@@ -1,0 +1,56 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Frieda Postfach",
+        "description": "Inbox rules, push delivery and the daily overview for a Frieda account. Frieda Postfach uses the account's connection; no second password is needed. Existing rules of the account are picked up automatically.",
+        "data": {
+          "account": "Frieda account"
+        }
+      }
+    },
+    "abort": {
+      "no_frieda": "Set up the Frieda integration (friedafetch 2.0 or newer) first.",
+      "already_configured": "Frieda Postfach is already set up for every Frieda account."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Frieda Postfach",
+        "description": "Daily overview: a short morning summary of unread e-mails, rule activity, today's events and birthdays.",
+        "data": {
+          "rules_auto": "Apply inbox rules automatically to new e-mails",
+          "rules_interval": "Interval for automatic rules (minutes)",
+          "rules_push": "Push: apply the rules right after new mail arrives (IMAP IDLE)",
+          "digest_time": "Daily overview at (HH:MM, empty = off)",
+          "digest_notify": "Send the overview with (notify service; empty = notification in Home Assistant)",
+          "digest_ai_task": "Phrase the overview with this AI task (optional)",
+          "birthday_sensor": "Sensor for the next birthday"
+        }
+      }
+    },
+    "error": {
+      "invalid_time": "Please enter a time as HH:MM, e.g. 07:30."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "next_birthday": {
+        "name": "Next birthday"
+      }
+    }
+  },
+  "services": {
+    "send_digest": {
+      "name": "Send daily overview",
+      "description": "Sends the daily overview (unread e-mails, rule activity, today's events, birthdays) now.",
+      "fields": {
+        "account": {
+          "name": "Account",
+          "description": "Label or Apple ID of the account (default: all accounts)."
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Frieda Postfach",
+        "description": "Posteingangsregeln, Push und Tagesüberblick für ein Frieda-Konto. Frieda Postfach nutzt die Verbindung des Kontos; ein zweites Passwort ist nicht nötig. Vorhandene Regeln des Kontos werden automatisch übernommen.",
+        "data": {
+          "account": "Frieda-Konto"
+        }
+      }
+    },
+    "abort": {
+      "no_frieda": "Richte zuerst die Integration Frieda (friedafetch 2.0 oder neuer) ein.",
+      "already_configured": "Frieda Postfach ist bereits für alle Frieda-Konten eingerichtet."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Frieda Postfach",
+        "description": "Tagesüberblick: morgens eine kurze Zusammenfassung mit ungelesenen Mails, Regelaktivität, heutigen Terminen und Geburtstagen.",
+        "data": {
+          "rules_auto": "Posteingangsregeln automatisch auf neue E-Mails anwenden",
+          "rules_interval": "Intervall der automatischen Regeln (Minuten)",
+          "rules_push": "Push: Regeln direkt nach dem Eingang neuer Mails anwenden (IMAP IDLE)",
+          "digest_time": "Tagesüberblick um (HH:MM, leer = aus)",
+          "digest_notify": "Überblick senden mit (Notify-Dienst; leer = Benachrichtigung in Home Assistant)",
+          "digest_ai_task": "Überblick mit dieser KI-Aufgabe formulieren (optional)",
+          "birthday_sensor": "Sensor für den nächsten Geburtstag"
+        }
+      }
+    },
+    "error": {
+      "invalid_time": "Bitte eine Uhrzeit im Format HH:MM eingeben, z. B. 07:30."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "next_birthday": {
+        "name": "Nächster Geburtstag"
+      }
+    }
+  },
+  "services": {
+    "send_digest": {
+      "name": "Tagesüberblick senden",
+      "description": "Sendet den Tagesüberblick (ungelesene Mails, Regelaktivität, heutige Termine, Geburtstage) sofort.",
+      "fields": {
+        "account": {
+          "name": "Konto",
+          "description": "Bezeichnung oder Apple-ID des Kontos (Standard: alle Konten)."
+        }
+      }
+    }
+  }
+}

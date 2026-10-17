@@ -1,0 +1,59 @@
+name: Release assets
+
+# Builds the HACS zip from the tagged source and signs it with GitHub's build provenance attestation.
+# Frieda Postfach has no Python requirements of its own, so there is no SBOM.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to (re)build assets for
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and attest
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.14"
+
+      - name: Check that manifest version matches the tag
+        run: |
+          TAG="${{ github.event.release.tag_name || inputs.tag }}"
+          VERSION=$(python -c "import json; print(json.load(open('custom_components/friedafetch_mail/manifest.json'))['version'])")
+          echo "tag=$TAG manifest=$VERSION"
+          test "v$VERSION" = "$TAG"
+
+      - name: Build HACS zip
+        run: |
+          cd custom_components/friedafetch_mail
+          find . -name "__pycache__" -prune -exec rm -rf {} +
+          zip -r -X ../../friedafetch_mail.zip . -x "*.pyc"
+          cd ../..
+          sha256sum friedafetch_mail.zip | tee friedafetch_mail.zip.sha256
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        with:
+          subject-path: friedafetch_mail.zip
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: gh release upload "$TAG" friedafetch_mail.zip friedafetch_mail.zip.sha256 --clobber --repo "$GITHUB_REPOSITORY"

@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Frieda version the tests run against (Frieda Postfach needs the extension interface of Frieda 2.0).
+  FRIEDA_REF: feature/paket-c
+
+jobs:
+  lint:
+    name: Ruff (lint, format, security rules)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.14"
+      - run: pip install "ruff==0.17.1"
+      - run: ruff check custom_components tests
+      - run: ruff format --check custom_components tests
+
+  tests:
+    name: pytest against Home Assistant ${{ matrix.ha }} and Frieda
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ha: ["2026.10.1"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Check out Frieda
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: nadeo360/friedafetch
+          ref: ${{ env.FRIEDA_REF }}
+          path: frieda
+          persist-credentials: false
+      - run: ln -s "$GITHUB_WORKSPACE/frieda/custom_components/friedafetch" custom_components/friedafetch
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.14"
+          cache: pip
+      - run: pip install -r requirements_dev.txt
+      - run: pytest -q --timeout=120
