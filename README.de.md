@@ -78,7 +78,7 @@ Auf Konten, die Frieda im Nur-Lesen-Modus betreibt, läuft nichts automatisch; P
   und `dry_run: true`.
 - **Gebündelte Ausführung:** Treffer werden pro Aktion gesammelt und in wenigen IMAP-Befehlen erledigt.
 - Friedas Leitplanken gelten: Kontingente, geschützte und verborgene Postfächer; jeder Lauf mit Treffern oder Fehlern
-  landet in Friedas Aktivitätsprotokoll (markiert als manuell, automatisch oder Push).
+  landet in Friedas Änderungsprotokoll (markiert als manuell, automatisch oder Push).
 
 Beispiel (als Tool-Aufruf):
 
@@ -92,10 +92,20 @@ Beispiel (als Tool-Aufruf):
 
 ## Panel
 
-**Frieda Postfach** in der Seitenleiste (nur Admins, Deutsch/Englisch): Konten mit Regelanzahl, Treffern, Automatik-
-und Push-Status; eine kompakte Regelliste zum Aufklappen, ein Editor direkt an Ort und Stelle, Probelauf und
-Ausführung mit Bericht pro Mail sowie der Verlauf **Ausführungen** (aufeinanderfolgende automatische Läufe ohne
-Treffer werden zusammengefasst) mit Filtern pro Spalte. Freigaben und Aktivitätsprotokoll bleiben im Panel von Frieda.
+**Frieda Postfach** in der Seitenleiste (nur Admins, Deutsch/Englisch). Eine Karte enthält die Regeln und alles, um
+sie auszuführen:
+
+- **Eine Statuszeile** sagt, wie neue Mails verarbeitet werden: *sofort per Push* (der Takt läuft als Sicherheitsnetz
+  mit), *Prüfung alle N Min.* (Push aus), *Push gestört* (der Takt läuft weiter) oder *Automatik aus*.
+- Eine kompakte Regelliste zum Aufklappen, **+** für eine neue Regel (und im Editor für eine weitere Bedingung) und
+  **Testen** an jeder Regel für einen Probelauf nur mit dieser Regel.
+- **Ausführen** öffnet ein Menü: Probelauf oder echter Lauf über das ganze Postfach oder nur neue Mails; der Bericht
+  pro Mail erscheint unter den Regeln.
+- Der Verlauf **Ausführungen** (aufeinanderfolgende automatische Läufe ohne Treffer werden zusammengefasst) mit Filtern
+  pro Spalte.
+
+Bei mehreren Konten erscheint oben eine Kontoauswahl. Freigaben und Änderungsprotokoll bleiben im Panel von Frieda,
+dessen Überblick auch zeigt, ob Frieda Postfach läuft.
 
 ## Tagesüberblick
 
@@ -108,7 +118,7 @@ Daten mit der Anweisung hinein, darin enthaltenen Aufforderungen nicht zu folgen
 ## Sicherheit
 
 Frieda Postfach bringt keine eigenen Zugangsdaten und keine eigenen Netzwerk-Endpunkte mit. Es nutzt Friedas
-Verbindung, Leitplanken und Aktivitätsprotokoll; die Push-Verbindung ist eine zweite IMAP-Sitzung, die nur auf neue
+Verbindung, Leitplanken und Änderungsprotokoll; die Push-Verbindung ist eine zweite IMAP-Sitzung, die nur auf neue
 Mails wartet. Die Tools von Frieda Postfach folgen Friedas Optionen: Schreibende Regel-Tools verschwinden im
 Nur-Lesen-Modus, und Freigaben gelten wie für jedes andere Frieda-Tool. Siehe [SECURITY.md](SECURITY.md).
 

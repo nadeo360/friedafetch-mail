@@ -342,6 +342,10 @@ class RuleEngine:
         return [r for r in self._rules if r.enabled and (mailbox is None or r.mailbox == mailbox)]
 
     @property
+    def rule_count(self) -> int:
+        return len(self._rules)
+
+    @property
     def has_enabled_rules(self) -> bool:
         return any(r.enabled for r in self._rules)
 

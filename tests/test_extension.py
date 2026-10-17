@@ -157,6 +157,18 @@ async def test_push_watcher_and_mailbox_stats_coverage(hass: HomeAssistant) -> N
     assert result.data["top_senders"][0]["covered_by"] == "Shop"
     assert result.data["rule_suggestions"] == []
 
+    # status shown on the Frieda overview
+    status = link.extension.status()
+    assert status["rules_total"] == 1 and status["rules_enabled"] == 1
+    assert status["auto"] is True and status["interval"] >= 1
+    assert status["push"] == link.watcher.state
+
+    from custom_components.friedafetch.frontend import _postfach  # noqa: PLC0415
+
+    overview = await _postfach(hass, core)
+    assert overview["state"] == "running" and overview["status"]["rules_total"] == 1
+    assert overview["version"]
+
 
 # ------------------------------------------------------------------ rules
 async def test_rule_saves_attachments_before_deleting(hass: HomeAssistant) -> None:

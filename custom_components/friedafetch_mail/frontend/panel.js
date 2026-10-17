@@ -77,21 +77,10 @@ const I18N = {
     },
     baseline: "Ausgangsbasis gesetzt – beim nächsten Lauf werden neue Mails verarbeitet.",
     delete_disabled: "Löschen ist in den Optionen deaktiviert.",
-    autoEvery: "Automatik: alle {0} Min.",
-    nextRun: "nächster Lauf {0}",
-    lastCheck: "letzte Prüfung {0}",
-    check_ran: "ausgeführt",
-    check_no_enabled_rules: "nichts zu tun",
-    check_error: "Fehler",
-    autoOff: "Automatik aus – aktivierbar in den Optionen von Frieda Postfach.",
-    autoIdle: "Keine aktive Regel: Die Automatik läuft, hat aber nichts zu tun. Lege eine Regel an oder aktiviere eine.",
     triggerAuto: "automatisch",
     triggerManual: "manuell",
-    nextShort: "nächster {0}",
     accounts: "Konten",
     accountRules: "{0} Regeln, {1} aktiv",
-    accountAuto: "Automatik alle {0} Min.",
-    accountManual: "Automatik aus",
     accountReadOnly: "Nur-Lesen",
     accountNoMail: "Mail-Tools deaktiviert",
     accountHits: "{0} Treffer gesamt",
@@ -132,9 +121,7 @@ const I18N = {
     filterPh: "filtern …",
     numPh: "z. B. >0",
     triggerPush: "Push",
-    digestAt: "Überblick {0}",
-    pushListening: "Push aktiv",
-    pushConnecting: "Push verbindet …",
+    digestAt: "Tagesüberblick um {0}",
     pushError: "Push gestört: {0}",
     pushUnsupported: "Push nicht verfügbar",
     saveAttachments: "Anhänge speichern",
@@ -142,6 +129,26 @@ const I18N = {
     attachmentsHint: "z. B. Belege – gespeichert unter <Anhang-Ordner>/<Unterordner>/<JJJJ-MM>/",
     aSave: "📎 Anhänge",
     attachments_unavailable: "Kein Anhang-Ordner eingerichtet (Frieda → Optionen → Tools und Konto).",
+    runMenu: "Ausführen",
+    dryRunHint: "zeigt nur, was passieren würde",
+    runAllHint: "verschiebt und löscht sofort",
+    runNewHint: "seit dem letzten Lauf eingetroffen",
+    testRule: "Testen",
+    testRuleHint: "Probelauf nur mit dieser Regel",
+    firstRule: "Erste Regel anlegen",
+    modePush: "Sofort per Push",
+    modePushSub: "Neue Mails im Posteingang werden beim Eintreffen sortiert. Zusätzlich prüft Frieda alle {0} Min. – als Sicherheitsnetz und für Regeln auf anderen Postfächern.",
+    modeConnecting: "Push verbindet …",
+    modePushDown: "Push gestört – Prüfung alle {0} Min.",
+    modePushDownSub: "{0} Die regelmäßige Prüfung läuft weiter, neue Mails werden spätestens nach {1} Min. sortiert.",
+    modeTimer: "Prüfung alle {0} Min.",
+    modeTimerSub: "Frieda sieht alle {0} Min. nach neuen Mails. Für sofortiges Sortieren schalte Push in den Optionen von Frieda Postfach ein.",
+    modeOff: "Automatik aus",
+    modeOffSub: "Regeln laufen nur, wenn du sie hier startest oder der Assistent sie ausführt. Einschalten: Optionen von Frieda Postfach.",
+    modeIdle: "Keine aktive Regel – die Automatik läuft, hat aber nichts zu tun.",
+    modeReadOnly: "Das Konto steht in Frieda auf Nur-Lesen – Regeln laufen nur als Probelauf.",
+    modeNoMail: "Mail-Tools sind in Frieda deaktiviert.",
+    nextAt: "nächste Prüfung {0}",
   },
   en: {
     title: "Frieda Postfach",
@@ -214,21 +221,10 @@ const I18N = {
     },
     baseline: "Baseline set – new mail will be processed on the next run.",
     delete_disabled: "Deleting is disabled in the options.",
-    autoEvery: "Automation: every {0} min",
-    nextRun: "next run {0}",
-    lastCheck: "last check {0}",
-    check_ran: "ran",
-    check_no_enabled_rules: "nothing to do",
-    check_error: "error",
-    autoOff: "Automation off – enable it in the options of Frieda Postfach.",
-    autoIdle: "No enabled rule: the automation is running but has nothing to do. Create or enable a rule.",
     triggerAuto: "automatic",
     triggerManual: "manual",
-    nextShort: "next {0}",
     accounts: "Accounts",
     accountRules: "{0} rules, {1} enabled",
-    accountAuto: "automatic every {0} min",
-    accountManual: "automation off",
     accountReadOnly: "read-only",
     accountNoMail: "mail tools disabled",
     accountHits: "{0} hits in total",
@@ -269,9 +265,7 @@ const I18N = {
     filterPh: "filter …",
     numPh: "e.g. >0",
     triggerPush: "push",
-    digestAt: "overview {0}",
-    pushListening: "push active",
-    pushConnecting: "push connecting …",
+    digestAt: "daily overview at {0}",
     pushError: "push disrupted: {0}",
     pushUnsupported: "push unavailable",
     saveAttachments: "Save attachments",
@@ -279,6 +273,26 @@ const I18N = {
     attachmentsHint: "e.g. Receipts – stored as <attachment folder>/<subfolder>/<YYYY-MM>/",
     aSave: "📎 attachments",
     attachments_unavailable: "No attachment folder configured (Frieda → options → Tools and account).",
+    runMenu: "Run",
+    dryRunHint: "only shows what would happen",
+    runAllHint: "moves and deletes right away",
+    runNewHint: "arrived since the last run",
+    testRule: "Test",
+    testRuleHint: "Dry run with this rule only",
+    firstRule: "Create the first rule",
+    modePush: "Instant via push",
+    modePushSub: "New mail in the inbox is sorted as it arrives. In addition Frieda checks every {0} min – as a safety net and for rules on other mailboxes.",
+    modeConnecting: "Push connecting …",
+    modePushDown: "Push interrupted – checking every {0} min",
+    modePushDownSub: "{0} The regular check keeps running, so new mail is sorted within {1} min.",
+    modeTimer: "Checking every {0} min",
+    modeTimerSub: "Frieda looks for new mail every {0} min. For instant sorting turn on push in the options of Frieda Postfach.",
+    modeOff: "Automation off",
+    modeOffSub: "Rules only run when you start them here or the assistant runs them. Turn it on in the options of Frieda Postfach.",
+    modeIdle: "No enabled rule – the automation runs but has nothing to do.",
+    modeReadOnly: "The account is read-only in Frieda – rules only run as dry runs.",
+    modeNoMail: "Mail tools are disabled in Frieda.",
+    nextAt: "next check {0}",
   },
 };
 
@@ -383,6 +397,26 @@ const STYLE = `
   .rule-body .lbl { font-size: 12px; color: var(--secondary-text-color); margin-bottom: 2px; }
   .rule-tools { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
   .editor { padding: 12px 14px; scroll-margin-top: 16px; }
+  button.round { width: 36px; height: 36px; padding: 0; border-radius: 50%; font-size: 22px; line-height: 1; display: inline-grid; place-items: center; flex: none; }
+  button.round.small { width: 28px; height: 28px; font-size: 18px; }
+  h3.with-add { display: flex; align-items: center; gap: 10px; }
+  .mode { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 10px; background: var(--secondary-background-color, #f5f5f5); margin-bottom: 12px; }
+  .mode.warn { background: color-mix(in srgb, var(--warning-color, #ffa600) 14%, transparent); }
+  .mode .ic { font-size: 18px; line-height: 1.2; }
+  .mode .tx { display: grid; gap: 2px; flex: 1; min-width: 0; }
+  .mode .tx strong { font-weight: 600; }
+  .mode .tx .muted { font-size: 12.5px; }
+  .subbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: -4px 0 10px; }
+  .subbar .grow { flex: 1; }
+  details.menu { position: relative; }
+  details.menu > summary { list-style: none; cursor: pointer; font-size: 15px; border-radius: 6px; padding: 7px 12px; border: 1px solid var(--primary-color); color: var(--primary-color); user-select: none; }
+  details.menu > summary::-webkit-details-marker { display: none; }
+  details.menu[open] > summary { background: color-mix(in srgb, var(--primary-color) 10%, transparent); }
+  details.menu .menu-list { position: absolute; right: 0; top: calc(100% + 4px); z-index: 5; min-width: 270px; background: var(--card-background-color, #fff); border: 1px solid var(--divider-color, #e0e0e0); border-radius: 10px; box-shadow: 0 6px 20px rgba(0,0,0,.18); padding: 6px; display: grid; gap: 2px; }
+  details.menu .menu-list button { background: none; color: var(--primary-text-color); text-align: left; display: grid; gap: 1px; padding: 8px 10px; border-radius: 6px; }
+  details.menu .menu-list button:hover:not(:disabled) { background: var(--secondary-background-color, #f0f0f0); }
+  details.menu .menu-list button small { color: var(--secondary-text-color); font-size: 12px; }
+  .empty { text-align: center; padding: 18px 8px; display: grid; gap: 10px; justify-items: center; }
   .editor h3.title { margin: 0 0 12px; font-size: 16px; font-weight: 500; }
   .fbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
   .fbar .grow { flex: 1; }
@@ -418,12 +452,16 @@ const STYLE = `
     table.stack td.actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding-top: 8px; }
     .scroll { overflow: visible; }
     .actionsbar { flex-direction: column; }
+    .card h2 button.round { flex: none; }
+    details.menu .menu-list { right: auto; left: 0; min-width: min(270px, 80vw); }
     .actionsbar button { width: 100%; }
     .tabs .tab { flex-basis: 100%; }
     .cond { grid-template-columns: 1fr; gap: 6px; padding: 8px; border: 1px solid var(--divider-color, #e0e0e0); border-radius: 10px; }
     .cond button.icon { justify-self: end; }
     button { min-height: 44px; }
     button.icon { min-width: 44px; min-height: 44px; font-size: 18px; }
+    button.round { min-height: 0; width: 42px; height: 42px; }
+    button.round.small { width: 36px; height: 36px; }
     input[type=text], select, select.copy { width: 100%; max-width: none; min-width: 0; box-sizing: border-box; min-height: 44px; font-size: 16px; }
     .row { gap: 4px; }
     .row label { min-width: 100%; }
@@ -464,12 +502,18 @@ class FriedaPostfachPanel extends HTMLElement {
       if (document.visibilityState === "visible") this._autoRefresh();
     };
     document.addEventListener("visibilitychange", this._onVisible);
+    this._onDocClick = (ev) => {
+      const menu = this.shadowRoot.querySelector("details.menu[open]");
+      if (menu && !ev.composedPath().includes(menu)) menu.removeAttribute("open");
+    };
+    document.addEventListener("click", this._onDocClick);
     this._timer = setInterval(() => this._autoRefresh(), 30000);
   }
 
   disconnectedCallback() {
     clearInterval(this._timer);
     document.removeEventListener("visibilitychange", this._onVisible);
+    document.removeEventListener("click", this._onDocClick);
   }
 
   async _autoRefresh() {
@@ -477,6 +521,7 @@ class FriedaPostfachPanel extends HTMLElement {
     if (!this._hass || !s.loaded || !s.entryId || s.busy || s.editing || document.visibilityState !== "visible") return;
     const active = this.shadowRoot.activeElement;
     if (active && ["SELECT", "INPUT", "TEXTAREA"].includes(active.tagName)) return;
+    if (this.shadowRoot.querySelector("details.menu[open]")) return;
     try {
       await this._reload();
       this._render();
@@ -793,10 +838,13 @@ class FriedaPostfachPanel extends HTMLElement {
     await this._call(() => this._reload());
   }
 
-  async _run(scope, dryRun) {
+  async _run(scope, dryRun, ruleIds = null) {
     if (!dryRun && scope === "all" && !confirm(this.t.confirmRun)) return;
     await this._call(async () => {
-      this._s.report = await this._ws({ type: "friedafetch_mail/rules/run", entry_id: this._s.entryId, scope, dry_run: dryRun });
+      const msg = { type: "friedafetch_mail/rules/run", entry_id: this._s.entryId, scope, dry_run: dryRun };
+      if (ruleIds) msg.rule_ids = ruleIds;
+      this._s.report = await this._ws(msg);
+      this._s.scrollToReport = true;
       await this._reload();
     });
   }
@@ -823,45 +871,55 @@ class FriedaPostfachPanel extends HTMLElement {
     return this._s.accounts.find((a) => a.entry_id === this._s.entryId) || null;
   }
 
+  // How new mail is picked up: one clear statement instead of several badges.
+  _mode(a, au) {
+    const t = this.t;
+    if (a && !a.mail_enabled) return { cls: "warn", ic: "⚠", title: t.modeNoMail, sub: "" };
+    if (a && a.read_only) return { cls: "warn", ic: "🔒", title: t.accountReadOnly, sub: t.modeReadOnly };
+    if (!au || !au.enabled) return { cls: "", ic: "⏸", title: t.modeOff, sub: t.modeOffSub };
+    const n = au.interval;
+    const idle = au.idle_reason === "no_enabled_rules" ? t.modeIdle : "";
+    const ps = au.push?.state;
+    if (ps === "listening" || ps === "connecting") {
+      return { cls: idle ? "warn" : "", ic: "⚡", title: ps === "listening" ? t.modePush : t.modeConnecting, sub: idle || fmt(t.modePushSub, n) };
+    }
+    if (au.push) {
+      const reason = ps === "unsupported" ? t.pushUnsupported + "." : fmt(t.pushError, au.push.error || ps) + ".";
+      return { cls: "warn", ic: "⚠", title: fmt(t.modePushDown, n), sub: idle || fmt(t.modePushDownSub, reason, n) };
+    }
+    return { cls: idle ? "warn" : "", ic: "⏱", title: fmt(t.modeTimer, n), sub: idle || fmt(t.modeTimerSub, n) };
+  }
+
   _renderAccounts() {
     const t = this.t;
     const s = this._s;
-    if (!s.accounts.length) return "";
+    if (s.accounts.length < 2) return "";
     const tabs = s.accounts
       .map((a) => {
         const active = a.entry_id === s.entryId;
-        const last = a.last_run ? fmtDateTime(a.last_run.finished || a.last_run.started) : t.never;
-        const badges = [
-          `<span class="badge">${esc(
-            a.automation && a.automation.enabled
-              ? fmt(t.accountAuto, a.automation.interval) + (a.automation.next_run ? " · " + fmt(t.nextShort, fmtClock(a.automation.next_run)) : "")
-              : t.accountManual
-          )}</span>`,
-          a.automation && a.automation.idle_reason ? `<span class="badge warn">${esc(t.check_no_enabled_rules)}</span>` : "",
-          a.rules_push && a.automation && a.automation.enabled ? `<span class="badge">${esc(t.triggerPush)}</span>` : "",
-          a.digest_time ? `<span class="badge">${esc(fmt(t.digestAt, a.digest_time))}</span>` : "",
-          a.read_only ? `<span class="badge warn">${esc(t.accountReadOnly)}</span>` : "",
-          a.mail_enabled ? "" : `<span class="badge warn">${esc(t.accountNoMail)}</span>`,
-        ].join("");
+        const m = this._mode(a, a.automation);
         return `<button class="tab ${active ? "active" : ""}" data-action="account" data-id="${esc(a.entry_id)}" aria-pressed="${active}">
           <span class="label"><span class="dot ${a.rules_enabled ? "" : "off"}"></span>${esc(a.label)}</span>
           <span class="meta">${esc(a.apple_id || a.title)}</span>
+          <span class="meta">${esc(m.ic)} ${esc(m.title)}</span>
           <span class="meta">${esc(fmt(t.accountRules, a.rules_total, a.rules_enabled))} · ${esc(fmt(t.accountHits, a.hits))}</span>
-          <span class="meta">${esc(t.lastRun)}: ${esc(last)}</span>
-          <span class="badges">${badges}</span>
         </button>`;
       })
       .join("");
     return `<div class="card"><h2><span class="grow">${esc(t.accounts)}</span><span class="muted">${s.accounts.length}</span></h2>
       <div class="tabs">${tabs}</div>
-      ${s.accounts.length > 1 ? `<p class="muted" style="margin:10px 0 0">${esc(t.switchHint)}</p>` : ""}</div>`;
+      <p class="muted" style="margin:10px 0 0">${esc(t.switchHint)}</p></div>`;
   }
 
   _renderRules() {
     const t = this.t;
     const s = this._s;
     const newEditor = s.editing && !s.editing.id ? `<div class="rule open" data-rule-id="">${this._renderEditor()}</div>` : "";
-    if (!s.rules.length) return newEditor || `<p class="muted">${esc(t.noRules)}</p>`;
+    if (!s.rules.length)
+      return (
+        newEditor ||
+        `<div class="empty"><p class="muted" style="margin:0">${esc(t.noRules)}</p><button data-action="new">+ ${esc(t.firstRule)}</button></div>`
+      );
     const items = s.rules
       .map((r, i) => {
         const { conds, acts } = this._summary(r);
@@ -885,6 +943,7 @@ class FriedaPostfachPanel extends HTMLElement {
                 <div><div class="lbl">${esc(t.actions)}</div>${acts || `<span class="muted">${esc(t.noActions)}</span>`}${r.actions.stop === false ? `<div class="muted">↓ ${esc(t.continueRules)}</div>` : ""}</div>
                 <div class="rule-tools">
                   <button class="secondary" data-action="edit" data-id="${esc(r.id)}" ${s.editing ? "disabled" : ""}>✎ ${esc(t.edit)}</button>
+                  <button class="secondary" data-action="test" data-id="${esc(r.id)}" ${s.busy ? "disabled" : ""} title="${esc(t.testRuleHint)}">▶ ${esc(t.testRule)}</button>
                   <button class="icon" data-action="up" data-id="${esc(r.id)}" ${i === 0 ? "disabled" : ""} title="${esc(t.up)}" aria-label="${esc(t.up)}">▲</button>
                   <button class="icon" data-action="down" data-id="${esc(r.id)}" ${i === s.rules.length - 1 ? "disabled" : ""} title="${esc(t.down)}" aria-label="${esc(t.down)}">▼</button>
                   <button class="icon" data-action="delete" data-id="${esc(r.id)}" title="${esc(t.remove)}" aria-label="${esc(t.remove)}">🗑</button>
@@ -929,9 +988,8 @@ class FriedaPostfachPanel extends HTMLElement {
       <div class="row"><label for="f-name">${esc(t.name)}</label><input type="text" id="f-name" class="grow" value="${esc(e.name)}"></div>
       <div class="row"><label for="f-mailbox">${esc(t.mailbox)}</label><select id="f-mailbox">${boxes.map((b) => opt(b, b, e.mailbox)).join("")}</select></div>
       <div class="row"><label for="f-match">${esc(t.match)}</label><select id="f-match">${opt("all", t.all, e.match)}${opt("any", t.any, e.match)}</select></div>
-      <h3 class="muted">${esc(t.conditions)}</h3>
+      <h3 class="muted with-add">${esc(t.conditions)} <button class="round small" data-action="add-cond" title="${esc(t.addCondition)}" aria-label="${esc(t.addCondition)}">+</button></h3>
       ${conds}
-      <button class="secondary" data-action="add-cond">+ ${esc(t.addCondition)}</button>
       <h3 class="muted">${esc(t.actions)}</h3>
       <div class="row"><label for="f-move">${esc(t.moveTo)}</label><select id="f-move">${opt("", t.noMove, a.move_to || "")}${this._s.mailboxes.map((b) => opt(b, b, a.move_to || "")).join("")}</select></div>
       <div class="row"><label for="f-seen">${esc(t.markSeen)}</label><select id="f-seen">${opt("", t.unchanged, tri(a.mark_seen))}${opt("true", t.seen, tri(a.mark_seen))}${opt("false", t.unseen, tri(a.mark_seen))}</select></div>
@@ -970,7 +1028,7 @@ class FriedaPostfachPanel extends HTMLElement {
       .map((s) => `<li>${esc(t[s.code] || s.reason)}${s.uid ? ` (UID ${s.uid})` : ""}${s.rule ? ` – ${esc(s.rule)}` : ""}${s.mailbox ? ` – ${esc(s.mailbox)}` : ""}</li>`)
       .join("");
     const errors = (r.errors || []).map((e) => `<li>${esc(e.error)}</li>`).join("");
-    return `<div class="card">
+    return `<div class="card" id="report">
       <h2><span class="grow">${esc(t.report)}${r.dry_run ? ` <span class="chip">${esc(t.dryRun)}</span>` : ""}</span><span class="muted">${r.checked} ${esc(t.checked)} · ${r.matched} ${esc(t.matched)}</span></h2>
       ${errors ? `<div class="error"><strong>${esc(t.errors)}</strong><ul>${errors}</ul></div>` : ""}
       ${skipped ? `<div class="muted"><strong>${esc(t.skipped)}</strong><ul>${skipped}</ul></div>` : ""}
@@ -981,29 +1039,23 @@ class FriedaPostfachPanel extends HTMLElement {
   _render() {
     const t = this.t;
     const s = this._s;
-    const accountSel = "";
+    const acc = this._account();
+    const readOnly = !!acc?.read_only;
     const trig = s.lastRun ? trigLabel(t, s.lastRun.trigger) : "";
     const last = s.lastRun
-      ? `${esc(t.lastRun)}: ${esc(fmtDateTime(s.lastRun.finished || s.lastRun.started))} (${esc(trig)}) · ${s.lastRun.checked} ${esc(t.checked)} · ${s.lastRun.matched} ${esc(t.matched)}`
-      : `${esc(t.lastRun)}: ${esc(t.never)}`;
+      ? `${t.lastRun}: ${fmtDateTime(s.lastRun.finished || s.lastRun.started)} (${trig}) · ${s.lastRun.checked} ${t.checked} · ${s.lastRun.matched} ${t.matched}`
+      : `${t.lastRun}: ${t.never}`;
     const au = s.automation;
+    const m = this._mode(acc, au);
+    const extra = [au?.enabled && au.next_run && au.push?.state !== "listening" ? fmt(t.nextAt, fmtClock(au.next_run)) : "", acc?.digest_time ? fmt(t.digestAt, acc.digest_time) : ""].filter(Boolean);
     const allOpen = s.rules.length > 0 && s.rules.every((r) => s.expanded.has(r.id));
-    let autoHtml = "";
-    if (au && au.enabled) {
-      const parts = [fmt(t.autoEvery, au.interval)];
-      if (au.next_run) parts.push(fmt(t.nextRun, fmtClock(au.next_run)));
-      if (au.last_check) parts.push(`${fmt(t.lastCheck, fmtClock(au.last_check.time))}: ${t["check_" + au.last_check.result] || au.last_check.result}`);
-      if (au.push) {
-        const ps = au.push.state;
-        parts.push(
-          ps === "listening" ? t.pushListening : ps === "connecting" ? t.pushConnecting : ps === "unsupported" ? t.pushUnsupported : fmt(t.pushError, au.push.error || ps)
-        );
-      }
-      autoHtml = `<p class="muted" style="margin:0 0 10px">${esc(parts.join(" · "))}</p>`;
-      if (au.idle_reason === "no_enabled_rules") autoHtml += `<div class="info" style="margin-bottom:10px">${esc(t.autoIdle)}</div>`;
-    } else if (au) {
-      autoHtml = `<div class="info" style="margin-bottom:10px">${esc(t.autoOff)}</div>`;
-    }
+    const runItem = (scope, dry, label, hint, disabled) =>
+      `<button data-action="run" data-scope="${scope}" data-dry="${dry ? 1 : 0}" ${s.busy || disabled ? "disabled" : ""}><span>${esc(label)}</span><small>${esc(hint)}</small></button>`;
+    const runMenu = `<details class="menu" id="run-menu"><summary role="button">▶ ${esc(t.runMenu)}</summary><div class="menu-list">
+        ${runItem("all", true, t.dryRunAll, t.dryRunHint, false)}
+        ${runItem("all", false, t.runAll, t.runAllHint, readOnly)}
+        ${runItem("new", false, t.runNew, t.runNewHint, readOnly)}
+      </div></details>`;
     const body = !s.loaded
       ? `<p class="muted">${esc(t.loading)}</p>`
       : !s.entryId
@@ -1013,24 +1065,18 @@ class FriedaPostfachPanel extends HTMLElement {
       ${s.notice ? `<div class="ok">${esc(s.notice)}</div>` : ""}
       ${this._renderAccounts()}
       <div class="card">
-        <h2><span class="grow">${esc(t.rules)}${this._account() ? ` <span class="chip">${esc(this._account().label)}</span>` : ""}</span>
-          ${s.rules.length > 1 ? `<button class="secondary" data-action="expand-all" data-open="${allOpen ? "0" : "1"}">${esc(allOpen ? t.collapseAll : t.expandAll)}</button>` : ""}
-          <button data-action="new" ${s.editing ? "disabled" : ""}>+ ${esc(t.newRule)}</button></h2>
+        <h2><span class="grow">${esc(t.rules)}${s.accounts.length > 1 && acc ? ` <span class="chip">${esc(acc.label)}</span>` : ""}</span>
+          ${s.rules.length ? runMenu : ""}
+          <button class="round" data-action="new" ${s.editing ? "disabled" : ""} title="${esc(t.newRule)}" aria-label="${esc(t.newRule)}">+</button></h2>
+        <div class="mode ${m.cls}"><span class="ic" aria-hidden="true">${esc(m.ic)}</span><span class="tx"><strong>${esc(m.title)}</strong>${m.sub ? `<span class="muted">${esc(m.sub)}</span>` : ""}</span></div>
+        <div class="subbar"><span class="muted">${esc([last, ...extra].join(" · "))}</span><span class="grow"></span>
+          ${s.rules.length > 1 ? `<button class="link" data-action="expand-all" data-open="${allOpen ? "0" : "1"}">${esc(allOpen ? t.collapseAll : t.expandAll)}</button>` : ""}</div>
         ${this._renderRules()}
-      </div>
-      <div class="card">
-        <h2><span class="grow">${esc(t.run)}</span><span class="muted">${last}</span></h2>
-        ${autoHtml}
-        <div class="actionsbar">
-          <button class="secondary" data-action="run" data-scope="all" data-dry="1" ${s.busy ? "disabled" : ""}>${esc(t.dryRunAll)}</button>
-          <button data-action="run" data-scope="all" data-dry="0" ${s.busy || this._account()?.read_only ? "disabled" : ""} title="${this._account()?.read_only ? esc(t.accountReadOnly) : ""}">${esc(t.runAll)}</button>
-          <button class="secondary" data-action="run" data-scope="new" data-dry="0" ${s.busy || this._account()?.read_only ? "disabled" : ""}>${esc(t.runNew)}</button>
-        </div>
       </div>
       ${this._renderReport()}
       ${this._renderHistory()}`;
     this.shadowRoot.innerHTML = `<style>${STYLE}</style>
-      <div class="toolbar"><ha-menu-button></ha-menu-button><img src="${esc(ICON_URL)}" alt=""><span>${esc(t.title)}</span><span class="grow"></span>${accountSel}</div>
+      <div class="toolbar"><ha-menu-button></ha-menu-button><img src="${esc(ICON_URL)}" alt=""><span>${esc(t.title)}</span><span class="grow"></span></div>
       <div class="content">${body}</div>`;
     const menu = this.shadowRoot.querySelector("ha-menu-button");
     if (menu && this._hass) {
@@ -1046,6 +1092,11 @@ class FriedaPostfachPanel extends HTMLElement {
   _afterRender() {
     const root = this.shadowRoot;
     const smooth = !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    if (this._s.scrollToReport) {
+      this._s.scrollToReport = false;
+      const rep = root.querySelector("#report");
+      if (rep) requestAnimationFrame(() => rep.scrollIntoView({ behavior: smooth ? "smooth" : "auto", block: "start" }));
+    }
     if (this._s.focusEditor) {
       this._s.focusEditor = false;
       const ed = root.querySelector("#editor");
@@ -1132,7 +1183,11 @@ class FriedaPostfachPanel extends HTMLElement {
           if (id) this._s.scrollTo = id;
           this._render();
         },
-        run: () => this._run(el.dataset.scope, el.dataset.dry === "1"),
+        run: () => {
+          el.closest("details")?.removeAttribute("open");
+          this._run(el.dataset.scope, el.dataset.dry === "1");
+        },
+        test: () => this._run("all", true, [el.dataset.id]),
       }[action];
       if (action === "toggle") {
         el.addEventListener("change", () => this._toggle(el.dataset.id, el.checked));

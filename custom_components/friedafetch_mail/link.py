@@ -26,6 +26,19 @@ class MailExtension:
 
         return covered
 
+    def status(self) -> dict[str, Any]:
+        """Short state for the Frieda overview: rules and how new mail is picked up."""
+        auto = self.rules.automation_status()
+        push = auto.get("push") or {}
+        return {
+            "rules_total": self.rules.rule_count,
+            "rules_enabled": auto.get("enabled_rules", 0),
+            "auto": bool(auto.get("enabled")),
+            "interval": auto.get("interval"),
+            "push": push.get("state"),
+            "last_run": self.rules.last_run,
+        }
+
 
 @dataclass
 class AccountLink:

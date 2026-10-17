@@ -77,7 +77,7 @@ Nothing runs automatically on accounts that Frieda keeps in read-only mode; dry 
   existing mail use the panel or `icloud_run_rules` with `scope: "all"` (newest 2000 messages) and `dry_run: true`.
 - **Batched execution:** matches are grouped per action and executed in a few IMAP commands.
 - Frieda's guard rails apply: quotas, protected and hidden mailboxes, and every run with hits or errors is written
-  to Frieda's activity log (marked manual, automatic or push).
+  to Frieda's change log (marked manual, automatic or push).
 
 Example (as a tool call):
 
@@ -91,10 +91,19 @@ Example (as a tool call):
 
 ## Panel
 
-**Frieda Postfach** in the sidebar (admins only, German/English): accounts with rule counts, hits, automation and
-push state; a compact rule list that expands per rule, an editor that opens in place, dry runs and real runs with a
-per-message report, and the **Runs** history (consecutive automatic runs without hits are merged) with filters per
-column. Approvals and the activity log stay in Frieda's own panel.
+**Frieda Postfach** in the sidebar (admins only, German/English). One card holds the rules and everything to run
+them:
+
+- **One status line** says how new mail is picked up: *instant via push* (with the timer as a safety net),
+  *checking every N min* (push off), *push interrupted* (the timer keeps going) or *automation off*.
+- A compact rule list that expands per rule, **+** for a new rule (and for another condition in the editor), and
+  **Test** on each rule for a dry run with only that rule.
+- **Run** opens a menu: dry run or real run over the whole mailbox, or new mail only; the per-message report appears
+  below the rules.
+- The **Runs** history (consecutive automatic runs without hits are merged) with filters per column.
+
+With several accounts an account picker appears on top. Approvals and the change log stay in Frieda's own panel,
+whose overview also shows whether Frieda Postfach is running.
 
 ## Daily overview
 
@@ -107,7 +116,7 @@ demand (optionally for one `account`) and returns the text.
 ## Security
 
 Frieda Postfach adds no credentials and no network endpoints of its own. It reuses Frieda's connection, guard rails
-and activity log; the push connection is a second, read-only IMAP session that only listens for new mail. Tools of
+and change log; the push connection is a second, read-only IMAP session that only listens for new mail. Tools of
 Frieda Postfach follow Frieda's options: writing rule tools disappear in read-only mode, and approvals apply as for
 every other Frieda tool. See [SECURITY.md](SECURITY.md).
 

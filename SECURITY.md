@@ -20,7 +20,7 @@ Frieda Postfach extends a Frieda account and inherits its security model
   app-specific password stay in Frieda's config entry. The push connection is a second IMAP session that selects the
   inbox and only waits for new-mail notifications.
 - **Frieda's guard rails apply** to every rule run: quotas, protected and hidden mailboxes, "Allow deleting", and
-  the read-only mode (no automatic runs, only dry runs). Runs with hits or errors are written to Frieda's activity log
+  the read-only mode (no automatic runs, only dry runs). Runs with hits or errors are written to Frieda's change log
   and fire `friedafetch_action`.
 - **AI tools** of Frieda Postfach are registered through Frieda and follow its options and approvals; writing rule
   tools are hidden in read-only mode.
@@ -67,7 +67,7 @@ Frieda Postfach erweitert ein Frieda-Konto und übernimmt dessen Sicherheitsmode
   und nur auf Neueingangs-Meldungen wartet.
 - **Friedas Leitplanken gelten** für jeden Regellauf: Kontingente, geschützte und verborgene Postfächer, „Löschen
   erlauben“ und der Nur-Lesen-Modus (keine automatischen Läufe, nur Probeläufe). Läufe mit Treffern oder Fehlern
-  landen in Friedas Aktivitätsprotokoll und lösen `friedafetch_action` aus.
+  landen in Friedas Änderungsprotokoll und lösen `friedafetch_action` aus.
 - **KI-Tools** von Frieda Postfach werden über Frieda angemeldet und folgen deren Optionen und Freigaben; schreibende
   Regel-Tools sind im Nur-Lesen-Modus ausgeblendet.
 - **Anhänge** werden ausschließlich über Friedas Anhang-Ablage gespeichert (erlaubter Ordner, sichere Dateinamen,
