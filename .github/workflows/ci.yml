@@ -11,7 +11,7 @@ permissions:
 
 env:
   # Frieda version the tests run against (Frieda Postfach needs the extension interface of Frieda 2.0).
-  FRIEDA_REF: feature/paket-c
+  FRIEDA_REF: main
 
 jobs:
   lint:
