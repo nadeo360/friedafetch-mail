@@ -20,6 +20,10 @@ extend-exclude = [".venv", ".venv314", "custom_components/friedafetch"]
 select = ["E", "F", "I", "UP", "B", "W", "S"]
 ignore = ["E501"]
 
+[tool.ruff.lint.isort]
+# Frieda (custom_components.friedafetch) is linked in for tests only; classify it the same way everywhere.
+known-first-party = ["custom_components"]
+
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101", "S105", "S106"]
 
