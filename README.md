@@ -1,8 +1,5 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
-    <img src="assets/logo.svg" alt="Frieda" width="720">
-  </picture>
+  <img src="https://raw.githubusercontent.com/nadeo360/friedafetch-mail/main/assets/logo@2x.png" alt="Frieda" width="720">
 </p>
 
 <p align="center">
@@ -10,10 +7,10 @@
   <a href="https://github.com/nadeo360/friedafetch-mail/actions/workflows/validate.yml"><img alt="hassfest & HACS" src="https://github.com/nadeo360/friedafetch-mail/actions/workflows/validate.yml/badge.svg"></a>
   <a href="https://github.com/nadeo360/friedafetch-mail/actions/workflows/security.yml"><img alt="Security checks" src="https://github.com/nadeo360/friedafetch-mail/actions/workflows/security.yml/badge.svg"></a>
   <a href="https://github.com/nadeo360/friedafetch-mail/releases"><img alt="Release" src="https://img.shields.io/github/v/release/nadeo360/friedafetch-mail?display_name=tag"></a>
-  <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
+  <a href="https://github.com/nadeo360/friedafetch-mail/blob/main/LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
 </p>
 
-<p align="center"><b>English</b> · <a href="README.de.md">Deutsch</a></p>
+<p align="center"><b>English</b> · <a href="https://github.com/nadeo360/friedafetch-mail/blob/main/README.de.md">Deutsch</a></p>
 
 # Frieda Postfach – inbox automation for Frieda
 
@@ -118,7 +115,7 @@ demand (optionally for one `account`) and returns the text.
 Frieda Postfach adds no credentials and no network endpoints of its own. It reuses Frieda's connection, guard rails
 and change log; the push connection is a second, read-only IMAP session that only listens for new mail. Tools of
 Frieda Postfach follow Frieda's options: writing rule tools disappear in read-only mode, and approvals apply as for
-every other Frieda tool. See [SECURITY.md](SECURITY.md).
+every other Frieda tool. See [SECURITY.md](https://github.com/nadeo360/friedafetch-mail/blob/main/SECURITY.md).
 
 ## Development
 
@@ -142,8 +139,8 @@ GitHub issues – they are read by a human.
 Apple and iCloud are trademarks of Apple Inc.; Home Assistant is a trademark of the Open Home Foundation. **This is an
 independent community project and is not affiliated with, endorsed or supported by Apple, the Open Home Foundation,
 Nabu Casa, Anthropic or HACS.** Using iCloud is subject to Apple's iCloud terms. The software comes without warranty
-and changes your mailbox on your behalf. Details: [NOTICE.md](NOTICE.md).
+and changes your mailbox on your behalf. Details: [NOTICE.md](https://github.com/nadeo360/friedafetch-mail/blob/main/NOTICE.md).
 
 ## License
 
-MIT – see [LICENSE](LICENSE).
+MIT – see [LICENSE](https://github.com/nadeo360/friedafetch-mail/blob/main/LICENSE).
