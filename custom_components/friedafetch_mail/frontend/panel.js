@@ -409,9 +409,11 @@ const STYLE = `
   .subbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: -4px 0 10px; }
   .subbar .grow { flex: 1; }
   details.menu { position: relative; }
-  details.menu > summary { list-style: none; cursor: pointer; font-size: 15px; border-radius: 6px; padding: 7px 12px; border: 1px solid var(--primary-color); color: var(--primary-color); user-select: none; }
+  details.menu > summary { list-style: none; cursor: pointer; user-select: none; display: inline-flex; align-items: center; gap: 6px; box-sizing: border-box; height: 36px; padding: 0 16px 0 12px; border-radius: 18px; background: var(--primary-color); color: var(--text-primary-color, #fff); font-size: 14px; font-weight: 500; }
   details.menu > summary::-webkit-details-marker { display: none; }
-  details.menu[open] > summary { background: color-mix(in srgb, var(--primary-color) 10%, transparent); }
+  details.menu > summary .play { font-size: 11px; }
+  details.menu > summary:hover, details.menu[open] > summary { filter: brightness(.92); }
+  details.menu > summary:focus-visible, button.round:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
   details.menu .menu-list { position: absolute; right: 0; top: calc(100% + 4px); z-index: 5; min-width: 270px; background: var(--card-background-color, #fff); border: 1px solid var(--divider-color, #e0e0e0); border-radius: 10px; box-shadow: 0 6px 20px rgba(0,0,0,.18); padding: 6px; display: grid; gap: 2px; }
   details.menu .menu-list button { background: none; color: var(--primary-text-color); text-align: left; display: grid; gap: 1px; padding: 8px 10px; border-radius: 6px; }
   details.menu .menu-list button:hover:not(:disabled) { background: var(--secondary-background-color, #f0f0f0); }
@@ -461,6 +463,7 @@ const STYLE = `
     button { min-height: 44px; }
     button.icon { min-width: 44px; min-height: 44px; font-size: 18px; }
     button.round { min-height: 0; width: 42px; height: 42px; }
+    details.menu > summary { height: 42px; border-radius: 21px; }
     button.round.small { width: 36px; height: 36px; }
     input[type=text], select, select.copy { width: 100%; max-width: none; min-width: 0; box-sizing: border-box; min-height: 44px; font-size: 16px; }
     .row { gap: 4px; }
@@ -1051,7 +1054,7 @@ class FriedaPostfachPanel extends HTMLElement {
     const allOpen = s.rules.length > 0 && s.rules.every((r) => s.expanded.has(r.id));
     const runItem = (scope, dry, label, hint, disabled) =>
       `<button data-action="run" data-scope="${scope}" data-dry="${dry ? 1 : 0}" ${s.busy || disabled ? "disabled" : ""}><span>${esc(label)}</span><small>${esc(hint)}</small></button>`;
-    const runMenu = `<details class="menu" id="run-menu"><summary role="button">▶ ${esc(t.runMenu)}</summary><div class="menu-list">
+    const runMenu = `<details class="menu" id="run-menu"><summary role="button"><span class="play" aria-hidden="true">▶</span>${esc(t.runMenu)}</summary><div class="menu-list">
         ${runItem("all", true, t.dryRunAll, t.dryRunHint, false)}
         ${runItem("all", false, t.runAll, t.runAllHint, readOnly)}
         ${runItem("new", false, t.runNew, t.runNewHint, readOnly)}

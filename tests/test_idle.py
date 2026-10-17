@@ -102,3 +102,30 @@ async def test_connection_errors_back_off_and_retry() -> None:
         await asyncio.sleep(0.1)
         assert connect.await_count == 2 and watcher.state == "listening"
         await watcher.async_stop()
+
+
+async def test_connect_refreshes_capabilities_after_login() -> None:
+    """iCloud announces IDLE only after login; the watcher must ask again instead of giving up."""
+    ok = MagicMock(result="OK")
+    client = MagicMock()
+    client.protocol.capabilities = {"IMAP4rev1", "AUTH=PLAIN"}
+
+    async def capability() -> None:
+        client.protocol.capabilities = {"CAPABILITY", "IMAP4rev1", "IDLE", "MOVE"}
+
+    client.protocol.capability = AsyncMock(side_effect=capability)
+    client.has_capability = lambda cap: cap in client.protocol.capabilities
+    client.wait_hello_from_server = AsyncMock()
+    client.login = AsyncMock(return_value=ok)
+    client.select = AsyncMock(return_value=ok)
+    watcher = MailWatcher(username="u", password="p", host="h", port=993, on_new_mail=AsyncMock())
+    with patch("custom_components.friedafetch_mail.idle.aioimaplib.IMAP4_SSL", return_value=client):
+        connected = await watcher._connect()
+    client.protocol.capability.assert_awaited_once()
+    assert connected.has_capability("IDLE")
+
+    # a server that already announced IDLE is not asked again
+    client.protocol.capability.reset_mock()
+    with patch("custom_components.friedafetch_mail.idle.aioimaplib.IMAP4_SSL", return_value=client):
+        await watcher._connect()
+    client.protocol.capability.assert_not_awaited()

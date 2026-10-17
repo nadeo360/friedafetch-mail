@@ -139,6 +139,9 @@ class MailWatcher:
         response = await client.select(quote_mailbox(self.mailbox))
         if response.result != "OK":
             raise LookupError(f"Mailbox '{self.mailbox}' cannot be opened")
+        if not client.has_capability("IDLE"):
+            # aioimaplib only knows the capabilities announced before login; iCloud lists IDLE afterwards
+            await asyncio.wait_for(client.protocol.capability(), self._timeout)
         return client
 
     async def _loop(self) -> None:
