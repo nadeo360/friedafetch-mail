@@ -11,7 +11,7 @@ const VERSION_QUERY = new URL(import.meta.url).search;
 const [{ I18N }, { STYLE }] = await Promise.all([import(`./i18n.js${VERSION_QUERY}`), import(`./styles.js${VERSION_QUERY}`)]);
 
 // Frieda's design library, served by Frieda itself, so both panels look and behave the same.
-const UI_API = 2;
+const UI_API = 3;
 let W = null;
 try {
   W = await import(`/friedafetch_static/ui.js${VERSION_QUERY}`);
@@ -245,7 +245,7 @@ class FriedaPostfachPanel extends HTMLElement {
       this._confirmResolve = resolve;
       this._s.confirm = { title, text, ok, irreversible };
       this._render();
-      this.shadowRoot.querySelector('.modal [data-action="confirm-no"]')?.focus();
+      this.shadowRoot.querySelector('.modal [data-action="confirm-no"]')?.focus({ preventScroll: true });
     });
   }
 
@@ -937,6 +937,13 @@ class FriedaPostfachPanel extends HTMLElement {
   }
 
   _render() {
+    const s = this._s;
+    // a deliberate jump (to the report or the editor) wins over keeping the position
+    if (s.scrollToReport || s.focusEditor || s.scrollTo || !W.keepScroll) this._draw();
+    else W.keepScroll(this, () => this._draw());
+  }
+
+  _draw() {
     const t = this.t;
     const s = this._s;
     const acc = this._account();
