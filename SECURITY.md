@@ -62,6 +62,9 @@ Release assets are built by GitHub Actions with a signed build provenance attest
 gh attestation verify friedafetch_mail.zip --repo nadeo360/friedafetch-mail
 ```
 
+The signature also comes with the release: `friedafetch_mail.zip.sigstore.json` (Sigstore bundle, for offline checks
+with `--bundle`) and `friedafetch_mail.zip.intoto.jsonl` (the SLSA provenance).
+
 ---
 
 # Sicherheit
@@ -125,3 +128,6 @@ Dependabot hält sie aktuell.
 ```bash
 gh attestation verify friedafetch_mail.zip --repo nadeo360/friedafetch-mail
 ```
+
+Die Signatur liegt auch am Release: `friedafetch_mail.zip.sigstore.json` (Sigstore-Bundle, für die Prüfung ohne Netz
+mit `--bundle`) und `friedafetch_mail.zip.intoto.jsonl` (die SLSA-Provenance).
