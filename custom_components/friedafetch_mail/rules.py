@@ -744,7 +744,12 @@ class RuleEngine:
         for summary in summaries[: max(0, HISTORY_MAILS * 3 - len(checked))]:
             sender = summary.get("from") or [{}]
             checked.append(
-                {"mailbox": box, "uid": summary["uid"], "subject": summary.get("subject"), "from": sender[0].get("email")}
+                {
+                    "mailbox": box,
+                    "uid": summary["uid"],
+                    "subject": summary.get("subject"),
+                    "from": sender[0].get("email"),
+                }
             )
 
         # decide per message
