@@ -111,6 +111,7 @@ def build_timeline(
                     "chars": entry.get("chars") or 0,
                     "ok": entry.get("ok", True),
                     "error": entry.get("error"),
+                    "duration": entry.get("duration"),  # seconds until the AI answered
                 }
             )
 

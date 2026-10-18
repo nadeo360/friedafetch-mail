@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -197,7 +198,9 @@ async def async_ai_text(
         "fields": [k for k in ("unread", "events", "birthdays", "rules") if data.get(k)],
         "chars": len(instructions),
         "items": sum(len(data.get(k) or []) for k in ("unread", "events", "birthdays")),
+        "started": datetime.now().astimezone().isoformat(timespec="seconds"),  # when the request goes out
     }
+    t0 = time.monotonic()
     try:
         response = await hass.services.async_call(
             "ai_task",
@@ -209,10 +212,16 @@ async def async_ai_text(
     except Exception as err:  # noqa: BLE001
         _LOGGER.warning("AI task for the daily overview failed, sending the plain version: %s", err)
         if ledger is not None:
-            ledger.record_usage("digest", ok=False, error=str(err) or err.__class__.__name__, **log)
+            ledger.record_usage(
+                "digest",
+                ok=False,
+                error=str(err) or err.__class__.__name__,
+                **log,
+                duration=round(time.monotonic() - t0, 1),
+            )
         return None
     if ledger is not None:
-        ledger.record_usage("digest", **log)
+        ledger.record_usage("digest", **log, duration=round(time.monotonic() - t0, 1))
     text = (response or {}).get("data") if isinstance(response, dict) else None
     return str(text).strip()[:1500] if text else None
 

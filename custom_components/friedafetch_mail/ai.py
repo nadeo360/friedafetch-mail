@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import uuid
 from datetime import datetime
 from typing import Any
@@ -319,10 +320,16 @@ class AiSorter:
         held_back: list[dict[str, Any]] | None = None,
         items: int | None = None,
         message_id: str | None = None,
+        started: str | None = None,
+        duration: float | None = None,
     ) -> dict[str, Any]:
-        """Log one transmission to an AI (or a mail held back by the kill switch). Saved by the caller."""
+        """Log one transmission to an AI (or a mail held back by the kill switch). Saved by the caller.
+
+        started is when the request went out (logging happens after the answer), duration how long the AI took.
+        """
         entry = {
-            "time": _now_iso(),
+            "time": started or _now_iso(),
+            "duration": duration,
             "kind": kind,  # sort | digest
             "entity": entity,
             "trigger": trigger,
@@ -718,7 +725,9 @@ class AiSorter:
             "sender": str(sender.get("email") or ""),
             "subject": str(summary.get("subject") or ""),
             "message_id": summary.get("message_id"),
+            "started": _now_iso(),  # when the request goes out; the answer comes seconds later
         }
+        t0 = time.monotonic()
         try:
             result = await _generate(
                 self._hass,
@@ -728,8 +737,10 @@ class AiSorter:
                 structure=self._structure(),
             )
         except Exception as err:
+            log["duration"] = round(time.monotonic() - t0, 1)
             self.record_usage("sort", ok=False, error=str(err) or err.__class__.__name__, **log)
             raise
+        log["duration"] = round(time.monotonic() - t0, 1)
         self.record_usage("sort", **log)
         data = result.data if isinstance(result.data, dict) else {}
         names = {c["name"] for c in self.categories}

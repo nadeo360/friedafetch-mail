@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -424,3 +425,26 @@ async def test_options_can_be_cleared(hass: HomeAssistant) -> None:
         and entry.options["digest_notify"] == ""
         and entry.options["digest_ai_task"] == ""
     )
+
+
+async def test_transmission_keeps_its_send_time_and_duration(hass: HomeAssistant, freezer) -> None:
+    """The AI answers seconds later: the log keeps when the request went out, the rating when it came back."""
+    entry = await _setup(hass, ai_enabled=True, ai_entity=AI_ENTITY)
+    sorter = entry.runtime_data.ai
+    answer = SimpleNamespace(data={"category": "Personal & important", "importance": 3, "reason": "x"})
+
+    async def slow_ai(*args: Any, **kwargs: Any) -> Any:
+        freezer.tick(7)  # the AI needs seven seconds
+        return answer
+
+    with (
+        patch(f"{MAIL}.async_search_uids", AsyncMock(side_effect=[[1], [1, 2]])),
+        patch(f"{MAIL}.async_summaries", AsyncMock(return_value=[_summary(2)])),
+        patch(GENERATE, side_effect=slow_ai),
+    ):
+        await sorter.async_process()
+        await sorter.async_process("push")
+    sent = sorter.usage_log[-1]
+    rated = sorter.ratings[-1]
+    gap = datetime.fromisoformat(rated["time"]) - datetime.fromisoformat(sent["time"])
+    assert gap.total_seconds() == 7 and sent["duration"] == 7

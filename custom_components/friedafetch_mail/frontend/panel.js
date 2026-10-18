@@ -988,7 +988,14 @@ class FriedaPostfachPanel extends HTMLElement {
       icon = "creation";
       tone = e.ok === false ? "err" : "ai";
       title = e.ok === false ? t.tlAiError : t.tlAiSent;
-      sub = [String(e.entity || "").replace(/^ai_task\./, ""), e.chars ? fmt(t.tlChars, Number(e.chars).toLocaleString()) : "", e.error || ""].filter(Boolean).join(" · ");
+      sub = [
+        String(e.entity || "").replace(/^ai_task\./, ""),
+        e.chars ? fmt(t.tlChars, Number(e.chars).toLocaleString()) : "",
+        e.duration != null ? fmt(t.tlDuration, Number(e.duration).toLocaleString(undefined, { maximumFractionDigits: 1 })) : "",
+        e.error || "",
+      ]
+        .filter(Boolean)
+        .join(" · ");
       minis = (e.fields || []).map((f) => t.aiuFields[f] || f);
     } else if (e.kind === "ai_held") {
       icon = "shield-check-outline";
