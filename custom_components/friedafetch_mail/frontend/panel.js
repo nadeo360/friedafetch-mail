@@ -44,6 +44,8 @@ const fmtClock = (iso) => {
 const ico = (name, title = "") =>
   `<ha-icon icon="mdi:${name}"${title ? ` title="${esc(title)}"` : ""} aria-hidden="${title ? "false" : "true"}"></ha-icon>`;
 
+const SEARCH_KEYS = { rules: "searchRules", aiu: "searchAiu" };
+
 // Short time for lists: only the time today, otherwise date and time.
 const fmtShort = (iso) => {
   const d = parseTime(iso);
@@ -326,40 +328,60 @@ class FriedaPostfachPanel extends HTMLElement {
         })
         .join("");
     const f = s.aiuFilter || "";
-    const rows = log
-      .filter((e) => !f || (f === "sent" ? e.sent : !e.sent))
-      .map((e) => {
+    const sort = s.aiuSort || { key: "time", dir: -1 };
+    const entities = new Set(log.map((e) => e.entity).filter(Boolean));
+    const showEntity = entities.size > 1;
+    const value = (e) => (sort.key === "chars" ? Number(e.chars || 0) : sort.key === "subject" ? String(e.subject || e.sender || "").toLowerCase() : parseTime(e.time)?.getTime() || 0);
+    const list = log
+      .map((e, i) => ({ e, i }))
+      .filter(({ e }) => !f || (f === "sent" ? e.sent : !e.sent))
+      .sort((x, y) => {
+        const a = value(x.e);
+        const b = value(y.e);
+        return (a < b ? -1 : a > b ? 1 : 0) * sort.dir || x.i - y.i;
+      });
+    const cols = 6 + (showEntity ? 1 : 0);
+    const rows = list
+      .map(({ e, i }) => {
         const state = !e.sent ? "held" : e.ok ? "sent" : "err";
         const stIcon = { sent: "send-outline", held: "shield-check-outline", err: "alert-circle-outline" }[state];
         const stText = { sent: t.aiuSent, held: t.aiuHeldBack, err: t.resError }[state];
         const digest = e.kind === "digest";
         const title = e.subject ? `„${e.subject}“` : digest ? t.aiuKindDigest : "–";
+        const open = s.aiuOpen === i;
         const fields = (e.fields || [])
           .map((x) => `<span class="fi ${x === "body" ? "hot" : ""}" title="${esc(t.aiuFields[x] || x)}">${ico(FIELD_ICONS[x] || "circle-small")}</span>`)
           .join("");
-        const meta = [
-          fact(digest ? "newspaper-variant-outline" : "sort-variant", digest ? t.aiuKindDigest : t.aiuKindSort, t.aiuTipKind),
-          e.entity ? fact("robot-outline", e.entity.replace(/^ai_task\./, ""), e.entity) : "",
-          e.sent && fields ? `<span class="fields" title="${esc(t.aiuTipFields)}">${fields}</span>` : "",
-          e.sent ? fact("format-text", num(e.chars), t.aiuTipChars) : "",
-          e.sent && e.items != null ? fact("format-list-bulleted", num(e.items), fmt(t.aiuItems, e.items)) : "",
-        ].join("");
-        return `<div class="aiu-row ${state}">
-          <span class="aiu-st" title="${esc(stText)}">${ico(stIcon)}</span>
-          <div class="aiu-main">
-            <div class="aiu-title">${esc(title)}</div>
-            ${e.sender ? `<div class="aiu-sub">${esc(e.sender)}</div>` : ""}
-            <div class="aiu-meta">${meta}</div>
-            ${!e.sent ? `<div class="aiu-reasons">${reasons(e.held_back)}</div>` : ""}
+        const heldCount = Array.isArray(e.held_back) ? e.held_back.length : e.held_back ? 1 : 0;
+        const fieldsCell = e.sent
+          ? `<span class="fields">${fields}</span>`
+          : `<span class="chip ic held">${ico("shield-check-outline")}${esc(heldCount > 1 ? fmt(t.aiuReasonsN, heldCount) : t.aiuKill)}</span>`;
+        const detail = `<div class="adet">
+            ${!e.sent ? `<div><div class="lbl">${esc(t.aiuWhy)}</div>${reasons(e.held_back)}</div>` : ""}
+            ${e.sent ? `<div><div class="lbl">${esc(t.aiuTipFields)}</div>${(e.fields || []).map((x) => `<span class="chip ic ${x === "body" ? "hot" : ""}">${ico(FIELD_ICONS[x] || "circle-small")}${esc(t.aiuFields[x] || x)}</span>`).join("")}</div>` : ""}
             ${e.error ? `<div class="aiu-error">${ico("alert-circle-outline")}${esc(e.error)}</div>` : ""}
-          </div>
-          <time class="aiu-time" datetime="${esc(e.time || "")}" title="${esc(fmtDateTime(e.time))}">${esc(fmtShort(e.time))}</time>
-        </div>`;
+            <div class="muted adet-meta">${esc([fmtDateTime(e.time), e.trigger ? trigLabel(t, e.trigger) : "", e.entity || "", e.items != null ? fmt(t.aiuItems, e.items) : ""].filter(Boolean).join(" · "))}</div>
+          </div>`;
+        const search = [e.subject, e.sender, e.entity, e.kind].join(" ").toLowerCase();
+        return `<tr class="arow ${state} ${open ? "open" : ""}" data-search="${esc(search)}">
+            <td class="c-st"><span class="aiu-st" title="${esc(stText)}" aria-label="${esc(stText)}">${ico(stIcon)}</span></td>
+            <td class="c-time num"><time datetime="${esc(e.time || "")}" title="${esc(fmtDateTime(e.time))}">${esc(fmtShort(e.time))}</time></td>
+            <td class="c-subj"><button class="rname" data-action="aiu-open" data-i="${i}" aria-expanded="${open}">${ico("chevron-right")}<span class="nm"><strong>${esc(title)}</strong>${e.sender ? `<small>${esc(e.sender)}</small>` : ""}</span></button></td>
+            <td class="c-kind">${fact(digest ? "newspaper-variant-outline" : "sort-variant", digest ? t.aiuKindDigest : t.aiuKindSort, t.aiuTipKind)}</td>
+            <td class="c-fields">${fieldsCell}</td>
+            <td class="c-chars num">${e.sent ? esc(num(e.chars)) : "–"}</td>
+            ${showEntity ? `<td class="c-ent">${fact("robot-outline", (e.entity || "–").replace(/^ai_task\./, ""), e.entity || "")}</td>` : ""}
+          </tr>${open ? `<tr class="adetail"><td colspan="${cols}">${detail}</td></tr>` : ""}`;
       })
       .join("");
     const sentCount = log.filter((e) => e.sent).length;
     const seg = (val, icon, label, count) =>
       `<button class="seg ${f === val ? "on" : ""}" data-action="aiu-filter" data-v="${val}" aria-pressed="${f === val}">${ico(icon)}${esc(label)}<span class="n">${esc(count)}</span></button>`;
+    const th = (key, label, cls = "") => {
+      const active = sort.key === key;
+      const icon = active ? (sort.dir < 0 ? "arrow-down" : "arrow-up") : "swap-vertical";
+      return `<th class="${cls}" aria-sort="${active ? (sort.dir < 0 ? "descending" : "ascending") : "none"}"><button class="sort ${active ? "on" : ""}" data-action="aiu-sort" data-k="${key}">${esc(label)}${ico(icon)}</button></th>`;
+    };
     return `<div class="card" id="ai-usage">
       <h2><span class="grow">${esc(t.aiu)}</span>${log.length ? `<button class="link" data-action="aiu-clear">${esc(t.aiuClear)}</button>` : ""}</h2>
       <p class="muted" style="margin:0 0 10px">${esc(t.aiuHint)}</p>
@@ -367,8 +389,14 @@ class FriedaPostfachPanel extends HTMLElement {
       ${chips.length ? `<div style="margin-top:10px">${chips.join("")}</div>` : ""}
       ${
         log.length
-          ? `<div class="segs" role="group" aria-label="${esc(t.aiuAll)}">${seg("", "format-list-bulleted", t.aiuAll, log.length)}${seg("sent", "send-outline", t.aiuOnlySent, sentCount)}${seg("held", "shield-check-outline", t.aiuOnlyHeld, log.length - sentCount)}</div>
-             <div class="aiu-list">${rows || `<p class="muted">${esc(t.aiuEmpty)}</p>`}</div>`
+          ? `<div class="tbar">
+               <label class="search">${ico("magnify")}<input type="search" data-search-table="aiu" value="${esc(s.searchAiu || "")}" placeholder="${esc(t.searchAi)}" aria-label="${esc(t.searchAi)}"></label>
+               <div class="segs" role="group">${seg("", "format-list-bulleted", t.aiuAll, log.length)}${seg("sent", "send-outline", t.aiuOnlySent, sentCount)}${seg("held", "shield-check-outline", t.aiuOnlyHeld, log.length - sentCount)}</div>
+             </div>
+             <div class="scroll aiu-scroll"><table class="dtable atable" data-table="aiu"><thead><tr>
+               <th class="c-st"><span class="vh">${esc(t.colStatus)}</span></th>${th("time", t.colTime, "c-time num")}${th("subject", t.colSubject)}<th>${esc(t.aiuTipKind)}</th><th>${esc(t.colFields)}</th>${th("chars", t.colChars, "num")}${showEntity ? `<th>${esc(t.colEntity)}</th>` : ""}
+             </tr></thead><tbody>${rows || `<tr><td colspan="${cols}" class="muted">${esc(t.aiuEmpty)}</td></tr>`}</tbody></table></div>
+             <p class="muted nomatch" hidden>${esc(t.noMatches)}</p>`
           : `<p class="muted" style="margin-top:12px">${esc(t.aiuEmpty)}</p>`
       }
     </div>`;
@@ -612,6 +640,23 @@ class FriedaPostfachPanel extends HTMLElement {
         <tr class="filters">${cols.map(filterCell).join("")}</tr></thead><tbody>${body}</tbody></table></div></div>`;
   }
 
+  // Search over table rows without re-rendering, so the input keeps its focus.
+  _applySearch(key) {
+    const table = this.shadowRoot.querySelector(`table[data-table="${key}"]`);
+    if (!table) return;
+    const q = String(this._s[SEARCH_KEYS[key]] || "").toLowerCase().trim();
+    let shown = 0;
+    table.querySelectorAll("tbody tr[data-search]").forEach((tr) => {
+      const ok = !q || tr.dataset.search.includes(q);
+      tr.hidden = !ok;
+      const next = tr.nextElementSibling;
+      if (next && !next.dataset.search && next.matches(".rdetail, .adetail")) next.hidden = !ok;
+      if (ok) shown++;
+    });
+    const hint = table.closest(".scroll")?.nextElementSibling;
+    if (hint?.classList.contains("nomatch")) hint.hidden = shown > 0 || !q;
+  }
+
   _applyFilters(key) {
     const wrap = this.shadowRoot.querySelector(`[data-ftable-wrap="${key}"]`);
     if (!wrap) return;
@@ -719,21 +764,24 @@ class FriedaPostfachPanel extends HTMLElement {
   }
 
   // ---------------------------------------------------------------- render
-  _summary(rule) {
+  _condText(c) {
     const t = this.t;
-    const conds = rule.conditions
-      .map((c) => `<span class="chip">${esc(t.fields[c.field] || c.field)} ${esc(t.ops[c.op] || c.op)} „${esc(c.value)}“</span>`)
-      .join(rule.match === "any" ? ` <span class="muted">${esc(t.any.split(" ")[0])}</span> ` : " ");
-    const a = rule.actions;
-    const acts = [];
-    if (a.move_to) acts.push(t.aMove.replace("{0}", esc(a.move_to)));
-    if (a.delete) acts.push(t.aDelete);
-    if (a.mark_seen === true) acts.push(t.aSeen);
-    if (a.mark_seen === false) acts.push(t.aUnseen);
-    if (a.flag === true) acts.push(t.aFlag);
-    if (a.flag === false) acts.push(t.aUnflag);
-    if (a.save_attachments) acts.push(t.aSave + (a.attachments_folder ? ` → ${esc(a.attachments_folder)}` : ""));
-    return { conds, acts: acts.map((x) => `<span class="chip">${x}</span>`).join(" ") };
+    return `${t.fields[c.field] || c.field} ${t.ops[c.op] || c.op} „${c.value}“`;
+  }
+
+  // Actions as small chips with icons (also used in the expanded row).
+  _actionChips(a) {
+    const t = this.t;
+    const chip = (icon, text) => `<span class="chip ic">${ico(icon)}${esc(text)}</span>`;
+    const out = [];
+    if (a.move_to) out.push(chip("folder-move-outline", a.move_to));
+    if (a.delete) out.push(chip("delete-outline", t.aDelete));
+    if (a.mark_seen === true) out.push(chip("email-open-outline", t.aSeen));
+    if (a.mark_seen === false) out.push(chip("email-mark-as-unread", t.aUnseen));
+    if (a.flag === true) out.push(chip("flag-outline", t.aFlag));
+    if (a.flag === false) out.push(chip("flag-off-outline", t.aUnflag));
+    if (a.save_attachments) out.push(chip("paperclip", t.aSave + (a.attachments_folder ? ` → ${a.attachments_folder}` : "")));
+    return out.join("");
   }
 
   _account() {
@@ -780,60 +828,75 @@ class FriedaPostfachPanel extends HTMLElement {
       <p class="muted" style="margin:10px 0 0">${esc(t.switchHint)}</p></div>`;
   }
 
+  // Rules as a compact table. The order decides which rule acts first, so it is shown and not sortable.
   _renderRules() {
     const t = this.t;
     const s = this._s;
-    const newEditor = s.editing && !s.editing.id ? `<div class="rule open" data-rule-id="">${this._renderEditor()}</div>` : "";
+    const newEditor = s.editing && !s.editing.id ? `<div class="rule-new">${this._renderEditor()}</div>` : "";
     if (!s.rules.length)
       return (
         newEditor ||
         `<div class="empty"><p class="muted" style="margin:0">${esc(t.noRules)}</p><button data-action="new">+ ${esc(t.firstRule)}</button></div>`
       );
-    const items = s.rules
+    const multiBox = new Set(s.rules.map((r) => r.mailbox)).size > 1;
+    const tests = { "": () => true, on: (r) => r.enabled, off: (r) => !r.enabled, delete: (r) => !!r.actions.delete, move: (r) => !!r.actions.move_to };
+    const f = tests[s.ruleFilter] ? s.ruleFilter : "";
+    const count = (k) => s.rules.filter(tests[k]).length;
+    const seg = (val, icon, label) => {
+      const n = count(val);
+      if (val && !n && f !== val) return "";
+      return `<button class="seg ${f === val ? "on" : ""}" data-action="rule-filter" data-v="${val}" aria-pressed="${f === val}">${ico(icon)}${esc(label)}<span class="n">${n}</span></button>`;
+    };
+    const others = s.accounts.filter((a) => a.entry_id !== s.entryId);
+    const item = (action, id, icon, label, extra = "", cls = "") =>
+      `<button class="${cls}" data-action="${action}" data-id="${esc(id)}" ${extra}>${ico(icon)}<span class="mi"><span>${esc(label)}</span></span></button>`;
+    const rows = s.rules
       .map((r, i) => {
-        const { conds, acts } = this._summary(r);
+        if (!tests[f](r)) return "";
         const editingThis = s.editing && s.editing.id === r.id;
         const open = editingThis || s.expanded.has(r.id);
-        const n = r.conditions.length;
-        const meta = [r.mailbox, n === 1 ? t.oneCondition : fmt(t.nConditions, n)];
-        if (n > 1) meta.push(r.match === "any" ? t.matchAnyShort : t.matchAllShort);
-        const copy =
-          s.accounts.length > 1
-            ? `<select class="copy" data-action="copy" data-id="${esc(r.id)}" title="${esc(t.copyTo)}"><option value="">${esc(t.copyTo)}</option>${s.accounts
-                .filter((a) => a.entry_id !== s.entryId)
-                .map((a) => `<option value="${esc(a.entry_id)}">${esc(a.label)}</option>`)
-                .join("")}</select>`
-            : "";
-        const body = editingThis
+        const conds = r.conditions.map((c) => this._condText(c));
+        const n = conds.length;
+        const acts = this._actionChips(r.actions);
+        const menu = `<details class="menu rowmenu"><summary aria-label="${esc(t.moreActions)}" title="${esc(t.moreActions)}">${ico("dots-vertical")}</summary><div class="menu-list">
+            ${item("edit", r.id, "pencil-outline", t.edit, s.editing ? "disabled" : "")}
+            ${item("test", r.id, "play-outline", t.testRuleHint, s.busy ? "disabled" : "")}
+            ${item("up", r.id, "arrow-up", t.up, i === 0 ? "disabled" : "")}
+            ${item("down", r.id, "arrow-down", t.down, i === s.rules.length - 1 ? "disabled" : "")}
+            ${others.map((a) => item("copy-to", r.id, "content-copy", fmt(t.copyToAccount, a.label), `data-target="${esc(a.entry_id)}"`)).join("")}
+            <hr>
+            ${item("delete", r.id, "delete-outline", t.remove, "", "danger-item")}
+          </div></details>`;
+        const detail = editingThis
           ? this._renderEditor()
-          : open
-            ? `<div class="rule-body">
-                <div><div class="lbl">${esc(t.conditions)}</div>${conds}</div>
-                <div><div class="lbl">${esc(t.actions)}</div>${acts || `<span class="muted">${esc(t.noActions)}</span>`}${r.actions.stop === false ? `<div class="muted">↓ ${esc(t.continueRules)}</div>` : ""}</div>
-                <div class="rule-tools">
-                  <button class="secondary ib" data-action="edit" data-id="${esc(r.id)}" ${s.editing ? "disabled" : ""}>${ico("pencil-outline")}${esc(t.edit)}</button>
-                  <button class="secondary ib" data-action="test" data-id="${esc(r.id)}" ${s.busy ? "disabled" : ""} title="${esc(t.testRuleHint)}">${ico("play-outline")}${esc(t.testRule)}</button>
-                  <button class="secondary ib danger" data-action="delete" data-id="${esc(r.id)}">${ico("delete-outline")}${esc(t.remove)}</button>
-                  <span class="move">
-                    <button class="icon" data-action="up" data-id="${esc(r.id)}" ${i === 0 ? "disabled" : ""} title="${esc(t.up)}" aria-label="${esc(t.up)}">${ico("arrow-up")}</button>
-                    <button class="icon" data-action="down" data-id="${esc(r.id)}" ${i === s.rules.length - 1 ? "disabled" : ""} title="${esc(t.down)}" aria-label="${esc(t.down)}">${ico("arrow-down")}</button>
-                  </span>
-                  ${copy}
-                </div>
-              </div>`
-            : "";
-        return `<div class="rule ${open ? "open" : ""} ${r.enabled ? "" : "disabled"}" data-rule-id="${esc(r.id)}">
-          <div class="rule-head">
-            <button class="icon chev" data-action="expand" data-id="${esc(r.id)}" aria-expanded="${open}" aria-label="${esc(r.name)}" ${editingThis ? "disabled" : ""}>▸</button>
-            <input type="checkbox" data-action="toggle" data-id="${esc(r.id)}" ${r.enabled ? "checked" : ""} title="${esc(t.enabled)}" aria-label="${esc(t.enabled)}">
-            <div class="rule-title" data-action="expand" data-id="${esc(r.id)}"><strong>${esc(r.name)}</strong><span class="muted">${esc(meta.join(" · "))}</span></div>
-            <span class="rule-side"><span class="rule-acts">${acts}</span><span class="badge" title="${esc(t.hits)}">${esc(r.hits ?? 0)} ${esc(t.hits)}</span></span>
-          </div>
-          ${body}
-        </div>`;
+          : `<div class="rdet">
+              <div><div class="lbl">${esc(t.conditions)}${n > 1 ? ` · ${esc(r.match === "any" ? t.matchAnyShort : t.matchAllShort)}` : ""}</div>${conds.map((c) => `<span class="chip">${esc(c)}</span>`).join("")}</div>
+              <div><div class="lbl">${esc(t.actions)}</div>${acts || `<span class="muted">${esc(t.noActions)}</span>`}${r.actions.stop === false ? `<div class="muted">${ico("arrow-down")} ${esc(t.continueRules)}</div>` : ""}</div>
+              <div class="rdet-tools">
+                <button class="secondary ib" data-action="edit" data-id="${esc(r.id)}" ${s.editing ? "disabled" : ""}>${ico("pencil-outline")}${esc(t.edit)}</button>
+                <button class="secondary ib" data-action="test" data-id="${esc(r.id)}" ${s.busy ? "disabled" : ""} title="${esc(t.testRuleHint)}">${ico("play-outline")}${esc(t.testRule)}</button>
+              </div>
+            </div>`;
+        const search = [r.name, r.mailbox, ...conds, r.actions.move_to || ""].join(" ").toLowerCase();
+        return `<tr class="rrow ${open ? "open" : ""} ${r.enabled ? "" : "off"}" data-rule-id="${esc(r.id)}" data-search="${esc(search)}">
+            <td class="c-pos num">${i + 1}</td>
+            <td class="c-on"><input type="checkbox" class="switch" data-action="toggle" data-id="${esc(r.id)}" ${r.enabled ? "checked" : ""} title="${esc(t.enabled)}" aria-label="${esc(t.enabled)}: ${esc(r.name)}"></td>
+            <td class="c-name"><button class="rname" data-action="expand" data-id="${esc(r.id)}" aria-expanded="${open}" ${editingThis ? "disabled" : ""}>${ico("chevron-right")}<span class="nm"><strong>${esc(r.name)}</strong>${multiBox ? `<small>${esc(r.mailbox)}</small>` : ""}</span></button></td>
+            <td class="c-cond" data-action="expand" data-id="${esc(r.id)}" title="${esc(conds.join("\n"))}"><span class="ctext">${esc(conds[0] || "")}</span>${n > 1 ? `<span class="more">+${n - 1}</span>` : ""}</td>
+            <td class="c-act">${acts || `<span class="muted">${esc(t.noActions)}</span>`}</td>
+            <td class="c-hits num" title="${esc(t.hits)}">${esc(r.hits ?? 0)}</td>
+            <td class="c-menu">${menu}</td>
+          </tr>${open ? `<tr class="rdetail" data-detail-for="${esc(r.id)}"><td colspan="7">${detail}</td></tr>` : ""}`;
       })
       .join("");
-    return `<div class="rules">${newEditor}${items}</div>`;
+    return `${newEditor}<div class="tbar">
+        <label class="search">${ico("magnify")}<input type="search" data-search-table="rules" value="${esc(s.searchRules || "")}" placeholder="${esc(t.searchRules)}" aria-label="${esc(t.searchRules)}"></label>
+        <div class="segs" role="group">${seg("", "format-list-bulleted", t.filterAllRules)}${seg("on", "check-circle-outline", t.enabled)}${seg("off", "pause-circle-outline", t.inactive)}${seg("delete", "delete-outline", t.aDelete)}${seg("move", "folder-move-outline", t.moves)}</div>
+      </div>
+      <div class="scroll menus"><table class="dtable rtable" data-table="rules"><thead><tr>
+        <th class="c-pos num" title="${esc(t.orderHint)}">#</th><th class="c-on"><span class="vh">${esc(t.enabled)}</span></th><th>${esc(t.name)}</th><th>${esc(t.conditions)}</th><th>${esc(t.actions)}</th><th class="num">${esc(t.hits)}</th><th class="c-menu"><span class="vh">${esc(t.moreActions)}</span></th>
+      </tr></thead><tbody>${rows || `<tr><td colspan="7" class="muted">${esc(t.noMatches)}</td></tr>`}</tbody></table></div>
+      <p class="muted nomatch" hidden>${esc(t.noMatches)}</p>`;
   }
 
   _renderEditor() {
@@ -958,6 +1021,8 @@ class FriedaPostfachPanel extends HTMLElement {
     }
     this._bind();
     this._applyFilters("runs");
+    this._applySearch("rules");
+    this._applySearch("aiu");
     this._afterRender();
   }
 
@@ -982,7 +1047,7 @@ class FriedaPostfachPanel extends HTMLElement {
     } else if (this._s.scrollTo) {
       const id = this._s.scrollTo;
       this._s.scrollTo = null;
-      const el = [...root.querySelectorAll(".rule[data-rule-id]")].find((n) => n.dataset.ruleId === id);
+      const el = [...root.querySelectorAll("tr.rrow[data-rule-id]")].find((n) => n.dataset.ruleId === id);
       if (el) {
         requestAnimationFrame(() => {
           el.scrollIntoView({ behavior: smooth ? "smooth" : "auto", block: "nearest" });
@@ -1098,6 +1163,22 @@ class FriedaPostfachPanel extends HTMLElement {
         },
         "confirm-yes": () => this._confirmDone(true),
         "confirm-no": () => this._confirmDone(false),
+        "rule-filter": () => {
+          this._s.ruleFilter = el.dataset.v;
+          this._render();
+        },
+        "copy-to": () => this._copy(el.dataset.id, el.dataset.target),
+        "aiu-sort": () => {
+          const key = el.dataset.k;
+          const cur = this._s.aiuSort || { key: "time", dir: -1 };
+          this._s.aiuSort = cur.key === key ? { key, dir: -cur.dir } : { key, dir: key === "subject" ? 1 : -1 };
+          this._render();
+        },
+        "aiu-open": () => {
+          const i = Number(el.dataset.i);
+          this._s.aiuOpen = this._s.aiuOpen === i ? null : i;
+          this._render();
+        },
       }[action];
       if (action === "aiu-filter") {
         el.addEventListener("click", () => {
@@ -1115,6 +1196,14 @@ class FriedaPostfachPanel extends HTMLElement {
       } else if (handler) {
         el.addEventListener("click", handler);
       }
+    });
+    // an item of a row menu closes the menu
+    root.querySelectorAll("details.rowmenu .menu-list button").forEach((b) => b.addEventListener("click", () => b.closest("details")?.removeAttribute("open")));
+    root.querySelectorAll("[data-search-table]").forEach((el) => {
+      el.addEventListener("input", () => {
+        this._s[SEARCH_KEYS[el.dataset.searchTable]] = el.value;
+        this._applySearch(el.dataset.searchTable);
+      });
     });
     root.querySelectorAll("[data-ftable]").forEach((el) => {
       const update = () => {
