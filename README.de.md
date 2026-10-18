@@ -171,6 +171,8 @@ Nur-Lesen-Modus, und Freigaben gelten wie für jedes andere Frieda-Tool. Siehe [
 
 ## Entwicklung
 
+Die Architektur von Frieda und Frieda Postfach beschreibt das arc42-Dokument im Repository von Frieda: [docs/architecture.de.md](https://github.com/nadeo360/friedafetch/blob/main/docs/architecture.de.md).
+
 ```bash
 python -m venv .venv && . .venv/bin/activate
 pip install -r requirements_dev.txt

@@ -167,6 +167,8 @@ every other Frieda tool. See [SECURITY.md](https://github.com/nadeo360/friedafet
 
 ## Development
 
+The architecture of Frieda and Frieda Postfach is described in the arc42 document in Frieda's repository: [docs/architecture.md](https://github.com/nadeo360/friedafetch/blob/main/docs/architecture.md).
+
 ```bash
 python -m venv .venv && . .venv/bin/activate
 pip install -r requirements_dev.txt
