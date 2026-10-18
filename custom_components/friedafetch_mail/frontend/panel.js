@@ -26,7 +26,7 @@ const { esc, fmt, parseTime, fmtDateTime, fmtClock, fmtShort, ico } = W || { esc
 const trigLabel = (t, trig) =>
   trig === "auto" ? t.triggerAuto : trig === "push" ? t.triggerPush : trig === "assistant" ? t.triggerAssistant : t.triggerManual;
 
-const SEARCH_KEYS = { rules: "searchRules", aiu: "searchAiu", runs: "searchRuns" };
+const SEARCH_KEYS = { rules: "searchRules", aiu: "searchAiu", runs: "searchRuns", rates: "searchRates" };
 
 // Widgets and the optional columns of their tables (true = shown by default).
 const WIDGETS = [{ id: "rules" }, { id: "ai" }, { id: "aiu" }, { id: "history" }];
@@ -34,6 +34,7 @@ const TABLE_COLUMNS = {
   rules: { pos: true, cond: true, act: true, hits: true },
   aiu: { time: true, kind: true, fields: true, chars: true, ent: true },
   runs: { trig: true, scope: true, checked: true, matched: true, rules: true, res: true },
+  rates: { time: true, from: true, cat: true, applied: true },
 };
 
 // Adds data-label attributes to the cells of each row so the CSS can stack tables on phones.
@@ -359,13 +360,13 @@ class FriedaPostfachPanel extends HTMLElement {
         const search = [e.subject, e.sender, e.entity, e.kind].join(" ").toLowerCase();
         return `<tr class="arow ${state} ${open ? "open" : ""}" data-search="${esc(search)}">
             <td class="c-st"><span class="aiu-st" title="${esc(stText)}" aria-label="${esc(stText)}">${ico(stIcon)}</span></td>
-            <td class="c-time num"><time datetime="${esc(e.time || "")}" title="${esc(fmtDateTime(e.time))}">${esc(fmtShort(e.time))}</time></td>
+            <td class="c-time num dim"><time datetime="${esc(e.time || "")}" title="${esc(fmtDateTime(e.time))}">${esc(fmtShort(e.time))}</time></td>
             <td class="c-subj"><button class="rtext" data-action="aiu-open" data-i="${i}" aria-expanded="${open}" title="${esc(title)}">${esc(title)}</button></td>
-            <td class="c-sender" title="${esc(e.sender || "")}">${esc(e.sender || "–")}</td>
-            <td class="c-kind">${fact(digest ? "newspaper-variant-outline" : "sort-variant", digest ? t.aiuKindDigest : t.aiuKindSort, t.aiuTipKind)}</td>
+            <td class="c-sender dim" title="${esc(e.sender || "")}">${esc(e.sender || "–")}</td>
+            <td class="c-kind dim">${fact(digest ? "newspaper-variant-outline" : "sort-variant", digest ? t.aiuKindDigest : t.aiuKindSort, t.aiuTipKind)}</td>
             <td class="c-fields">${fieldsCell}</td>
             <td class="c-chars num">${e.sent ? esc(num(e.chars)) : "–"}</td>
-            ${showEntity ? `<td class="c-ent">${fact("robot-outline", (e.entity || "–").replace(/^ai_task\./, ""), e.entity || "")}</td>` : ""}
+            ${showEntity ? `<td class="c-ent dim">${fact("robot-outline", (e.entity || "–").replace(/^ai_task\./, ""), e.entity || "")}</td>` : ""}
           </tr>${open ? `<tr class="detail adetail"><td colspan="${cols}">${detail}</td></tr>` : ""}`;
       })
       .join("");
@@ -402,6 +403,85 @@ class FriedaPostfachPanel extends HTMLElement {
           : `<p class="muted" style="margin-top:12px">${esc(t.aiuEmpty)}</p>`
       }
     </div>`;
+  }
+
+  // The AI's recent ratings, as a data table like the other lists.
+  _renderRatings(ai, cats, catLabel) {
+    const t = this.t;
+    const s = this._s;
+    const list = (ai.ratings || []).map((r, i) => ({ r, i }));
+    if (!list.length) return `<p class="muted">${esc(t.aiNoRatings)}</p>`;
+    const kinds = {
+      "": () => true,
+      important: ({ r }) => Number(r.importance) >= 4,
+      corrected: ({ r }) => !!r.corrected,
+      suspicious: ({ r }) => !!r.suspicious,
+    };
+    const f = kinds[s.ratesFilter] ? s.ratesFilter : "";
+    const sort = s.ratesSort || { key: "time", dir: -1 };
+    const value = ({ r }) => (sort.key === "imp" ? Number(r.importance) : parseTime(r.time)?.getTime() || 0);
+    const rows = list
+      .filter(kinds[f])
+      .sort((x, y) => (value(x) - value(y)) * sort.dir || y.i - x.i)
+      .map(({ r, i }) => {
+        const cur = r.corrected || r.category;
+        const open = s.ratesOpen === r.id;
+        const appliedIcons = { seen: "email-open-outline", flagged: "flag-outline", notified: "bell-outline", quota: "timer-sand" };
+        const applied = (r.applied || [])
+          .map((a) => {
+            const moved = a.startsWith("moved:");
+            const label = moved ? `→ ${a.slice(6)}` : t[`aiApplied_${a}`] || a;
+            return `<span class="fi ${a === "quota" ? "hot" : ""}" title="${esc(label)}">${ico(moved ? "folder-move-outline" : appliedIcons[a] || "check")}</span>`;
+          })
+          .join("");
+        const opt = (val, label) => `<option value="${esc(val)}" ${val === cur ? "selected" : ""}>${esc(label)}</option>`;
+        const detail = open
+          ? `<tr class="detail"><td colspan="7"><div class="det">
+              ${r.reason ? `<div><div class="lbl">${esc(t.aiReason)}</div>${esc(r.reason)}</div>` : ""}
+              ${r.suspicious ? `<div class="aiu-error">${ico("alert-outline")}${esc(t.aiSuspiciousHint)}</div>` : ""}
+              <div class="corr"><label class="lbl" for="corr-${esc(r.id)}">${esc(t.aiCorrect)}</label>
+                <select id="corr-${esc(r.id)}" data-action="ai-correct" data-id="${esc(r.id)}">${[...cats.map((c) => c.name), "other"].map((n) => opt(n, catLabel(n))).join("")}</select></div>
+              ${(r.applied || []).length ? `<div class="muted">${esc((r.applied || []).map((a) => (a.startsWith("moved:") ? `→ ${a.slice(6)}` : t[`aiApplied_${a}`] || a)).join(" · "))}</div>` : ""}
+              <div class="muted">${esc([fmtDateTime(r.time), r.from_domain || ""].filter(Boolean).join(" · "))}</div>
+            </div></td></tr>`
+          : "";
+        const search = [r.subject, r.from, r.from_domain, cur, r.reason].join(" ").toLowerCase();
+        return `<tr class="arow rrate ${open ? "open" : ""}" data-search="${esc(search)}">
+            <td class="c-imp"><span class="imp i${esc(r.importance)}" title="${esc(fmt(t.aiImportance, r.importance))}">${esc(r.importance)}</span></td>
+            <td class="c-time num dim" title="${esc(fmtDateTime(r.time))}">${esc(fmtShort(r.time))}</td>
+            <td class="c-subj"><button class="rtext" data-action="rate-open" data-id="${esc(r.id)}" aria-expanded="${open}" title="${esc(r.subject || "")}">${esc(r.subject || "–")}</button></td>
+            <td class="c-from dim" title="${esc(r.from || "")}">${esc(r.from || "–")}</td>
+            <td class="c-cat"><span class="chip ic ${r.corrected ? "fixed" : ""}" title="${esc(r.corrected ? `${t.aiCorrected}: ${catLabel(r.category)} → ${catLabel(cur)}` : catLabel(cur))}">${r.corrected ? ico("pencil-outline") : ""}${esc(catLabel(cur))}</span>${r.suspicious ? `<span class="fi hot" title="${esc(t.aiSuspicious)}">${ico("alert-outline")}</span>` : ""}</td>
+            <td class="c-applied"><span class="fields">${applied || `<span class="muted">–</span>`}</span></td>
+          </tr>${detail}`;
+      })
+      .join("");
+    const cols = [
+      { key: "time", label: t.colTime },
+      { key: "from", label: t.colSender },
+      { key: "cat", label: t.colCategory },
+      { key: "applied", label: t.colApplied },
+    ];
+    const count = (k) => list.filter(kinds[k]).length;
+    const seg = (val, icon, label) => {
+      const n = count(val);
+      if (val && !n && f !== val) return "";
+      const text = label.charAt(0).toUpperCase() + label.slice(1);
+      return `<button class="seg ${f === val ? "on" : ""}" data-action="rate-filter" data-v="${val}" aria-pressed="${f === val}">${ico(icon)}${esc(text)}<span class="n">${n}</span></button>`;
+    };
+    const th = (key, label, cls = "") => {
+      const active = sort.key === key;
+      return `<th class="${cls}" aria-sort="${active ? (sort.dir < 0 ? "descending" : "ascending") : "none"}"><button class="sort ${active ? "on" : ""}" data-action="rate-sort" data-k="${key}">${esc(label)}${ico(active ? (sort.dir < 0 ? "arrow-down" : "arrow-up") : "swap-vertical")}</button></th>`;
+    };
+    return `<div class="tbar">
+        <label class="search">${ico("magnify")}<input type="search" data-search-table="rates" value="${esc(s.searchRates || "")}" placeholder="${esc(t.searchAi)}" aria-label="${esc(t.searchAi)}"></label>
+        <div class="segs" role="group">${seg("", "format-list-bulleted", t.aiuAll)}${seg("important", "alert-circle-outline", t.aiImportant)}${seg("corrected", "pencil-outline", t.aiCorrected)}${seg("suspicious", "alert-outline", t.aiSuspicious)}</div>
+        <span class="grow"></span>${W.columnMenu(this._layout, "rates", cols, t)}
+      </div>${W.columnStyle(this._layout, "rates", cols)}
+      <div class="scroll aiu-scroll"><table class="dtable atable ratetable" data-table="rates"><thead><tr>
+        ${th("imp", "!", "c-imp")}${th("time", t.colTime, "c-time num")}<th class="c-subj">${esc(t.colSubjectOnly)}</th><th class="c-from">${esc(t.colSender)}</th><th class="c-cat">${esc(t.colCategory)}</th><th class="c-applied">${esc(t.colApplied)}</th>
+      </tr></thead><tbody>${rows || `<tr><td colspan="7" class="muted">${esc(t.noMatches)}</td></tr>`}</tbody></table></div>
+      <p class="muted nomatch" hidden>${esc(t.noMatches)}</p>`;
   }
 
   _renderAi() {
@@ -449,22 +529,7 @@ class FriedaPostfachPanel extends HTMLElement {
           <button class="icon" data-action="ai-cat-edit" data-index="${i}" ${edit ? "disabled" : ""} title="${esc(t.edit)}" aria-label="${esc(t.edit)}: ${esc(c.name)}">${ico("pencil-outline")}</button></div>`;
       })
       .join("");
-    const ratings = (ai.ratings || [])
-      .map((r) => {
-        const cur = r.corrected || r.category;
-        const applied = (r.applied || []).map((a) => (a.startsWith("moved:") ? `→ ${a.slice(6)}` : t[`aiApplied_${a}`] || a));
-        return `<div class="ai-rate">
-          <span class="imp i${r.importance}" title="${esc(fmt(t.aiImportance, r.importance))}">${esc(r.importance)}</span>
-          <span class="subj">${esc(r.subject || "–")}</span>
-          <span class="side">
-            <select data-action="ai-correct" data-id="${esc(r.id)}" title="${esc(t.aiCorrect)}" aria-label="${esc(t.aiCorrect)}">${[...cats.map((c) => c.name), "other"].map((n) => opt(n, catLabel(n), cur)).join("")}</select>
-            ${r.corrected ? `<span class="badge">${esc(t.aiCorrected)}</span>` : ""}${r.suspicious ? `<span class="badge warn">${esc(t.aiSuspicious)}</span>` : ""}
-          </span>
-          <span class="meta">${esc(r.from || "")} · ${esc(fmtDateTime(r.time))}${applied.length ? " · " + applied.map(esc).join(", ") : ""}</span>
-          <span class="why muted">${esc(r.reason || "")}</span>
-        </div>`;
-      })
-      .join("");
+    const ratings = this._renderRatings(ai, cats, catLabel);
     return `<div class="card" id="ai">
       <h2><span class="grow">${esc(t.ai)} <span class="badge ${act ? "warn" : ""}">${esc(act ? t.aiModeActShort : t.aiModeObserveShort)}</span></span>
         <button class="pill" data-action="ai-run" ${s.busy ? "disabled" : ""} title="${esc(t.aiRunHint)}">${ico("play")}${esc(t.aiRun)}</button>
@@ -475,7 +540,7 @@ class FriedaPostfachPanel extends HTMLElement {
       <p class="muted" style="margin:-4px 0 8px">${esc(t.aiCategoriesHint)}</p>
       <div class="ai-cats">${catRows}${edit && edit.index < 0 ? editor(edit) : ""}</div>
       <h3 class="muted with-add">${esc(t.aiRatings)}</h3>
-      ${ratings ? `<div class="ai-rates">${ratings}</div>` : `<p class="muted">${esc(t.aiNoRatings)}</p>`}
+      ${ratings}
     </div>`;
   }
 
@@ -656,8 +721,8 @@ class FriedaPostfachPanel extends HTMLElement {
         const search = [time(h), trig, scope, ...rules.map(([n]) => n), res, ...(h.errors || [])].join(" ").toLowerCase();
         return `<tr data-search="${esc(search)}" class="${errors ? "err" : h.matched ? "hit" : "idle"}">
             <td class="c-time"><span class="nm"><strong>${esc(time(h))}</strong>${(h.runs || 1) > 1 ? `<small>${esc(fmt(t.runsMerged, h.runs))}</small>` : ""}</span></td>
-            <td class="c-trig"><span class="fact">${ico(trigIcon[h.trigger] || "gesture-tap")}${esc(trig)}</span></td>
-            <td class="c-scope"><span class="nm"><span>${esc(scope)}</span>${h.mailboxes?.length ? `<small>${esc(h.mailboxes.join(", "))}</small>` : ""}</span></td>
+            <td class="c-trig dim"><span class="fact">${ico(trigIcon[h.trigger] || "gesture-tap")}${esc(trig)}</span></td>
+            <td class="c-scope dim"><span class="nm"><span>${esc(scope)}</span>${h.mailboxes?.length ? `<small>${esc(h.mailboxes.join(", "))}</small>` : ""}</span></td>
             <td class="c-checked num" title="${esc(t.colChecked)}" data-label="${esc(t.colChecked)}">${esc(h.checked ?? 0)}</td>
             <td class="c-matched num" title="${esc(t.colMatched)}" data-label="${esc(t.colMatched)}">${h.matched ? `<strong>${esc(h.matched)}</strong>` : "0"}</td>
             <td class="c-rules">${rules.length ? rules.map(([n, c]) => `<span class="chip">${esc(n)} · ${esc(c)}</span>`).join("") : `<span class="muted">–</span>`}</td>
@@ -847,7 +912,7 @@ class FriedaPostfachPanel extends HTMLElement {
             <td class="c-pos num">${i + 1}</td>
             <td class="c-on"><input type="checkbox" class="switch" data-action="toggle" data-id="${esc(r.id)}" ${r.enabled ? "checked" : ""} title="${esc(t.enabled)}" aria-label="${esc(t.enabled)}: ${esc(r.name)}"></td>
             <td class="c-name"><button class="rname" data-action="expand" data-id="${esc(r.id)}" aria-expanded="${open}" ${editingThis ? "disabled" : ""}>${ico("chevron-right")}<span class="nm"><strong>${esc(r.name)}</strong>${multiBox ? `<small>${esc(r.mailbox)}</small>` : ""}</span></button></td>
-            <td class="c-cond" data-action="expand" data-id="${esc(r.id)}" title="${esc(conds.join("\n"))}"><span class="ctext">${esc(conds[0] || "")}</span>${n > 1 ? `<span class="more">+${n - 1}</span>` : ""}</td>
+            <td class="c-cond dim" data-action="expand" data-id="${esc(r.id)}" title="${esc(conds.join("\n"))}"><span class="ctext">${esc(conds[0] || "")}</span>${n > 1 ? `<span class="more">+${n - 1}</span>` : ""}</td>
             <td class="c-act">${acts || `<span class="muted">${esc(t.noActions)}</span>`}</td>
             <td class="c-hits num" title="${esc(t.hits)}">${esc(r.hits ?? 0)}</td>
             <td class="c-menu">${menu}</td>
@@ -1145,6 +1210,21 @@ class FriedaPostfachPanel extends HTMLElement {
           this._s.aiuSort = cur.key === key ? { key, dir: -cur.dir } : { key, dir: key === "subject" ? 1 : -1 };
           this._render();
         },
+        "rate-filter": () => {
+          this._s.ratesFilter = el.dataset.v;
+          this._render();
+        },
+        "rate-sort": () => {
+          const key = el.dataset.k;
+          const cur = this._s.ratesSort || { key: "time", dir: -1 };
+          this._s.ratesSort = cur.key === key ? { key, dir: -cur.dir } : { key, dir: -1 };
+          this._render();
+        },
+        "rate-open": () => {
+          const id = el.dataset.id;
+          this._s.ratesOpen = this._s.ratesOpen === id ? null : id;
+          this._render();
+        },
         "aiu-charts": () => {
           this._layout.setOpt("aiu", "charts", !this._layout.opt("aiu", "charts", false));
           this._render();
@@ -1176,7 +1256,7 @@ class FriedaPostfachPanel extends HTMLElement {
     root.querySelectorAll("tr.arow").forEach((tr) =>
       tr.addEventListener("click", (ev) => {
         if (ev.target.closest("button, a, input, select, details")) return;
-        tr.querySelector('[data-action="aiu-open"]')?.click();
+        tr.querySelector('[data-action="aiu-open"], [data-action="rate-open"]')?.click();
       })
     );
     // an item of a row menu closes the menu
