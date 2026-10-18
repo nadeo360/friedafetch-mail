@@ -60,8 +60,12 @@ export const STYLE = `
   .tchip.t-assistant { background: color-mix(in srgb, var(--info-color, #039be5) 16%, transparent); color: var(--info-color, #039be5); }
   .htable .scope { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .htable .scope .chip.mbox { margin: 0; font-size: 12px; }
-  .htable .c-matched .infotip { margin-right: 6px; }
   .htable .c-matched { white-space: nowrap; }
+  table.dtable tr.expandable { cursor: pointer; }
+  button.hitchip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px 2px 7px; min-height: 0; border-radius: 12px; font-size: 13px; background: color-mix(in srgb, var(--primary-color) 12%, transparent); color: var(--primary-text-color); --mdc-icon-size: 15px; }
+  button.hitchip ha-icon { color: var(--primary-color); }
+  tr.open button.hitchip { background: var(--primary-color); color: var(--text-primary-color, #fff); }
+  tr.open button.hitchip ha-icon { color: inherit; }
   .htable tr.err .res { color: var(--error-color, #db4437); }
   .htable tr.hit .res { color: var(--success-color, #43a047); }
   .htable tr.idle .res { color: var(--secondary-text-color); }
@@ -161,9 +165,9 @@ export const STYLE = `
     .htable .c-rules { grid-column: 2 / 4; grid-row: 2; }
     .htable .c-rules .chip { margin: 0 4px 0 0; }
     .htable .c-rules:has(> .muted), .htable .c-scope, .htable .c-checked { display: none !important; }
-    .htable .c-matched { grid-column: 1; grid-row: 2; justify-self: center; }
-    .htable .c-matched strong, .htable .c-matched::before { display: none; }
-    .htable .c-matched:not(:has(.infotip)) { display: none !important; }
+    .htable .c-matched { grid-column: 3; grid-row: 2; justify-self: end; align-self: start; }
+    .htable .c-matched:not(:has(.hitchip)) { display: none !important; }
+    .htable tr:has(.hitchip) .c-rules { grid-column: 2; }
     .rtable .c-on { grid-area: on; }
     .rtable .c-name { grid-area: name; }
     .rtable .c-hits { grid-area: hits; font-size: 12px; color: var(--secondary-text-color); }

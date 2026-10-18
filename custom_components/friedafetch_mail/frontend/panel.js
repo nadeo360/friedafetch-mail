@@ -11,7 +11,7 @@ const VERSION_QUERY = new URL(import.meta.url).search;
 const [{ I18N }, { STYLE }] = await Promise.all([import(`./i18n.js${VERSION_QUERY}`), import(`./styles.js${VERSION_QUERY}`)]);
 
 // Frieda's design library, served by Frieda itself, so both panels look and behave the same.
-const UI_API = 4;
+const UI_API = 3;
 let W = null;
 try {
   W = await import(`/friedafetch_static/ui.js${VERSION_QUERY}`);
@@ -760,12 +760,12 @@ class FriedaPostfachPanel extends HTMLElement {
         const mailList = mails.length ? this._mailList(mails, h.mails_more) : "";
         const open = s.runOpen === h.id && mailList;
         const search = [time(h), trig, scope, ...rules.map(([n]) => n), res, ...(h.errors || []), ...mails.map((m) => `${m.subject} ${m.from}`)].join(" ").toLowerCase();
-        return `<tr data-search="${esc(search)}" class="${errors ? "err row-err" : h.matched ? "hit" : "idle"}">
+        return `<tr data-search="${esc(search)}" class="${errors ? "err row-err" : h.matched ? "hit" : "idle"} ${mailList ? "expandable" : ""} ${open ? "open" : ""}">
             <td class="c-time"><span class="nm"><strong>${esc(time(h))}</strong>${(h.runs || 1) > 1 ? `<small>${esc(fmt(t.runsMerged, h.runs))}</small>` : ""}</span></td>
             <td class="c-trig"><span class="tchip t-${esc(trigIcon[h.trigger] ? h.trigger : "manual")}" title="${esc(trig)}">${ico(trigIcon[h.trigger] || trigIcon.manual)}<span class="tl">${esc(trig)}</span></span></td>
             <td class="c-scope dim"><span class="scope">${ico(h.scope === "all" ? "email-multiple-outline" : "email-arrow-left-outline", scope)}<span class="sc-txt">${esc(scope)}</span>${(h.mailboxes || []).map((b) => `<span class="chip ic mbox">${ico("inbox-outline")}${esc(b)}</span>`).join("")}</span></td>
             <td class="c-checked num" title="${esc(t.colChecked)}" data-label="${esc(t.colChecked)}">${esc(h.checked ?? 0)}</td>
-            <td class="c-matched num" title="${esc(t.colMatched)}" data-label="${esc(t.colMatched)}">${mailList ? W.infoTip(mailList, { label: t.runMails, action: "run-open", data: { id: h.id } }) : ""}${h.matched ? `<strong>${esc(h.matched)}</strong>` : "0"}</td>
+            <td class="c-matched num" title="${esc(t.colMatched)}" data-label="${esc(t.colMatched)}">${mailList ? `<button class="hitchip" data-action="run-open" data-id="${esc(h.id)}" aria-expanded="${!!open}" title="${esc(t.runMails)}">${ico("email-multiple-outline")}<strong>${esc(h.matched)}</strong></button>` : h.matched ? `<strong>${esc(h.matched)}</strong>` : "0"}</td>
             <td class="c-rules">${rules.length ? rules.map(([n, c]) => `<span class="chip">${esc(n)} · ${esc(c)}</span>`).join("") : `<span class="muted">–</span>`}</td>
             <td class="c-res"><span class="fact res" title="${esc(errors ? h.errors.join("; ") : res)}">${ico(resIcon)}${esc(res)}</span>${errors ? `<div class="muted">${esc(h.errors.join("; "))}</div>` : ""}</td>
           </tr>${open ? `<tr class="detail"><td colspan="7"><div class="det"><div class="lbl">${esc(t.runMails)}</div>${mailList}</div></td></tr>` : ""}`;
@@ -1320,11 +1320,11 @@ class FriedaPostfachPanel extends HTMLElement {
         el.addEventListener("click", handler);
       }
     });
-    // the whole row of the AI log opens its details
-    root.querySelectorAll("tr.arow").forEach((tr) =>
+    // the whole row opens its details (AI log, ratings, runs with handled mails)
+    root.querySelectorAll("tr.arow, tr.expandable").forEach((tr) =>
       tr.addEventListener("click", (ev) => {
         if (ev.target.closest("button, a, input, select, details")) return;
-        tr.querySelector('[data-action="aiu-open"], [data-action="rate-open"]')?.click();
+        tr.querySelector('[data-action="aiu-open"], [data-action="rate-open"], [data-action="run-open"]')?.click();
       })
     );
     // an item of a row menu closes the menu
