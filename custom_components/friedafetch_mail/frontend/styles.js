@@ -74,11 +74,17 @@ export const STYLE = `
   .htable tr.idle .res { color: var(--secondary-text-color); }
   tr.disabled td { opacity: .5; }
   .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
-  .row label { min-width: 170px; color: var(--secondary-text-color); font-size: 14px; }
-  input[type=text], select { font: inherit; padding: 7px 10px; border: 1px solid var(--divider-color, #ccc); border-radius: 6px; background: var(--card-background-color, #fff); color: var(--primary-text-color); min-width: 160px; }
+  /* forms: field names 13px grey like secondary table columns, values and options 14px in the text colour */
+  .row label { min-width: 170px; color: var(--secondary-text-color); font-size: 13px; }
+  .row label.opt { display: inline-flex; align-items: center; gap: 10px; min-width: 0; color: var(--primary-text-color); font-size: 14px; cursor: pointer; }
+  .row select { min-width: 240px; }
+  input[type=text], select { font: inherit; font-size: 14px; padding: 7px 10px; border: 1px solid var(--divider-color, #ccc); border-radius: 6px; background: var(--card-background-color, #fff); color: var(--primary-text-color); min-width: 160px; }
   input[type=text].grow { flex: 1; min-width: 200px; }
-  .cond { display: grid; grid-template-columns: 150px 150px 1fr 40px; gap: 8px; margin-bottom: 8px; align-items: center; }
-  .actionsbar { display: flex; gap: 8px; flex-wrap: wrap; }
+  .cond { display: grid; grid-template-columns: minmax(0, 190px) minmax(0, 190px) minmax(0, 1fr) 40px; gap: 8px; margin-bottom: 8px; align-items: center; }
+  .cond select, .cond input[type=text] { width: 100%; min-width: 0; box-sizing: border-box; }
+  .actionsbar { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+  .actionsbar button { border-radius: 18px; padding: 8px 18px; }
+  .actionsbar button.ib { justify-content: center; }
   .tab .label .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--success-color, #43a047); display: inline-block; }
   .tab .label .dot.off { background: var(--secondary-text-color); }
   .tab .badges { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -115,7 +121,7 @@ export const STYLE = `
   .aiu-st { display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; --mdc-icon-size: 18px; background: color-mix(in srgb, var(--primary-color) 14%, transparent); color: var(--primary-color); }
   .aiu-error { display: flex; gap: 4px; align-items: center; font-size: 12px; color: var(--frieda-text-err); overflow-wrap: anywhere; }
   .pill { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 16px 0 12px; border-radius: 18px; font-size: 14px; font-weight: 500; }
-  .editor h3.title { margin: 0 0 12px; font-size: 16px; font-weight: 500; }
+  .editor h3.title { margin: 0 0 14px; font-size: 16px; font-weight: 500; text-transform: none; letter-spacing: normal; color: var(--primary-text-color); }
   .fbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
   .fbar .grow { flex: 1; }
   button.ftoggle { display: none; }
@@ -153,7 +159,12 @@ export const STYLE = `
     button.round.small { width: 36px; height: 36px; }
     input[type=text], select, select.copy { width: 100%; max-width: none; min-width: 0; box-sizing: border-box; min-height: 44px; font-size: 16px; }
     .row { gap: 4px; }
-    .row label { min-width: 100%; }
+    .row label { min-width: 100%; font-size: 14px; }
+    /* phones: values and options 16px like Home Assistant's own fields (and no zoom on focus in iOS) */
+    .row label.opt { font-size: 16px; min-height: 40px; }
+    .row label:empty { display: none; }
+    .row { margin-bottom: 8px; }
+    .editor h3.title { font-size: 17px; }
     .row label:has(input[type=checkbox]) { display: flex; align-items: center; gap: 10px; min-height: 44px; }
     input[type=checkbox]:not(.switch) { width: 22px; height: 22px; }
   }

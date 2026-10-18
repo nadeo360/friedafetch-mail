@@ -522,8 +522,8 @@ class FriedaPostfachPanel extends HTMLElement {
         <div class="row"><label for="ai-name">${esc(t.aiCatName)}</label><input type="text" id="ai-name" class="grow" value="${esc(e.data.name)}" maxlength="40"></div>
         <div class="row"><label for="ai-desc">${esc(t.aiCatDesc)}</label><input type="text" id="ai-desc" class="grow" value="${esc(e.data.description)}" maxlength="300"></div>
         <div class="row"><label for="ai-move">${esc(t.aiCatMove)}</label><select id="ai-move">${opt("", t.noMove, e.data.move_to || "")}${s.mailboxes.map((b) => opt(b, b, e.data.move_to || "")).join("")}</select></div>
-        <div class="row"><label></label><label><input type="checkbox" id="ai-seen" ${e.data.mark_seen ? "checked" : ""}> ${esc(t.aiCatSeen)}</label></div>
-        <div class="row"><label></label><label><input type="checkbox" id="ai-flag" ${e.data.flag ? "checked" : ""}> ${esc(t.aiCatFlag)}</label></div>
+        <div class="row"><label></label><label class="opt"><input type="checkbox" class="switch" id="ai-seen" ${e.data.mark_seen ? "checked" : ""}><span>${esc(t.aiCatSeen)}</span></label></div>
+        <div class="row"><label></label><label class="opt"><input type="checkbox" class="switch" id="ai-flag" ${e.data.flag ? "checked" : ""}><span>${esc(t.aiCatFlag)}</span></label></div>
         ${act ? "" : `<p class="muted" style="margin:0 0 10px">${esc(t.aiCatActionsObserve)}</p>`}
         <div class="actionsbar"><button data-action="ai-cat-save" ${s.busy ? "disabled" : ""}>${esc(t.save)}</button><button class="secondary" data-action="ai-cat-cancel">${esc(t.cancel)}</button>
           ${e.index >= 0 ? `<button class="secondary ib danger" data-action="ai-cat-delete">${ico("delete-outline")}${esc(t.aiCatDelete)}</button>` : ""}</div>
@@ -1055,7 +1055,7 @@ class FriedaPostfachPanel extends HTMLElement {
     const a = e.actions;
     const tri = (val) => (val === null || val === undefined ? "" : String(val));
     return `<div class="editor" id="editor">
-      <h3 class="title">${esc(e.id ? t.edit : t.newRule)}</h3>
+      <h3 class="title">${esc(e.id ? t.editRule : t.newRule)}</h3>
       <div class="row"><label for="f-name">${esc(t.name)}</label><input type="text" id="f-name" class="grow" value="${esc(e.name)}"></div>
       <div class="row"><label for="f-mailbox">${esc(t.mailbox)}</label><select id="f-mailbox">${boxes.map((b) => opt(b, b, e.mailbox)).join("")}</select></div>
       <div class="row"><label for="f-match">${esc(t.match)}</label><select id="f-match">${opt("all", t.all, e.match)}${opt("any", t.any, e.match)}</select></div>
@@ -1065,11 +1065,11 @@ class FriedaPostfachPanel extends HTMLElement {
       <div class="row"><label for="f-move">${esc(t.moveTo)}</label><select id="f-move">${opt("", t.noMove, a.move_to || "")}${this._s.mailboxes.map((b) => opt(b, b, a.move_to || "")).join("")}</select></div>
       <div class="row"><label for="f-seen">${esc(t.markSeen)}</label><select id="f-seen">${opt("", t.unchanged, tri(a.mark_seen))}${opt("true", t.seen, tri(a.mark_seen))}${opt("false", t.unseen, tri(a.mark_seen))}</select></div>
       <div class="row"><label for="f-flag">${esc(t.flag)}</label><select id="f-flag">${opt("", t.unchanged, tri(a.flag))}${opt("true", t.flagSet, tri(a.flag))}${opt("false", t.flagClear, tri(a.flag))}</select></div>
-      <div class="row"><label></label><label><input type="checkbox" id="f-delete" ${a.delete ? "checked" : ""}> ${esc(t.delete)}</label></div>
-      <div class="row"><label></label><label><input type="checkbox" id="f-save" ${a.save_attachments ? "checked" : ""}> ${esc(t.saveAttachments)}</label></div>
+      <div class="row"><label></label><label class="opt"><input type="checkbox" class="switch" id="f-delete" ${a.delete ? "checked" : ""}><span>${esc(t.delete)}</span></label></div>
+      <div class="row"><label></label><label class="opt"><input type="checkbox" class="switch" id="f-save" ${a.save_attachments ? "checked" : ""}><span>${esc(t.saveAttachments)}</span></label></div>
       <div class="row"><label for="f-save-folder">${esc(t.attachmentsFolder)}</label><input type="text" id="f-save-folder" class="grow" value="${esc(a.attachments_folder || "")}" placeholder="${esc(t.attachmentsHint)}"></div>
-      <div class="row"><label></label><label><input type="checkbox" id="f-stop" ${a.stop !== false ? "checked" : ""}> ${esc(t.stop)}</label></div>
-      <div class="row"><label></label><label><input type="checkbox" id="f-enabled" ${e.enabled ? "checked" : ""}> ${esc(t.enabled)}</label></div>
+      <div class="row"><label></label><label class="opt"><input type="checkbox" class="switch" id="f-stop" ${a.stop !== false ? "checked" : ""}><span>${esc(t.stop)}</span></label></div>
+      <div class="row"><label></label><label class="opt"><input type="checkbox" class="switch" id="f-enabled" ${e.enabled ? "checked" : ""}><span>${esc(t.enabled)}</span></label></div>
       <div class="actionsbar"><button data-action="save" ${this._s.busy ? "disabled" : ""}>${esc(t.save)}</button><button class="secondary" data-action="cancel">${esc(t.cancel)}</button></div>
     </div>`;
   }
