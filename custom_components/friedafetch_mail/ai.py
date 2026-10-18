@@ -113,17 +113,39 @@ def parse_terms(value: str | None) -> list[str]:
     return [i.strip().lower() for i in items if len(i.strip()) >= 2]
 
 
-def blocked_reason(
-    settings: dict[str, Any], *, sender_name: str = "", sender_email: str = "", subject: str = "", body: str = ""
-) -> str | None:
-    """Why a mail must not reach any AI: 'sender' (exclusion list) or 'term:<term>' (kill switch); else None."""
-    if is_excluded({"from": [{"email": sender_email}]}, settings.get("exclude") or []):
-        return "sender"
-    haystack = " ".join((sender_name, sender_email, subject, body)).lower()
+def blocked_reasons(
+    settings: dict[str, Any],
+    *,
+    sender_name: str = "",
+    sender_email: str = "",
+    subject: str = "",
+    body: str | None = None,
+) -> list[dict[str, Any]]:
+    """Every kill-switch hit: the blocked sender/domain and each blocked term with where it was found."""
+    reasons: list[dict[str, Any]] = []
+    email = sender_email.lower()
+    domain = email.rsplit("@", 1)[-1] if "@" in email else ""
+    for item in settings.get("exclude") or []:
+        if ("@" in item and email == item) or (
+            "@" not in item and domain and (domain == item or domain.endswith("." + item))
+        ):
+            reasons.append({"type": "sender", "value": item, "where": ["sender"]})
+    places = {
+        "sender": f"{sender_name} {sender_email}".lower(),
+        "subject": subject.lower(),
+        "body": (body or "").lower(),
+    }
     for term in settings.get("block_terms") or []:
-        if term in haystack:
-            return f"term:{term}"
-    return None
+        where = [place for place, text in places.items() if term in text]
+        if where:
+            reasons.append({"type": "term", "value": term, "where": where})
+    return reasons
+
+
+def blocked_reason(settings: dict[str, Any], **fields: Any) -> dict[str, Any] | None:
+    """The first kill-switch hit, or None."""
+    reasons = blocked_reasons(settings, **fields)
+    return reasons[0] if reasons else None
 
 
 def is_excluded(summary: dict[str, Any], exclude: list[str]) -> bool:
@@ -280,7 +302,7 @@ class AiSorter:
         error: str | None = None,
         sender: str = "",
         subject: str = "",
-        held_back: str | None = None,
+        held_back: list[dict[str, Any]] | None = None,
         items: int | None = None,
     ) -> dict[str, Any]:
         """Log one transmission to an AI (or a mail held back by the kill switch). Saved by the caller."""
@@ -290,7 +312,7 @@ class AiSorter:
             "entity": entity,
             "trigger": trigger,
             "sent": held_back is None,
-            "held_back": held_back,  # sender | term:<term>
+            "held_back": held_back or None,  # every kill-switch hit: {type: sender|term, value, where}
             "fields": fields if held_back is None else [],
             "chars": chars if held_back is None else 0,
             "ok": ok,
@@ -496,24 +518,24 @@ class AiSorter:
                     self._last_uid[MAILBOX] = max(self._last_uid.get(MAILBOX, 0), uid)
                 continue
             sender = (summary.get("from") or [{}])[0]
-            held = blocked_reason(
-                self.settings,
-                sender_name=str(sender.get("name") or ""),
-                sender_email=str(sender.get("email") or ""),
-                subject=str(summary.get("subject") or ""),
-            )
+            fields = {
+                "sender_name": str(sender.get("name") or ""),
+                "sender_email": str(sender.get("email") or ""),
+                "subject": str(summary.get("subject") or ""),
+            }
+            held = blocked_reasons(self.settings, **fields)
             body: str | None = None
-            if held is None and (self.settings["include_body"] or self.settings["block_terms"]):
-                # read locally (PEEK, stays unread): needed to send it, or to check the kill-switch terms
+            if self.settings["block_terms"] or (self.settings["include_body"] and not held):
+                # read locally (PEEK, stays unread): to check the kill-switch terms in the text, or to send it
                 try:
                     message = await self._mail.async_get_message(MAILBOX, uid, max_chars=20000)
                 except (MailError, MailboxNotFound) as err:
                     report["errors"].append(f"Could not read message {uid}: {err}")
                     break
                 full = sanitize_text(message.get("body") or "")
-                held = blocked_reason(self.settings, body=full)
+                held = blocked_reasons(self.settings, **fields, body=full)
                 body = full[:AI_BODY_CHARS] if self.settings["include_body"] else None
-            if held is not None:
+            if held:
                 report["skipped"] += 1
                 self.record_usage(
                     "sort",

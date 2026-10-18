@@ -20,7 +20,7 @@ from custom_components.friedafetch.const import (
 )
 from custom_components.friedafetch.insights import upcoming_birthdays
 
-from .ai import ai_settings, blocked_reason
+from .ai import ai_settings, blocked_reason, blocked_reasons
 from .const import CONF_DIGEST_AI_TASK, CONF_DIGEST_NOTIFY
 
 _LOGGER = logging.getLogger(__name__)
@@ -145,13 +145,13 @@ def render_text(data: dict[str, Any], lang: str = "de") -> tuple[str, str]:
     return t["title"], "\n".join(lines)
 
 
-def ai_payload(data: dict[str, Any], settings: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, str]]]:
+def ai_payload(data: dict[str, Any], settings: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """The part of the overview an AI may see: kill-switch matches removed, sender addresses dropped."""
-    held: list[dict[str, str]] = []
+    held: list[dict[str, Any]] = []
     payload = {k: v for k, v in data.items() if k not in ("unread", "events", "birthdays")}
     unread = []
     for item in data.get("unread") or []:
-        reason = blocked_reason(
+        reason = blocked_reasons(
             settings,
             sender_name=str(item.get("from") or ""),
             sender_email=str(item.get("email") or ""),

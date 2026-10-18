@@ -207,6 +207,9 @@ const I18N = {
     aiuSent: "gesendet",
     aiuHeldBack: "zurückgehalten",
     aiuHeldSender: "Absender gesperrt",
+    aiuHeldSenderV: "Absender gesperrt: {0}",
+    aiuWhere: { sender: "Absender", subject: "Betreff", body: "Text" },
+    aiuReasons: "{0} Gründe",
     aiuHeldTerm: "Sperrbegriff „{0}“",
     aiuAll: "Alle Einträge",
     aiuOnlySent: "Nur gesendet",
@@ -418,6 +421,9 @@ const I18N = {
     aiuSent: "sent",
     aiuHeldBack: "held back",
     aiuHeldSender: "sender blocked",
+    aiuHeldSenderV: "sender blocked: {0}",
+    aiuWhere: { sender: "sender", subject: "subject", body: "text" },
+    aiuReasons: "{0} reasons",
     aiuHeldTerm: "blocked term “{0}”",
     aiuAll: "All entries",
     aiuOnlySent: "Sent only",
@@ -823,6 +829,23 @@ class FriedaPostfachPanel extends HTMLElement {
     });
   }
 
+  // Kill-switch reasons: a list of {type, value, where} (older entries: "sender" or "term:<x>").
+  _heldReasons(held) {
+    const t = this.t;
+    const list = Array.isArray(held)
+      ? held
+      : held === "sender"
+        ? [{ type: "sender", value: "", where: [] }]
+        : [{ type: "term", value: String(held || "").replace(/^term:/, ""), where: [] }];
+    return list
+      .map((r) => {
+        const where = (r.where || []).map((w) => t.aiuWhere[w] || w).join(", ");
+        const text = r.type === "sender" ? (r.value ? fmt(t.aiuHeldSenderV, r.value) : t.aiuHeldSender) : fmt(t.aiuHeldTerm, r.value);
+        return where && r.type !== "sender" ? `${text} (${where})` : text;
+      })
+      .join(" · ");
+  }
+
   _renderAiUsage() {
     const t = this.t;
     const s = this._s;
@@ -846,11 +869,9 @@ class FriedaPostfachPanel extends HTMLElement {
         const kind = e.kind === "digest" ? t.aiuKindDigest : t.aiuKindSort;
         const what = e.sent
           ? `${(e.fields || []).map((x) => t.aiuFields[x] || x).join(", ")} · ${fmt(t.aiuChars, Number(e.chars || 0).toLocaleString())}${e.items != null ? " · " + fmt(t.aiuItems, e.items) : ""}`
-          : e.held_back === "sender"
-            ? t.aiuHeldSender
-            : fmt(t.aiuHeldTerm, String(e.held_back || "").replace(/^term:/, ""));
+          : this._heldReasons(e.held_back);
         return `<div class="aiu-row">
-          <span class="badge ${e.sent ? (e.ok ? "" : "warn") : "ok-held"}">${esc(e.sent ? (e.ok ? t.aiuSent : t.resError) : t.aiuHeldBack)}</span>
+          <span class="badge ${e.sent ? (e.ok ? "" : "warn") : "ok-held"}">${esc(e.sent ? (e.ok ? t.aiuSent : t.resError) : t.aiuHeldBack)}</span>${!e.sent && Array.isArray(e.held_back) && e.held_back.length > 1 ? `<span class="badge">${esc(fmt(t.aiuReasons, e.held_back.length))}</span>` : ""}
           <span class="tx"><span><strong>${esc(kind)}</strong> → ${esc(e.entity || "–")} <span class="muted">· ${esc(fmtDateTime(e.time))}</span></span>
             <span class="muted">${esc(what)}</span>
             ${e.subject || e.sender ? `<span class="muted">${esc([e.sender, e.subject ? `„${e.subject}“` : ""].filter(Boolean).join(" · "))}</span>` : ""}

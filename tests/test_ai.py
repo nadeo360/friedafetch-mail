@@ -292,12 +292,16 @@ async def test_kill_switch_terms_and_usage_log(hass: HomeAssistant, hass_ws_clie
     assert generate.await_count == 1  # only the harmless mail reached the AI
     sent = generate.await_args.kwargs["instructions"]
     assert "Diagnose" not in sent and "Hallo" not in sent  # body checked locally, not sent (option off)
-    assert {c.args[1] for c in read.await_args_list} == {2, 3}  # subject/sender matches need no body
+    assert {c.args[1] for c in read.await_args_list} == {2, 3, 4, 5}  # with terms set, every text is checked locally
     usage = sorter.usage_summary()
     assert usage["today"]["calls"] == 1 and usage["today"]["held_back"] == 3 and usage["today"]["body"] == 0
     assert usage["today"]["entities"] == {AI_ENTITY: 1}
-    reasons = sorted(e["held_back"] for e in usage["log"] if not e["sent"])
-    assert reasons == ["sender", "term:diagnose", "term:gehalt"]
+    held = {e["subject"]: e["held_back"] for e in usage["log"] if not e["sent"]}
+    assert held["Treffen morgen?"] == [{"type": "term", "value": "diagnose", "where": ["body"]}]
+    assert held["Gehaltsabrechnung Oktober"] == [{"type": "term", "value": "gehalt", "where": ["subject"]}]
+    assert held["Treffen morgen?"] != held["Gehaltsabrechnung Oktober"]
+    bank = next(e for e in usage["log"] if e["sender"] == "info@bank.example")
+    assert bank["held_back"] == [{"type": "sender", "value": "bank.example", "where": ["sender"]}]
     sent_entry = next(e for e in usage["log"] if e["sent"])
     assert sent_entry["fields"] == ["from", "to", "subject", "date"] and sent_entry["chars"] == len(sent)
 
@@ -343,3 +347,71 @@ async def test_daily_overview_respects_kill_switch_and_is_logged(hass: HomeAssis
     assert usage["today"]["digest"] == 1 and usage["today"]["held_back"] == 2
     digest_entry = next(e for e in usage["log"] if e["sent"])
     assert digest_entry["kind"] == "digest" and digest_entry["items"] == 2 and digest_entry["chars"] == len(prompt)
+
+
+def test_all_kill_switch_reasons_are_reported() -> None:
+    from custom_components.friedafetch_mail.ai import ai_settings, blocked_reasons
+
+    settings = ai_settings(
+        {"ai_exclude": "arzt.example\npraxis@arzt.example", "ai_block_terms": "Diagnose\nBefund\nGehalt"}
+    )
+    reasons = blocked_reasons(
+        settings,
+        sender_name="Praxis Dr. Befund",
+        sender_email="praxis@arzt.example",
+        subject="Ihre Diagnose",
+        body="Anbei der Befund und die Diagnose.",
+    )
+    assert reasons == [
+        {"type": "sender", "value": "arzt.example", "where": ["sender"]},
+        {"type": "sender", "value": "praxis@arzt.example", "where": ["sender"]},
+        {"type": "term", "value": "diagnose", "where": ["subject", "body"]},
+        {"type": "term", "value": "befund", "where": ["sender", "body"]},
+    ]
+    assert blocked_reasons(settings, sender_email="anna@example.com", subject="Hallo") == []
+
+
+async def test_options_can_be_cleared(hass: HomeAssistant) -> None:
+    core = await setup_core(hass)
+    _ai_available(hass)
+    entry = await setup_postfach(
+        hass,
+        core,
+        rules_auto=False,
+        ai_enabled=True,
+        ai_entity=AI_ENTITY,
+        ai_exclude="bank.example",
+        ai_block_terms="diagnose",
+        digest_time="07:30",
+        digest_notify="mobile_app_x",
+        digest_ai_task=AI_ENTITY,
+    )
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"next_step_id": "ai"})
+    # the frontend leaves cleared optional fields out of the submitted data
+    form = {
+        "ai_enabled": True,
+        "ai_entity": AI_ENTITY,
+        "ai_mode": "observe",
+        "ai_include_body": False,
+        "ai_hourly_limit": 30,
+        "ai_notify_importance": "0",
+    }
+    result = await hass.config_entries.options.async_configure(result["flow_id"], form)
+    await hass.async_block_till_done()
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options["ai_exclude"] == "" and entry.options["ai_block_terms"] == ""
+    assert entry.runtime_data.ai.settings["block_terms"] == [] and entry.runtime_data.ai.settings["exclude"] == []
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"next_step_id": "automation"})
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"rules_auto": False, "rules_interval": 5, "rules_push": False, "birthday_sensor": False}
+    )
+    await hass.async_block_till_done()
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert (
+        entry.options["digest_time"] == ""
+        and entry.options["digest_notify"] == ""
+        and entry.options["digest_ai_task"] == ""
+    )

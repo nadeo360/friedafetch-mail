@@ -113,7 +113,11 @@ class FriedaPostfachConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class FriedaPostfachOptionsFlow(OptionsFlow):
-    """Menu: automation (rules, push, daily overview, birthday sensor) and AI sorting."""
+    """Menu: automation (rules, push, daily overview, birthday sensor) and AI sorting.
+
+    Optional text and select fields use ``suggested_value`` instead of ``default``: the frontend leaves a cleared
+    field out of the submitted data, and a default would silently put the old value back.
+    """
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         return self.async_show_menu(step_id="init", menu_options=["automation", "ai"])
@@ -144,7 +148,7 @@ class FriedaPostfachOptionsFlow(OptionsFlow):
         schema = vol.Schema(
             {
                 vol.Required(CONF_AI_ENABLED, default=opts.get(CONF_AI_ENABLED, DEFAULT_AI_ENABLED)): BooleanSelector(),
-                vol.Optional(CONF_AI_ENTITY, default=current): SelectSelector(
+                vol.Optional(CONF_AI_ENTITY, description={"suggested_value": current}): SelectSelector(
                     SelectSelectorConfig(options=entity_options, mode=SelectSelectorMode.DROPDOWN)
                 ),
                 vol.Required(CONF_AI_MODE, default=opts.get(CONF_AI_MODE, DEFAULT_AI_MODE)): SelectSelector(
@@ -163,12 +167,12 @@ class FriedaPostfachOptionsFlow(OptionsFlow):
                         options=["0", "3", "4", "5"], translation_key="ai_notify", mode=SelectSelectorMode.DROPDOWN
                     )
                 ),
-                vol.Optional(CONF_AI_EXCLUDE, default=opts.get(CONF_AI_EXCLUDE) or ""): TextSelector(
-                    TextSelectorConfig(multiline=True)
-                ),
-                vol.Optional(CONF_AI_BLOCK_TERMS, default=opts.get(CONF_AI_BLOCK_TERMS) or ""): TextSelector(
-                    TextSelectorConfig(multiline=True)
-                ),
+                vol.Optional(
+                    CONF_AI_EXCLUDE, description={"suggested_value": opts.get(CONF_AI_EXCLUDE) or ""}
+                ): TextSelector(TextSelectorConfig(multiline=True)),
+                vol.Optional(
+                    CONF_AI_BLOCK_TERMS, description={"suggested_value": opts.get(CONF_AI_BLOCK_TERMS) or ""}
+                ): TextSelector(TextSelectorConfig(multiline=True)),
             }
         )
         return self.async_show_form(step_id="ai", data_schema=schema, errors=errors)
@@ -207,11 +211,13 @@ class FriedaPostfachOptionsFlow(OptionsFlow):
                     )
                 ),
                 vol.Required(CONF_RULES_PUSH, default=opts.get(CONF_RULES_PUSH, DEFAULT_RULES_PUSH)): BooleanSelector(),
-                vol.Optional(CONF_DIGEST_TIME, default=opts.get(CONF_DIGEST_TIME) or ""): TextSelector(),
-                vol.Optional(CONF_DIGEST_NOTIFY, default=current_notify): SelectSelector(
+                vol.Optional(
+                    CONF_DIGEST_TIME, description={"suggested_value": opts.get(CONF_DIGEST_TIME) or ""}
+                ): TextSelector(),
+                vol.Optional(CONF_DIGEST_NOTIFY, description={"suggested_value": current_notify}): SelectSelector(
                     SelectSelectorConfig(options=notify_options, custom_value=True, mode=SelectSelectorMode.DROPDOWN)
                 ),
-                vol.Optional(CONF_DIGEST_AI_TASK, default=current_ai): SelectSelector(
+                vol.Optional(CONF_DIGEST_AI_TASK, description={"suggested_value": current_ai}): SelectSelector(
                     SelectSelectorConfig(options=ai_options, mode=SelectSelectorMode.DROPDOWN)
                 ),
                 vol.Required(
