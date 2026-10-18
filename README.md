@@ -94,7 +94,9 @@ Example (as a tool call):
 **Limits.** Unattended runs (timer, push) and runs an AI starts change at most 100 messages, 50 of them deletions,
 per run and count against Frieda's hourly quota for mail changes; the rest follows in the next run. When an AI
 creates or enables a rule that deletes or moves, or applies the rules to the whole mailbox, Frieda's approvals apply
-(“approve deleting”, mass threshold), and so does Frieda's injection lock.
+(“approve deleting”, mass threshold), and so does Frieda's injection lock. Regex conditions that could block Home
+Assistant on unlucky subjects – nested repetition such as `(a+)+` or chains like `a+a+a+` – are refused when the
+rule is saved; regex conditions look at the first 300 characters of a header.
 
 ## Panel
 

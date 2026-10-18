@@ -96,6 +96,9 @@ Beispiel (als Tool-Aufruf):
 50 Löschungen, pro Lauf und zählen gegen Friedas Stundenkontingent für Mail-Änderungen; der Rest folgt im nächsten
 Lauf. Legt eine KI eine Regel an oder schaltet sie ein, die löscht oder verschiebt, oder wendet sie die Regeln auf das
 ganze Postfach an, gelten Friedas Freigaben („Löschen freigeben“, Massenschwelle) und Friedas Injection-Sperre.
+Regex-Bedingungen, die Home Assistant bei ungünstigen Betreffzeilen blockieren könnten – verschachtelte Wiederholung
+wie `(a+)+` oder Ketten wie `a+a+a+` –, werden beim Speichern abgelehnt; Regex-Bedingungen sehen die ersten
+300 Zeichen einer Kopfzeile.
 
 ## Panel
 
