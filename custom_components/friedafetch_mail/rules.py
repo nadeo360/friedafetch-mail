@@ -549,6 +549,7 @@ class RuleEngine:
                             "matched": report["matched"],
                             "actions": len(report["actions"]),
                             "trigger": trigger,
+                            "mails": _audit_mails(report["actions"]),
                         },
                     )
                 except Exception as err:  # noqa: BLE001
@@ -752,6 +753,8 @@ class RuleEngine:
                     "uid": summary["uid"],
                     "subject": summary.get("subject"),
                     "from": sender[0].get("email"),
+                    "message_id": summary.get("message_id"),
+                    "date": summary.get("date"),
                 }
             )
 
@@ -816,6 +819,7 @@ class RuleEngine:
                             "rule_id": rule.id,
                             "subject": summary.get("subject"),
                             "from": [a.get("email") for a in summary.get("from") or []],
+                            "message_id": summary.get("message_id"),
                             "move_to": decision["move_to"],
                             "delete": decision["delete"],
                             "mark_seen": decision["seen"],
@@ -937,13 +941,16 @@ def _handled_mails(
     """One entry per message of a pass: checked by the rules, acted on by rules, rated by the AI."""
     mails: dict[tuple[Any, Any], dict[str, Any]] = {}
 
-    def entry(box: Any, uid: Any, subject: Any, sender: Any) -> dict[str, Any]:
-        return mails.setdefault(
+    def entry(box: Any, uid: Any, subject: Any, sender: Any, item: dict[str, Any]) -> dict[str, Any]:
+        mail = mails.setdefault(
             (box, uid),
             {
                 "subject": str(subject or "")[:200],
                 "from": str(sender or "")[:200],
                 "mailbox": box,
+                "uid": uid,
+                "message_id": None,
+                "date": None,
                 "rules": [],
                 "move_to": None,
                 "delete": False,
@@ -951,12 +958,17 @@ def _handled_mails(
                 "flag": None,
             },
         )
+        # the Message-ID links the entry to the mail's timeline (it survives moves, the UID does not)
+        for key in ("message_id", "date"):
+            if item.get(key) and not mail.get(key):
+                mail[key] = str(item[key])[:300]
+        return mail
 
     for item in checked or []:
-        entry(item.get("mailbox"), item.get("uid"), item.get("subject"), item.get("from"))
+        entry(item.get("mailbox"), item.get("uid"), item.get("subject"), item.get("from"), item)
     for act in actions:
         sender = act.get("from") or []
-        mail = entry(act.get("mailbox"), act.get("uid"), act.get("subject"), sender[0] if sender else "")
+        mail = entry(act.get("mailbox"), act.get("uid"), act.get("subject"), sender[0] if sender else "", act)
         mail.update(
             {
                 "move_to": act.get("move_to"),
@@ -968,9 +980,21 @@ def _handled_mails(
         if act.get("rule") and act["rule"] not in mail["rules"]:
             mail["rules"].append(act["rule"])
     for item in (ai or {}).get("items") or []:
-        mail = entry(item.get("mailbox") or "INBOX", item.get("uid"), item.get("subject"), item.get("from"))
+        mail = entry(item.get("mailbox") or "INBOX", item.get("uid"), item.get("subject"), item.get("from"), item)
         mail["ai"] = {k: item.get(k) for k in ("category", "importance", "applied", "held")}
     return list(mails.values())
+
+
+def _audit_mails(actions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The mails a run acted on, for the change log (message id and subject), so it can link to their timelines."""
+    seen: set[str] = set()
+    out: list[dict[str, Any]] = []
+    for act in actions:
+        mid = act.get("message_id")
+        if mid and mid not in seen and len(out) < 20:
+            seen.add(mid)
+            out.append({"message_id": mid, "subject": str(act.get("subject") or "")[:120]})
+    return out
 
 
 def _now_iso() -> str:

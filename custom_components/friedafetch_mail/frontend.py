@@ -30,6 +30,7 @@ from .const import (
 )
 from .live import SIGNAL_PANEL
 from .rules import RuleError, RuleNotFound
+from .timeline import build_timeline
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -49,6 +50,7 @@ async def async_setup_frontend(hass: HomeAssistant, version: str) -> None:
     for command in (
         ws_accounts,
         ws_subscribe,
+        ws_mail_timeline,
         ws_mailboxes,
         ws_rules_list,
         ws_rules_create,
@@ -143,6 +145,7 @@ async def ws_accounts(hass: HomeAssistant, connection: websocket_api.ActiveConne
         accounts.append(
             {
                 "entry_id": entry.entry_id,
+                "core_entry_id": link.core_entry_id,  # Frieda's account (links from its change log)
                 "label": link.label,
                 "apple_id": link.apple_id,
                 "title": link.apple_id,
@@ -379,6 +382,43 @@ async def ws_ai_clear(hass: HomeAssistant, connection: websocket_api.ActiveConne
     sorter = _sorter(hass, msg.get("entry_id"))
     await sorter.async_clear_ratings()
     connection.send_result(msg["id"], _ai_payload(sorter))
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/mail/timeline",
+        vol.Optional("entry_id"): str,
+        vol.Optional("message_id"): vol.Any(str, None),
+        vol.Optional("subject"): vol.Any(str, None),
+        vol.Optional("sender"): vol.Any(str, None),
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+@_ws_errors
+async def ws_mail_timeline(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """The steps of one message (rules, AI, your correction), found by Message-ID or by subject and sender."""
+    link = _entry(hass, msg.get("entry_id")).runtime_data
+    await link.rules.async_load()
+    sorter = link.ai
+    ratings: list[dict[str, Any]] = []
+    usage: list[dict[str, Any]] = []
+    if sorter is not None:
+        await sorter.async_load()
+        ratings, usage = list(sorter.ratings), list(sorter.usage_log)
+    connection.send_result(
+        msg["id"],
+        build_timeline(
+            link.rules.history(limit=10_000),
+            ratings,
+            usage,
+            message_id=msg.get("message_id") or None,
+            subject=msg.get("subject") or None,
+            sender=msg.get("sender") or None,
+        ),
+    )
 
 
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/ai/usage/clear", vol.Optional("entry_id"): str})

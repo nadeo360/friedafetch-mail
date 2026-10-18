@@ -216,4 +216,54 @@ export const STYLE = `
     .ratetable .c-cat { grid-area: cat; }
     .ratetable .c-applied { display: none !important; }
   }
+  /* subject cells that open a timeline: text with a small chevron */
+  button.rtext.go { display: flex; align-items: center; gap: 4px; }
+  button.rtext.go .rt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  button.rtext.go ha-icon { --mdc-icon-size: 16px; opacity: .4; flex: none; }
+  tr.arow:hover button.rtext.go ha-icon, button.rtext.go:focus-visible ha-icon { opacity: .8; }
+
+  /* timeline sheet: from the right on wide screens, from the bottom on phones */
+  .sheet-backdrop { position: fixed; inset: 0; z-index: 20; background: rgba(0,0,0,.32); }
+  .sheet { position: fixed; z-index: 21; top: 0; right: 0; bottom: 0; width: min(460px, 100vw); box-sizing: border-box; display: grid; grid-template-rows: auto auto auto 1fr auto; background: var(--card-background-color, #fff); color: var(--primary-text-color); box-shadow: -12px 0 40px rgba(0,0,0,.22); }
+  .sheet .handle { display: block; height: 0; }  /* keeps its grid row; drawn only on phones */
+  .sheet button:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
+  .sheet-top { display: flex; align-items: center; gap: 8px; padding: 14px 12px 6px 20px; }
+  .sheet-top .ttl { flex: 1; font-size: 13px; font-weight: 500; color: var(--secondary-text-color); text-transform: uppercase; letter-spacing: .04em; }
+  .sheet-head { padding: 0 20px 14px; border-bottom: 1px solid var(--divider-color, #e0e0e0); display: grid; gap: 6px; min-width: 0; }
+  .sheet-head h2 { margin: 0; font-size: 18px; font-weight: 500; line-height: 1.3; overflow-wrap: anywhere; }
+  .sheet-head .from { font-size: 13px; color: var(--secondary-text-color); overflow-wrap: anywhere; }
+  .sheet-head .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+  .sheet .state { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; padding: 3px 10px 3px 8px; border-radius: 12px; --mdc-icon-size: 15px; }
+  .sheet .state.ai { background: color-mix(in srgb, var(--frieda-ai-color, #8e6bd8) 14%, transparent); color: var(--frieda-text-ai); }
+  .sheet .state.held { background: color-mix(in srgb, var(--success-color, #43a047) 14%, transparent); color: var(--frieda-text-ok); }
+  .sheet .state.box { background: var(--secondary-background-color); color: var(--frieda-text-on-fill); }
+  .sheet-body { overflow: auto; padding: 16px 20px 8px; overscroll-behavior: contain; }
+  .sheet-foot { padding: 12px 20px 16px; border-top: 1px solid var(--divider-color, #e0e0e0); }
+  .sheet-foot .muted { font-size: 12px; }
+  ol.tl { list-style: none; margin: 0; padding: 0; }
+  ol.tl li { position: relative; display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; column-gap: 12px; padding-bottom: 18px; }
+  ol.tl li:not(:last-child)::before { content: ""; position: absolute; left: 15px; top: 34px; bottom: 2px; width: 2px; border-radius: 1px; background: var(--divider-color, #e0e0e0); }
+  ol.tl .dot { width: 32px; height: 32px; border-radius: 50%; display: inline-grid; place-items: center; --mdc-icon-size: 17px; background: var(--secondary-background-color); color: var(--frieda-text-on-fill); }
+  ol.tl .what { min-width: 0; padding-top: 6px; display: grid; gap: 3px; }
+  ol.tl .what strong { font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
+  ol.tl .what .sub { font-size: 13px; color: var(--secondary-text-color); overflow-wrap: anywhere; }
+  ol.tl .what .quote { font-size: 13px; border-left: 2px solid var(--divider-color, #e0e0e0); padding: 2px 0 2px 10px; margin-top: 2px; }
+  ol.tl .what .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+  ol.tl .mini { font-size: 12px; padding: 1px 8px; border-radius: 10px; background: var(--secondary-background-color); color: var(--frieda-text-on-fill); }
+  ol.tl .when { padding-top: 7px; font-size: 12px; color: var(--secondary-text-color); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  ol.tl .t-ai .dot { background: color-mix(in srgb, var(--frieda-ai-color, #8e6bd8) 15%, transparent); color: var(--frieda-text-ai); }
+  ol.tl .t-move .dot { background: color-mix(in srgb, var(--info-color, #039be5) 13%, transparent); color: var(--frieda-text-info); }
+  ol.tl .t-held .dot { background: color-mix(in srgb, var(--success-color, #43a047) 14%, transparent); color: var(--frieda-text-ok); }
+  ol.tl .t-warn .dot { background: color-mix(in srgb, var(--warning-color, #ffa600) 18%, transparent); color: var(--frieda-text-warn); }
+  ol.tl .t-err .dot { background: color-mix(in srgb, var(--error-color, #db4437) 12%, transparent); color: var(--frieda-text-err); }
+  ol.tl .t-you .dot { background: color-mix(in srgb, var(--primary-color) 14%, transparent); color: var(--primary-color); }
+  ol.tl li.now .what strong { font-weight: 600; }
+  @media (max-width: 600px) {
+    .sheet { top: auto; left: 0; width: 100vw; max-height: 92vh; border-radius: 16px 16px 0 0; box-shadow: 0 -10px 40px rgba(0,0,0,.25); }
+    .sheet .handle { width: 36px; height: 4px; border-radius: 2px; background: var(--divider-color, #e0e0e0); margin: 8px auto 0; }
+    .sheet-top { padding-top: 6px; }
+    .sheet-head h2 { font-size: 17px; }
+    .sheet-foot { padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+  }
+
 `;

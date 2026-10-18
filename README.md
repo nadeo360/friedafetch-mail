@@ -114,6 +114,10 @@ the rules and everything to run them:
 - The **Runs** history: one entry per pass of the rules and the AI sorting (automatic passes without new mail are
   merged), with search, filters and sorting; a click shows every message of the pass with what the rules did, the
   AI's category and importance, a kill-switch hold or "no action".
+- The **message timeline**: a click on a message (in a run, under *Recently rated* or *Sent to AI*) opens its whole
+  path as a timeline – received, rules checked, sent to the AI or held back by the kill switch, rating, action, your
+  correction. Steps are linked by the message's Message-ID (it survives moves); older entries are matched by subject
+  and sender. Nothing new is stored for it, everything stays in Home Assistant. Frieda's change log links to it too.
 
 With several accounts an account picker appears on top. Approvals and the change log stay in Frieda's own panel,
 whose overview also shows whether Frieda Postfach is running.

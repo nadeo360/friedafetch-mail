@@ -117,6 +117,11 @@ auszuführen:
 - Der Verlauf **Ausführungen**: ein Eintrag pro Durchgang von Regeln und KI-Sortierung (automatische Durchgänge ohne
   neue Mails werden zusammengefasst), mit Suche, Filtern und Sortierung; ein Klick zeigt jede Mail des Durchgangs mit
   dem, was die Regeln getan haben, der Kategorie und Wichtigkeit der KI, einem Killswitch-Stopp oder „keine Aktion“.
+- Der **Verlauf einer Mail**: Ein Klick auf eine Mail (in einer Ausführung, unter *Zuletzt bewertet* oder *An KI
+  übermittelt*) öffnet ihren ganzen Weg als Zeitleiste – eingegangen, Regeln geprüft, an die KI übermittelt oder vom
+  Killswitch zurückgehalten, Bewertung, Aktion, deine Korrektur. Verknüpft wird über die Message-ID der Mail (sie
+  bleibt beim Verschieben erhalten); ältere Einträge werden über Betreff und Absender zugeordnet. Dafür wird nichts
+  zusätzlich gespeichert, alles bleibt in Home Assistant. Auch das Änderungsprotokoll von Frieda verlinkt dorthin.
 
 Bei mehreren Konten erscheint oben eine Kontoauswahl. Freigaben und Änderungsprotokoll bleiben im Panel von Frieda,
 dessen Überblick auch zeigt, ob Frieda Postfach läuft.

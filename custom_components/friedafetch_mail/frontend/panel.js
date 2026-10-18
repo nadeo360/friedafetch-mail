@@ -108,6 +108,7 @@ class FriedaPostfachPanel extends HTMLElement {
     // live updates arrive through the subscription; the slow timer keeps relative times fresh and is the fallback
     this._timer = setInterval(() => this._autoRefresh(), 60000);
     this._subscribe();
+    this._openLinked(); // the panel may come back from Home Assistant's cache with a new link
   }
 
   disconnectedCallback() {
@@ -168,6 +169,7 @@ class FriedaPostfachPanel extends HTMLElement {
     if (topics.has("rules")) jobs.push(this._loadRules(), this._loadHistory(true));
     if (topics.has("rules") || topics.has("accounts")) jobs.push(this._loadAccounts());
     if (topics.has("ai")) jobs.push(this._ws({ type: "friedafetch_mail/ai", entry_id: this._s.entryId }).then((ai) => (this._s.ai = ai)));
+    if (this._s.sheet && (topics.has("rules") || topics.has("ai"))) jobs.push(this._loadTimeline());
     await Promise.all(jobs.map((j) => j.catch(() => null)));
     this._render();
     this._fresh = null; // the highlight plays once
@@ -222,13 +224,34 @@ class FriedaPostfachPanel extends HTMLElement {
     try {
       const [{ accounts }] = await Promise.all([this._ws({ type: "friedafetch_mail/accounts" }), this._layout.load(this._hass)]);
       this._s.accounts = accounts;
-      this._s.entryId = accounts[0]?.entry_id || null;
+      const linked = this._linkedAccount();
+      this._s.entryId = (linked || accounts[0])?.entry_id || null;
       if (this._s.entryId) await this._reload();
     } catch (err) {
       this._s.error = err.message || String(err);
     }
     this._s.loaded = true;
     this._render();
+    this._openLinked();
+  }
+
+  // A link from Frieda's change log: /frieda-postfach?mail=<Message-ID>&account=<Frieda account>
+  _linkedAccount() {
+    const id = new URLSearchParams(window.location.search).get("account");
+    return id ? this._s.accounts.find((a) => a.core_entry_id === id || a.entry_id === id) || null : null;
+  }
+
+  async _openLinked() {
+    const params = new URLSearchParams(window.location.search);
+    const mail = params.get("mail");
+    if (!mail || !this._s.loaded) return;
+    const account = this._linkedAccount();
+    params.delete("mail");
+    params.delete("account");
+    const rest = params.toString();
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${rest ? `?${rest}` : ""}`);
+    if (account && account.entry_id !== this._s.entryId) await this._switchAccount(account.entry_id);
+    this._openTimeline({ message_id: mail, subject: "", sender: "" });
   }
 
   async _reload() {
@@ -416,7 +439,7 @@ class FriedaPostfachPanel extends HTMLElement {
         const stText = { sent: t.aiuSent, held: t.aiuHeldBack, err: t.resError }[state];
         const digest = e.kind === "digest";
         const title = e.subject || (digest ? t.aiuKindDigest : "–");
-        const open = s.aiuOpen === i;
+        const open = digest && s.aiuOpen === i; // a sorted mail opens its timeline, the daily overview its details
         const fields = (e.fields || [])
           .map((x) => `<span class="fi ${x === "body" ? "hot" : ""}" role="img" aria-label="${esc(t.aiuFields[x] || x)}" title="${esc(t.aiuFields[x] || x)}">${ico(FIELD_ICONS[x] || "circle-small")}</span>`)
           .join("");
@@ -434,7 +457,11 @@ class FriedaPostfachPanel extends HTMLElement {
         return `<tr class="arow ${state} ${state === "err" ? "row-err" : ""} ${open ? "open" : ""}" data-search="${esc(search)}">
             <td class="c-st"><span class="aiu-st" role="img" title="${esc(stText)}" aria-label="${esc(stText)}">${ico(stIcon)}</span></td>
             <td class="c-time num dim"><time datetime="${esc(e.time || "")}" title="${esc(fmtDateTime(e.time))}">${esc(fmtShort(e.time))}</time></td>
-            <td class="c-subj"><button class="rtext" data-action="aiu-open" data-i="${i}" aria-expanded="${open}" title="${esc(title)}">${esc(title)}</button></td>
+            <td class="c-subj">${
+              digest
+                ? `<button class="rtext" data-action="aiu-open" data-i="${i}" aria-expanded="${open}" title="${esc(title)}">${esc(title)}</button>`
+                : `<button class="rtext go" data-action="aiu-mail" data-i="${i}" aria-haspopup="dialog" title="${esc(title)}"><span class="rt">${esc(title)}</span>${ico("chevron-right")}</button>`
+            }</td>
             <td class="c-sender dim" title="${esc(e.sender || "")}">${esc(e.sender || "–")}</td>
             <td class="c-kind dim">${fact(digest ? "newspaper-variant-outline" : "sort-variant", digest ? t.aiuKindDigest : t.aiuKindSort, t.aiuTipKind)}</td>
             <td class="c-fields">${fieldsCell}</td>
@@ -498,7 +525,6 @@ class FriedaPostfachPanel extends HTMLElement {
       .sort((x, y) => (value(x) - value(y)) * sort.dir || y.i - x.i)
       .map(({ r, i }) => {
         const cur = r.corrected || r.category;
-        const open = s.ratesOpen === r.id;
         const appliedIcons = { seen: "email-open-outline", flagged: "flag-outline", notified: "bell-outline", quota: "timer-sand" };
         const applied = (r.applied || [])
           .map((a) => {
@@ -508,23 +534,15 @@ class FriedaPostfachPanel extends HTMLElement {
           })
           .join("");
         const opt = (val, label) => `<option value="${esc(val)}" ${val === cur ? "selected" : ""}>${esc(label)}</option>`;
-        const detail = open
-          ? `<tr class="detail"><td colspan="7"><div class="det">
-              ${r.reason ? `<div><div class="lbl">${esc(t.aiReason)}</div>${esc(r.reason)}</div>` : ""}
-              ${r.suspicious ? `<div class="aiu-error">${ico("alert-outline")}${esc(t.aiSuspiciousHint)}</div>` : ""}
-              ${(r.applied || []).length ? `<div class="muted">${esc((r.applied || []).map((a) => (a.startsWith("moved:") ? `→ ${a.slice(6)}` : t[`aiApplied_${a}`] || a)).join(" · "))}</div>` : ""}
-              <div class="muted">${esc([fmtDateTime(r.time), r.from_domain || ""].filter(Boolean).join(" · "))}</div>
-            </div></td></tr>`
-          : "";
         const search = [r.subject, r.from, r.from_domain, cur, r.reason].join(" ").toLowerCase();
-        return `<tr class="arow rrate ${open ? "open" : ""}" data-search="${esc(search)}">
+        return `<tr class="arow rrate" data-search="${esc(search)}">
             <td class="c-imp"><span class="imp i${esc(r.importance)}" role="img" aria-label="${esc(fmt(t.aiImportance, r.importance))}" title="${esc(fmt(t.aiImportance, r.importance))}">${esc(r.importance)}</span></td>
             <td class="c-time num dim" title="${esc(fmtDateTime(r.time))}">${esc(fmtShort(r.time))}</td>
-            <td class="c-subj"><button class="rtext" data-action="rate-open" data-id="${esc(r.id)}" aria-expanded="${open}" title="${esc(r.subject || "")}">${esc(r.subject || "–")}</button></td>
+            <td class="c-subj"><button class="rtext go" data-action="rate-open" data-id="${esc(r.id)}" aria-haspopup="dialog" title="${esc(r.subject || "")}"><span class="rt">${esc(r.subject || "–")}</span>${ico("chevron-right")}</button></td>
             <td class="c-from dim" title="${esc(r.from || "")}">${esc(r.from || "–")}</td>
             <td class="c-cat"><label class="chipsel ${r.corrected ? "on" : ""}" title="${esc(r.corrected ? `${t.aiCorrected}: ${catLabel(r.category)} → ${catLabel(cur)}` : t.aiCorrect)}">${r.corrected ? `<span class="lead">${ico("pencil-outline")}</span>` : ""}<select data-action="ai-correct" data-id="${esc(r.id)}" aria-label="${esc(t.aiCorrect)}: ${esc(r.subject || "")}">${[...new Set([...cats.map((c) => c.name), "other", cur])].map((n) => opt(n, catLabel(n))).join("")}</select>${ico("chevron-down")}</label>${r.suspicious ? `<span class="fi hot" role="img" aria-label="${esc(t.aiSuspicious)}" title="${esc(t.aiSuspicious)}">${ico("alert-outline")}</span>` : ""}</td>
             <td class="c-applied"><span class="fields">${applied || `<span class="muted">–</span>`}</span></td>
-          </tr>${detail}`;
+          </tr>`;
       })
       .join("");
     const cols = [
@@ -773,7 +791,7 @@ class FriedaPostfachPanel extends HTMLElement {
 
   // Messages a run handled, for the info popup and the expanded row.
   // Messages of one pass: what the rules did, what the AI decided, or that nothing applied.
-  _mailList(mails, more = 0) {
+  _mailList(mails, more = 0, runId = null) {
     const t = this.t;
     const ruleKind = (m) =>
       m.delete
@@ -794,7 +812,7 @@ class FriedaPostfachPanel extends HTMLElement {
         .join(" · ");
     };
     const items = mails
-      .map((m) => {
+      .map((m, idx) => {
         const ai = m.ai || null;
         const ruled = (m.rules || []).length > 0;
         let k;
@@ -804,7 +822,8 @@ class FriedaPostfachPanel extends HTMLElement {
         else k = { icon: "minus", tone: "none", label: t.runNoAction };
         const source = ruled ? (m.rules || []).join(", ") : ai ? t.ai : "";
         const extra = ruled && ai && ai.category ? `${t.ai}: ${aiText(ai)}` : "";
-        return `<li class="tone-${k.tone || "plain"}">
+        const go = runId != null ? `role="button" tabindex="0" aria-haspopup="dialog" data-action="mail-open" data-i="${esc(`${runId}:${idx}`)}"` : "";
+        return `<li class="tone-${k.tone || "plain"} ${go ? "go" : ""}" ${go}>
             <span class="i-ic">${ico(k.icon)}</span>
             <span class="i-main" title="${esc(m.subject || "")}">${esc(m.subject || "–")}</span>
             ${k.label ? `<span class="i-chip">${esc(k.label)}</span>` : ""}
@@ -813,6 +832,144 @@ class FriedaPostfachPanel extends HTMLElement {
       })
       .join("");
     return `<ul class="ilist">${items}${more ? `<li class="i-more">${esc(fmt(t.runMailsMore, more))}</li>` : ""}</ul>`;
+  }
+
+  // ------------------------------------------------------------ timeline of one message
+  // key: { message_id, subject, sender } – the Message-ID links everything; subject and sender find older entries
+  async _openTimeline(key) {
+    this._s.sheet = { key, data: null, loading: true, error: null };
+    this._render();
+    await this._loadTimeline();
+  }
+
+  async _loadTimeline() {
+    const sheet = this._s.sheet;
+    if (!sheet) return;
+    try {
+      const data = await this._ws({ type: "friedafetch_mail/mail/timeline", entry_id: this._s.entryId, ...sheet.key });
+      if (this._s.sheet !== sheet) return;
+      sheet.data = data;
+      sheet.error = null;
+    } catch (err) {
+      if (this._s.sheet !== sheet) return;
+      sheet.error = err.message || String(err);
+    }
+    sheet.loading = false;
+    this._render();
+  }
+
+  _closeTimeline() {
+    if (!this._s.sheet) return;
+    this._s.sheet = null;
+    this._render();
+  }
+
+  _renderSheet() {
+    const sheet = this._s.sheet;
+    if (!sheet) return "";
+    const t = this.t;
+    const d = sheet.data || {};
+    const cat = (c) => (c === "other" ? t.aiOther : c);
+    const subject = d.subject || sheet.key.subject || "–";
+    const sender = d.sender || sheet.key.sender || "";
+    const chips = [];
+    if (d.category) chips.push(`<span class="state ai">${ico(d.corrected ? "pencil-outline" : "creation")}${esc(d.corrected ? fmt(t.tlCategoryCorrected, cat(d.category)) : cat(d.category))}</span>`);
+    if (d.held) chips.push(`<span class="state held">${ico("shield-check-outline")}${esc(t.tlNotAi)}</span>`);
+    const where = d.location === "trash" ? t.tlTrash : d.location ? `${d.mailbox || "INBOX"} → ${d.location}` : d.mailbox;
+    if (where) chips.push(`<span class="state box">${ico(d.location === "trash" ? "delete-outline" : "folder-outline")}${esc(where)}</span>`);
+    const events = d.events || [];
+    const body = sheet.loading
+      ? `<p class="working"><span class="spinner" aria-hidden="true"></span>${esc(t.tlLoading)}</p>`
+      : sheet.error
+        ? `<div class="error">${esc(sheet.error)}</div>`
+        : !d.found
+          ? `<p class="muted">${esc(t.tlEmpty)}</p>`
+          : `<ol class="tl">${events.map((e, i) => this._tlStep(e, i === events.length - 1)).join("")}</ol>`;
+    return `<div class="sheet-backdrop" data-action="sheet-close"></div>
+      <aside class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+        <span class="handle" aria-hidden="true"></span>
+        <div class="sheet-top"><span class="ttl">${esc(t.tlTitle)}</span><button class="icon" data-action="sheet-close" aria-label="${esc(t.close)}" title="${esc(t.close)}">${ico("close")}</button></div>
+        <div class="sheet-head">
+          <h2 id="sheet-title">${esc(subject)}</h2>
+          ${sender || d.date ? `<span class="from">${esc([sender.replace(/^@/, ""), d.date ? fmtDateTime(d.date) : ""].filter(Boolean).join(" · "))}</span>` : ""}
+          ${chips.length ? `<div class="chips">${chips.join("")}</div>` : ""}
+        </div>
+        <div class="sheet-body">${body}</div>
+        <div class="sheet-foot"><span class="muted">${esc(d.message_id || sheet.key.message_id ? t.tlFoot : t.tlFootOld)}</span></div>
+      </aside>`;
+  }
+
+  // One step of the timeline: tinted symbol, what happened, details, time.
+  _tlStep(e, last) {
+    const t = this.t;
+    const cat = (c) => (c === "other" ? t.aiOther : c);
+    let tone = "none";
+    let icon = "circle-small";
+    let title = "";
+    let sub = "";
+    let quote = "";
+    let minis = [];
+    if (e.kind === "received") {
+      icon = "email-arrow-left-outline";
+      title = t.tlReceived;
+      sub = e.mailbox || "";
+    } else if (e.kind === "checked") {
+      const hit = (e.rules || []).length > 0;
+      const acts = [
+        e.delete && t.aDelete,
+        e.move_to && `→ ${e.move_to}`,
+        e.seen === true && t.aSeen,
+        e.seen === false && t.aUnseen,
+        e.flag === true && t.aFlag,
+        e.flag === false && t.aUnflag,
+      ].filter(Boolean);
+      icon = !hit ? "filter-outline" : e.delete ? "delete-outline" : e.move_to ? "folder-move-outline" : "filter-check-outline";
+      tone = !hit ? "none" : e.delete ? "err" : "move";
+      title = hit ? fmt(t.tlRuleHit, e.rules.join(", ")) : t.tlChecked;
+      sub = [e.trigger ? trigLabel(t, e.trigger) : "", hit ? acts.join(", ") : t.tlNoRule, e.count > 1 ? fmt(t.tlTimes, e.count) : ""].filter(Boolean).join(" · ");
+    } else if (e.kind === "ai_sent") {
+      icon = "creation";
+      tone = e.ok === false ? "err" : "ai";
+      title = e.ok === false ? t.tlAiError : t.tlAiSent;
+      sub = [String(e.entity || "").replace(/^ai_task\./, ""), e.chars ? fmt(t.tlChars, Number(e.chars).toLocaleString()) : "", e.error || ""].filter(Boolean).join(" · ");
+      minis = (e.fields || []).map((f) => t.aiuFields[f] || f);
+    } else if (e.kind === "ai_held") {
+      icon = "shield-check-outline";
+      tone = "held";
+      title = t.tlHeld;
+      sub = t.tlHeldSub;
+      minis = (e.reasons || []).map((r) => (r.type === "sender" ? (r.value ? fmt(t.aiuHeldSenderV, r.value) : t.aiuHeldSender) : fmt(t.aiuHeldTerm, r.value)));
+    } else if (e.kind === "rated") {
+      icon = "tag-outline";
+      tone = "ai";
+      title = fmt(t.tlRated, cat(e.category));
+      sub = e.importance ? fmt(t.tlImportance, e.importance) : "";
+      quote = e.reason || "";
+      if (e.suspicious) minis = [t.aiSuspicious];
+    } else if (e.kind === "ai_applied") {
+      const applied = e.applied || [];
+      const moved = applied.find((a) => String(a).startsWith("moved:"));
+      const quota = applied.includes("quota");
+      icon = moved ? "folder-move-outline" : quota ? "timer-sand" : "check";
+      tone = quota ? "warn" : "move";
+      title = moved ? fmt(t.tlMoved, moved.slice(6)) : quota ? t.aiApplied_quota : t.tlApplied;
+      sub = applied
+        .filter((a) => !String(a).startsWith("moved:") && a !== "quota")
+        .map((a) => t[`aiApplied_${a}`] || a)
+        .join(", ") || t.tlAppliedSub;
+    } else if (e.kind === "corrected") {
+      icon = "pencil-outline";
+      tone = "you";
+      title = t.tlCorrected;
+      sub = fmt(t.tlCorrectedSub, cat(e.before), cat(e.after));
+    }
+    return `<li class="t-${tone} ${last ? "now" : ""}">
+        <span class="dot">${ico(icon)}</span>
+        <div class="what"><strong>${esc(title)}</strong>${sub ? `<span class="sub">${esc(sub)}</span>` : ""}${quote ? `<span class="quote">${esc(quote)}</span>` : ""}${
+          minis.length ? `<span class="chips">${minis.map((m) => `<span class="mini">${esc(m)}</span>`).join("")}</span>` : ""
+        }</div>
+        <span class="when">${e.time ? `<time datetime="${esc(e.time)}">${esc(fmtShort(e.time))}</time>` : ""}</span>
+      </li>`;
   }
 
   _renderHistory() {
@@ -866,7 +1023,7 @@ class FriedaPostfachPanel extends HTMLElement {
         const resIcon = errors.length ? "alert-circle-outline" : didSomething(h) ? "check-circle-outline" : "minus-circle-outline";
         const rules = Object.entries(h.rules || {});
         const mails = h.mails || [];
-        const mailList = mails.length ? this._mailList(mails, h.mails_more) : "";
+        const mailList = mails.length ? this._mailList(mails, h.mails_more, h.id) : "";
         const open = s.runOpen === h.id && mailList;
         const aiCell = ai && (ai.rated || ai.held || ai.errors.length)
           ? `<span class="tchip t-ai" title="${esc(fmt(t.runAiTip, ai.rated, ai.applied, ai.held))}"><span class="vh">${esc(fmt(t.runAiTip, ai.rated, ai.applied, ai.held))}</span>${ico("creation")}<span aria-hidden="true">${esc(ai.rated)}</span>${ai.applied ? `<span class="sub" aria-hidden="true">· ${esc(fmt(t.runAiApplied, ai.applied))}</span>` : ""}${ai.held ? `<span class="sub" aria-hidden="true">· ${ico("shield-check-outline")}${esc(ai.held)}</span>` : ""}</span>`
@@ -1232,7 +1389,7 @@ class FriedaPostfachPanel extends HTMLElement {
       this.shadowRoot,
       `<style>${W.UI_STYLE}${STYLE}</style>
       <div class="toolbar"><ha-menu-button></ha-menu-button><img src="${esc(ICON_URL)}" alt=""><span>${esc(t.title)}</span><span class="grow"></span>${s.loaded && s.entryId ? W.layoutButton(this._layout, t) : ""}</div>
-      <div class="content widgets">${body}</div>${this._renderConfirm()}`
+      <div class="content widgets">${body}</div>${this._renderSheet()}${this._renderConfirm()}`
     );
     const menu = this.shadowRoot.querySelector("ha-menu-button");
     if (menu && this._hass) {
@@ -1414,10 +1571,19 @@ class FriedaPostfachPanel extends HTMLElement {
           this._render();
         },
         "rate-open": () => {
-          const id = el.dataset.id;
-          this._s.ratesOpen = this._s.ratesOpen === id ? null : id;
-          this._render();
+          const r = (this._s.ai?.ratings || []).find((x) => x.id === el.dataset.id);
+          if (r) this._openTimeline({ message_id: r.message_id || null, subject: r.subject || "", sender: r.from_domain ? `@${r.from_domain}` : r.from || "" });
         },
+        "aiu-mail": () => {
+          const e = (this._s.ai?.usage?.log || [])[Number(el.dataset.i)];
+          if (e) this._openTimeline({ message_id: e.message_id || null, subject: e.subject || "", sender: e.sender || "" });
+        },
+        "mail-open": () => {
+          const [runId, idx] = String(el.dataset.i).split(":");
+          const m = (this._s.history || []).find((h) => String(h.id) === runId)?.mails?.[Number(idx)];
+          if (m) this._openTimeline({ message_id: m.message_id || null, subject: m.subject || "", sender: m.from || "" });
+        },
+        "sheet-close": () => this._closeTimeline(),
         "aiu-charts": () => {
           this._layout.setOpt("aiu", "charts", !this._layout.opt("aiu", "charts", false));
           this._render();
@@ -1449,9 +1615,22 @@ class FriedaPostfachPanel extends HTMLElement {
     root.querySelectorAll("tr.arow, tr.expandable").forEach((tr) =>
       tr.addEventListener("click", (ev) => {
         if (ev.target.closest("button, a, input, select, details")) return;
-        tr.querySelector('[data-action="aiu-open"], [data-action="rate-open"], [data-action="run-open"]')?.click();
+        tr.querySelector('[data-action="aiu-open"], [data-action="aiu-mail"], [data-action="rate-open"], [data-action="run-open"]')?.click();
       })
     );
+    // list entries that act as buttons (the mails of a run) also answer to Enter and Space
+    root.querySelectorAll('li[role="button"][data-action]').forEach((li) =>
+      li.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter" || ev.key === " ") {
+          ev.preventDefault();
+          li.click();
+        }
+      })
+    );
+    // the timeline closes with Escape
+    root.querySelector(".sheet")?.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") this._closeTimeline();
+    });
     // an item of a row menu closes the menu
     root.querySelectorAll("details.rowmenu .menu-list button").forEach((b) => b.addEventListener("click", () => b.closest("details")?.removeAttribute("open")));
     root.querySelectorAll("[data-search-table]").forEach((el) => {

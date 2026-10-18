@@ -318,6 +318,7 @@ class AiSorter:
         subject: str = "",
         held_back: list[dict[str, Any]] | None = None,
         items: int | None = None,
+        message_id: str | None = None,
     ) -> dict[str, Any]:
         """Log one transmission to an AI (or a mail held back by the kill switch). Saved by the caller."""
         entry = {
@@ -334,6 +335,7 @@ class AiSorter:
             "sender": sender[:120],
             "subject": subject[:160],
             "items": items,
+            "message_id": (message_id or None) and str(message_id)[:300],  # links the entry to the mail's timeline
         }
         self.usage_log.append(entry)
         self.usage_log = self.usage_log[-MAX_LOG:]
@@ -440,6 +442,7 @@ class AiSorter:
         if rating is None:
             raise AiSortError("Rating not found")
         rating["corrected"] = category
+        rating["corrected_at"] = _now_iso()
         self.examples = [e for e in self.examples if e.get("rating_id") != rating_id]
         self.examples.append(
             {
@@ -549,7 +552,12 @@ class AiSorter:
                     result="error" if report["errors"] else "ok",
                     client=f"ai ({report['trigger']})",
                     error="; ".join(report["errors"]) or None,
-                    details={"checked": report["rated"], "matched": report["applied"], "trigger": report["trigger"]},
+                    details={
+                        "checked": report["rated"],
+                        "matched": report["applied"],
+                        "trigger": report["trigger"],
+                        "mails": _audit_mails(i for i in report["items"] if i.get("applied")),
+                    },
                 )
             except Exception as err:  # noqa: BLE001
                 _LOGGER.debug("Audit logging of AI sorting failed: %s", err)
@@ -590,6 +598,7 @@ class AiSorter:
                         "uid": uid,
                         "subject": summary.get("subject"),
                         "from": sender.get("email"),
+                        "message_id": summary.get("message_id"),
                         "held": sorted({str(r.get("type")) for r in held}),
                     }
                 )
@@ -602,6 +611,7 @@ class AiSorter:
                     sender=str(sender.get("email") or ""),
                     subject=str(summary.get("subject") or ""),
                     held_back=held,
+                    message_id=summary.get("message_id"),
                 )
                 if advance:
                     self._last_uid[MAILBOX] = max(self._last_uid.get(MAILBOX, 0), uid)
@@ -632,6 +642,7 @@ class AiSorter:
                     "uid": uid,
                     "subject": summary.get("subject"),
                     "from": sender.get("email"),
+                    "message_id": summary.get("message_id"),
                     "category": rating.get("category"),
                     "importance": rating.get("importance"),
                     "applied": list(rating.get("applied") or []),
@@ -706,6 +717,7 @@ class AiSorter:
             "chars": len(instructions),
             "sender": str(sender.get("email") or ""),
             "subject": str(summary.get("subject") or ""),
+            "message_id": summary.get("message_id"),
         }
         try:
             result = await _generate(
@@ -833,3 +845,12 @@ class AiSorter:
             guard.consume(QUOTA_MAIL_MODIFY, 1)
         rating["applied"] = applied
         return bool(applied)
+
+
+def _audit_mails(items: Any) -> list[dict[str, Any]]:
+    """The mails of a pass for the change log (message id and subject), so it can link to their timelines."""
+    return [
+        {"message_id": i.get("message_id"), "subject": str(i.get("subject") or "")[:120]}
+        for i in list(items)[:20]
+        if i.get("message_id")
+    ]
