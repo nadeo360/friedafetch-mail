@@ -10,6 +10,7 @@ from homeassistant.components import frontend, panel_custom, websocket_api
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.util.hass_dict import HassKey
 
 from custom_components.friedafetch.const import CONF_ENABLE_MAIL, CONF_READ_ONLY, DEFAULT_ENABLE_MAIL, DEFAULT_READ_ONLY
@@ -27,6 +28,7 @@ from .const import (
     DEFAULT_RULES_PUSH,
     DOMAIN,
 )
+from .live import SIGNAL_PANEL
 from .rules import RuleError, RuleNotFound
 
 _LOGGER = logging.getLogger(__name__)
@@ -46,6 +48,7 @@ async def async_setup_frontend(hass: HomeAssistant, version: str) -> None:
     await hass.http.async_register_static_paths([StaticPathConfig(STATIC_URL, str(static_dir), cache_headers=False)])
     for command in (
         ws_accounts,
+        ws_subscribe,
         ws_mailboxes,
         ws_rules_list,
         ws_rules_create,
@@ -106,6 +109,24 @@ def _ws_errors(func):
     wrapper.__name__ = func.__name__
     wrapper.__doc__ = func.__doc__
     return wrapper
+
+
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/subscribe"})
+@websocket_api.require_admin
+@callback
+def ws_subscribe(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """Live updates: sends {entry_id, topic} whenever rules, runs or the AI sorting of an account change."""
+
+    @callback
+    def forward(core_entry_id: str, topic: str) -> None:
+        # the engines speak of the Frieda account; the panel knows the Frieda Postfach entry
+        for entry in _entries(hass):
+            if entry.runtime_data.core_entry_id == core_entry_id:
+                event = {"entry_id": entry.entry_id, "topic": topic}
+                connection.send_message(websocket_api.event_message(msg["id"], event))
+
+    connection.subscriptions[msg["id"]] = async_dispatcher_connect(hass, SIGNAL_PANEL, forward)
+    connection.send_result(msg["id"])
 
 
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/accounts"})

@@ -584,3 +584,17 @@ async def test_ai_only_pass_is_recorded(hass: HomeAssistant) -> None:
     entry = engine.history()[0]
     assert entry["trigger"] == "manual" and entry["checked"] == 0 and entry["ai"]["held"] == 1
     assert entry["mails"][0]["ai"]["held"] == ["term"]
+
+
+async def test_subscribe_sends_live_updates(hass: HomeAssistant, hass_ws_client) -> None:
+    """The open panel hears that rules or runs of its Frieda Postfach entry changed (not the Frieda account id)."""
+    core = await setup_core(hass)
+    entry = await setup_postfach(hass, core, rules_auto=False)
+    ws = await hass_ws_client(hass)
+    await ws.send_json({"id": 1, "type": "friedafetch_mail/subscribe"})
+    assert (await ws.receive_json())["success"]
+
+    await ws.send_json({"id": 2, "type": "friedafetch_mail/rules/history/clear", "entry_id": entry.entry_id})
+    event = await ws.receive_json()
+    assert event["id"] == 1 and event["event"] == {"entry_id": entry.entry_id, "topic": "rules"}
+    assert (await ws.receive_json())["id"] == 2  # the result of the clear call follows

@@ -27,6 +27,7 @@ from custom_components.friedafetch.llm_api import ToolNotFoundError
 from custom_components.friedafetch.mail import ICloudMail, MailboxNotFound, MailError
 
 from .const import CORE_DOMAIN, EVENT_RULE_MATCHED, MAX_EVENTS_PER_RUN, SIGNAL_UPDATED
+from .live import async_notify
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -374,6 +375,7 @@ class RuleEngine:
 
     async def _save(self) -> None:
         await self._store.async_save(self._data())
+        async_notify(self._hass, self._entry_id, "rules")
 
     # -------------------------------------------------------- automation
     def set_automation(self, enabled: bool, interval_minutes: int | None, next_run: datetime | None) -> None:
@@ -388,6 +390,7 @@ class RuleEngine:
         if next_run is not None:
             self.next_run = next_run.isoformat(timespec="seconds")
         self._store.async_delay_save(self._data, 5)
+        async_notify(self._hass, self._entry_id, "rules")
 
     def automation_status(self) -> dict[str, Any]:
         enabled_rules = sum(1 for r in self._rules if r.enabled)

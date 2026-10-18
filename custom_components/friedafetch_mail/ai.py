@@ -48,6 +48,7 @@ from .const import (
     MAX_AI_LIMIT,
     SIGNAL_UPDATED,
 )
+from .live import async_notify
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -274,6 +275,7 @@ class AiSorter:
 
     async def _save(self) -> None:
         await self._store.async_save(self._data())
+        async_notify(self._hass, self._entry_id, "ai")
 
     # ------------------------------------------------------------- status
     def _budget(self) -> int:

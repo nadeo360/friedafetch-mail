@@ -105,21 +105,83 @@ class FriedaPostfachPanel extends HTMLElement {
       if (menu && !ev.composedPath().includes(menu)) menu.removeAttribute("open");
     };
     document.addEventListener("click", this._onDocClick);
-    this._timer = setInterval(() => this._autoRefresh(), 30000);
+    // live updates arrive through the subscription; the slow timer keeps relative times fresh and is the fallback
+    this._timer = setInterval(() => this._autoRefresh(), 60000);
+    this._subscribe();
   }
 
   disconnectedCallback() {
     clearInterval(this._timer);
+    clearTimeout(this._liveTimer);
     document.removeEventListener("visibilitychange", this._onVisible);
     document.removeEventListener("click", this._onDocClick);
+    this._unsubscribe();
+  }
+
+  // A redraw now would get in the way: the user is editing, choosing, typing, deciding or has a menu open.
+  _canRefresh() {
+    const s = this._s;
+    if (!this._hass || !s.loaded || !s.entryId || s.busy || s.confirm || s.editing || s.aiEdit || document.visibilityState !== "visible") return false;
+    const active = this.shadowRoot.activeElement;
+    if (active && ["SELECT", "INPUT", "TEXTAREA"].includes(active.tagName)) return false;
+    return !this.shadowRoot.querySelector("details.menu[open]");
+  }
+
+  // ------------------------------------------------------------ live updates
+  async _subscribe() {
+    if (!W || this._unsub || this._subscribing || !this._hass?.connection || !this.isConnected) return;
+    this._subscribing = true;
+    try {
+      this._unsub = await this._hass.connection.subscribeMessage((ev) => this._onLive(ev), { type: "friedafetch_mail/subscribe" });
+      if (!this.isConnected) this._unsubscribe();
+    } catch (err) {
+      this._unsub = null; // older backend: the timer keeps the panel current
+    }
+    this._subscribing = false;
+  }
+
+  _unsubscribe() {
+    const unsub = this._unsub;
+    this._unsub = null;
+    if (unsub) Promise.resolve(unsub()).catch(() => {});
+  }
+
+  // Collects the changed parts for a moment, then reloads only those.
+  _onLive(ev) {
+    if (!ev || ev.entry_id !== this._s.entryId) {
+      if (ev?.topic === "rules") (this._live ||= new Set()).add("accounts"); // counts of another account
+      else return;
+    } else (this._live ||= new Set()).add(ev.topic);
+    clearTimeout(this._liveTimer);
+    this._liveTimer = setTimeout(() => this._flushLive(), 400);
+  }
+
+  async _flushLive() {
+    if (!this._live?.size) return;
+    if (!this._canRefresh()) {
+      this._liveTimer = setTimeout(() => this._flushLive(), 1500); // try again once the user is done
+      return;
+    }
+    const topics = this._live;
+    this._live = new Set();
+    const jobs = [];
+    if (topics.has("rules")) jobs.push(this._loadRules(), this._loadHistory(true));
+    if (topics.has("rules") || topics.has("accounts")) jobs.push(this._loadAccounts());
+    if (topics.has("ai")) jobs.push(this._ws({ type: "friedafetch_mail/ai", entry_id: this._s.entryId }).then((ai) => (this._s.ai = ai)));
+    await Promise.all(jobs.map((j) => j.catch(() => null)));
+    this._render();
+    this._fresh = null; // the highlight plays once
+  }
+
+  async _loadRules() {
+    const list = await this._ws({ type: "friedafetch_mail/rules/list", entry_id: this._s.entryId });
+    this._s.rules = list.rules;
+    this._s.lastRun = list.last_run;
+    this._s.automation = list.automation || null;
   }
 
   async _autoRefresh() {
-    const s = this._s;
-    if (!this._hass || !s.loaded || !s.entryId || s.busy || s.confirm || s.editing || s.aiEdit || document.visibilityState !== "visible") return;
-    const active = this.shadowRoot.activeElement;
-    if (active && ["SELECT", "INPUT", "TEXTAREA"].includes(active.tagName)) return;
-    if (this.shadowRoot.querySelector("details.menu[open]")) return;
+    if (!this._canRefresh()) return;
     try {
       await this._reload();
       this._render();
@@ -132,6 +194,7 @@ class FriedaPostfachPanel extends HTMLElement {
     const first = !this._hass;
     this._hass = hass;
     if (first) this._init();
+    if (first) this._subscribe();
     const menu = this.shadowRoot.querySelector("ha-menu-button");
     if (menu) {
       menu.hass = hass;
@@ -670,9 +733,12 @@ class FriedaPostfachPanel extends HTMLElement {
     if (!accounts.some((a) => a.entry_id === this._s.entryId)) this._s.entryId = accounts[0]?.entry_id || null;
   }
 
-  async _loadHistory() {
+  // live: runs that were not there before are highlighted briefly (merged runs keep their id and stay calm)
+  async _loadHistory(live = false) {
     const res = await this._ws({ type: "friedafetch_mail/rules/history", entry_id: this._s.entryId, limit: this._s.historyLimit });
+    const known = new Set((this._s.history || []).map((h) => h.id));
     this._s.history = res.runs || [];
+    if (live && known.size) this._fresh = new Set(this._s.history.filter((h) => !known.has(h.id)).map((h) => h.id));
     this._s.historyTotal = res.total || 0;
   }
 
@@ -810,7 +876,7 @@ class FriedaPostfachPanel extends HTMLElement {
           ...mails.map((m) => `${m.subject} ${m.from} ${m.ai?.category || ""}`),
           ai ? t.ai : "",
         ].join(" ").toLowerCase();
-        return `<tr data-search="${esc(search)}" class="${errors.length ? "err row-err" : didSomething(h) ? "hit" : "idle"} ${mailList ? "expandable" : ""} ${open ? "open" : ""}">
+        return `<tr data-search="${esc(search)}" class="${errors.length ? "err row-err" : didSomething(h) ? "hit" : "idle"} ${mailList ? "expandable" : ""} ${open ? "open" : ""} ${this._fresh?.has(h.id) ? "fresh" : ""}">
             <td class="c-time"><span class="nm"><strong>${esc(time(h))}</strong>${(h.runs || 1) > 1 ? `<small>${esc(fmt(t.runsMerged, h.runs))}</small>` : ""}</span></td>
             <td class="c-trig"><span class="tchip t-${esc(trigIcon[h.trigger] ? h.trigger : "manual")}" title="${esc(trig)}">${ico(trigIcon[h.trigger] || trigIcon.manual)}<span class="tl">${esc(trig)}</span></span></td>
             <td class="c-scope dim"><span class="scope">${ico(h.scope === "all" ? "email-multiple-outline" : "email-arrow-left-outline")}<span class="sc-txt">${esc(scope)}</span>${(h.mailboxes || []).map((b) => `<span class="chip ic mbox">${ico("inbox-outline")}${esc(b)}</span>`).join("")}</span></td>
