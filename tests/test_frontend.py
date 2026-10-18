@@ -33,6 +33,12 @@ async def test_static_panel_served(hass: HomeAssistant, hass_client) -> None:
     for module in ("i18n.js", "styles.js"):  # loaded by panel.js with the same version query
         resp = await client.get(f"/friedafetch_mail_static/{module}?v=1")
         assert resp.status == 200 and "export const" in await resp.text()
+    # the panel takes its design from Frieda's library; the cache key covers both versions
+    assert "/friedafetch_static/ui.js" in body
+    lib = await client.get("/friedafetch_static/ui.js")
+    assert lib.status == 200 and "UI_API" in await lib.text()
+    module_url = hass.data[frontend.DATA_PANELS]["frieda-postfach"].config["_panel_custom"]["module_url"]
+    assert module_url.count("-") >= 1
 
 
 async def test_websocket_rule_lifecycle(hass: HomeAssistant, hass_ws_client) -> None:

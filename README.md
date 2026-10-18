@@ -36,7 +36,7 @@ no file writes unless you install Frieda Postfach.
 ## Requirements
 
 - Home Assistant 2026.10 or newer
-- **Frieda 2.0 or newer** (`friedafetch`), set up with at least one iCloud account. Frieda Postfach uses that
+- **Frieda 2.0.6 or newer** (`friedafetch`; older versions work, but the panel then only shows an update hint), set up with at least one iCloud account. Frieda Postfach uses that
   account's connection; it never asks for your Apple ID or password itself.
 
 ## Installation
@@ -100,16 +100,18 @@ rule is saved; regex conditions look at the first 300 characters of a header.
 
 ## Panel
 
-**Frieda Postfach** in the sidebar (admins only, German/English). One card holds the rules and everything to run
-them:
+**Frieda Postfach** in the sidebar (admins only, German/English). It uses Frieda's design library, so it looks like
+Frieda's own panel; the cards (rules, AI sorting, sent to AI, runs) are widgets you can arrange, resize and hide,
+and every table has search, filters and a **Columns** menu (stored per Home Assistant user). The rules card holds
+the rules and everything to run them:
 
 - **One status line** says how new mail is picked up: *instant via push* (with the timer as a safety net),
   *checking every N min* (push off), *push interrupted* (the timer keeps going) or *automation off*.
-- A compact rule list that expands per rule, **+** for a new rule (and for another condition in the editor), and
-  **Test** on each rule for a dry run with only that rule.
+- A rule table (position, switch, name, conditions, actions, hits) that expands per rule, **+** for a new rule, and a
+  ⋮ menu per rule for edit, dry run with only this rule, order, copy and delete.
 - **Run** opens a menu: dry run or real run over the whole mailbox, or new mail only; the per-message report appears
   below the rules.
-- The **Runs** history (consecutive automatic runs without hits are merged) with filters per column.
+- The **Runs** history (consecutive automatic runs without hits are merged) as a table with search and filters.
 
 With several accounts an account picker appears on top. Approvals and the change log stay in Frieda's own panel,
 whose overview also shows whether Frieda Postfach is running.

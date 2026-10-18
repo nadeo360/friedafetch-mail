@@ -286,7 +286,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     ir.async_delete_issue(hass, CORE_DOMAIN, f"rules_moved_{core.entry_id}")
     try:
-        await async_setup_frontend(hass, str((await async_get_integration(hass, DOMAIN)).version or "0"))
+        # the panel uses Frieda's design library: its version is part of the cache key as well
+        own = (await async_get_integration(hass, DOMAIN)).version or "0"
+        core_version = (await async_get_integration(hass, CORE_DOMAIN)).version or "0"
+        await async_setup_frontend(hass, f"{own}-{core_version}")
     except Exception as err:  # noqa: BLE001 - the panel is optional
         _LOGGER.warning("Could not register the Frieda Postfach panel: %s", err)
     _LOGGER.info("Frieda Postfach attached to account %s", link.label)

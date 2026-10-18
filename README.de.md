@@ -36,7 +36,7 @@ Aufgaben und ohne Dateizugriffe – solange Frieda Postfach nicht installiert is
 ## Voraussetzungen
 
 - Home Assistant 2026.10 oder neuer
-- **Frieda 2.0 oder neuer** (`friedafetch`) mit mindestens einem eingerichteten iCloud-Konto. Frieda Postfach nutzt
+- **Frieda 2.0.6 oder neuer** (`friedafetch`; ältere Versionen funktionieren, das Panel zeigt dann aber nur einen Update-Hinweis) mit mindestens einem eingerichteten iCloud-Konto. Frieda Postfach nutzt
   dessen Verbindung und fragt selbst nie nach Apple-ID oder Passwort.
 
 ## Installation
@@ -102,17 +102,20 @@ wie `(a+)+` oder Ketten wie `a+a+a+` –, werden beim Speichern abgelehnt; Regex
 
 ## Panel
 
-**Frieda Postfach** in der Seitenleiste (nur Admins, Deutsch/Englisch). Eine Karte enthält die Regeln und alles, um
-sie auszuführen:
+**Frieda Postfach** in der Seitenleiste (nur Admins, Deutsch/Englisch). Es nutzt die Design-Bibliothek von Frieda und
+sieht daher aus wie Friedas eigenes Panel; die Karten (Regeln, KI-Sortierung, An KI übermittelt, Ausführungen) sind
+Widgets, die du anordnen, in der Breite ändern und ausblenden kannst, und jede Tabelle hat Suche, Filter und ein
+Menü **Spalten** (gespeichert pro Home-Assistant-Benutzer). Die Regelkarte enthält die Regeln und alles, um sie
+auszuführen:
 
 - **Eine Statuszeile** sagt, wie neue Mails verarbeitet werden: *sofort per Push* (der Takt läuft als Sicherheitsnetz
   mit), *Prüfung alle N Min.* (Push aus), *Push gestört* (der Takt läuft weiter) oder *Automatik aus*.
-- Eine kompakte Regelliste zum Aufklappen, **+** für eine neue Regel (und im Editor für eine weitere Bedingung) und
-  **Testen** an jeder Regel für einen Probelauf nur mit dieser Regel.
+- Eine Regeltabelle (Position, Schalter, Name, Bedingungen, Aktionen, Treffer) zum Aufklappen, **+** für eine neue
+  Regel und ein ⋮-Menü pro Regel für Bearbeiten, Probelauf nur mit dieser Regel, Reihenfolge, Kopieren und Löschen.
 - **Ausführen** öffnet ein Menü: Probelauf oder echter Lauf über das ganze Postfach oder nur neue Mails; der Bericht
   pro Mail erscheint unter den Regeln.
-- Der Verlauf **Ausführungen** (aufeinanderfolgende automatische Läufe ohne Treffer werden zusammengefasst) mit Filtern
-  pro Spalte.
+- Der Verlauf **Ausführungen** (aufeinanderfolgende automatische Läufe ohne Treffer werden zusammengefasst) als
+  Tabelle mit Suche und Filtern.
 
 Bei mehreren Konten erscheint oben eine Kontoauswahl. Freigaben und Änderungsprotokoll bleiben im Panel von Frieda,
 dessen Überblick auch zeigt, ob Frieda Postfach läuft.
