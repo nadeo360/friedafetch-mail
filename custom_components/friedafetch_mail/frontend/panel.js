@@ -43,6 +43,8 @@ const sortTh = (action, sort, key, label, cls = "") => {
 const nextSort = (cur, key, firstDir) => (cur.key === key ? { key, dir: -cur.dir } : { key, dir: firstDir });
 
 const SEARCH_KEYS = { rules: "searchRules", aiu: "searchAiu", runs: "searchRuns", rates: "searchRates" };
+const PAGE_DEFAULT = { rules: 25, aiu: 10, runs: 10, rates: 10 }; // rows per page until the user picks another size
+const FILTER_TABLE = { "rule-filter": "rules", "aiu-filter": "aiu", "rate-filter": "rates", "run-filter": "runs" };
 
 // Widgets and the optional columns of their tables (true = shown by default).
 const WIDGETS = [{ id: "rules" }, { id: "ai" }, { id: "aiu" }, { id: "history" }];
@@ -81,7 +83,7 @@ class FriedaPostfachPanel extends HTMLElement {
       notice: null,
       history: [],
       historyTotal: 0,
-      historyLimit: 50,
+      historyLimit: 200, // everything that is kept; the table pages it
       ai: null,
       aiEdit: null,
       aiuFilter: "",
@@ -507,7 +509,7 @@ class FriedaPostfachPanel extends HTMLElement {
              </div>${W.columnStyle(this._layout, "aiu", aiuCols)}
              <div class="scroll aiu-scroll"><table class="dtable atable" data-table="aiu"><thead><tr>
                <th class="c-st"><span class="vh">${esc(t.colStatus)}</span></th>${th("time", t.colTime, "c-time num")}${th("subject", t.colSubjectOnly)}<th class="c-sender">${esc(t.colSender)}</th><th class="c-kind">${esc(t.aiuTipKind)}</th><th class="c-fields">${esc(t.colFields)}</th>${th("chars", t.colChars, "c-chars num")}${showEntity ? `<th class="c-ent">${esc(t.colEntity)}</th>` : ""}
-             </tr></thead><tbody>${rows || `<tr><td colspan="${cols}" class="muted">${esc(t.aiuEmpty)}</td></tr>`}</tbody></table></div>
+             </tr></thead><tbody>${rows || `<tr><td colspan="${cols}" class="muted">${esc(t.aiuEmpty)}</td></tr>`}</tbody></table></div>${W.pagerSlot ? W.pagerSlot("aiu") : ""}
              <p class="muted nomatch" hidden>${esc(t.noMatches)}</p>`
           : `<p class="muted" style="margin-top:12px">${esc(t.aiuEmpty)}</p>`
       }
@@ -578,7 +580,7 @@ class FriedaPostfachPanel extends HTMLElement {
       </div>${W.columnStyle(this._layout, "rates", cols)}
       <div class="scroll aiu-scroll"><table class="dtable atable ratetable" data-table="rates"><thead><tr>
         ${th("imp", "!", "c-imp")}${th("time", t.colTime, "c-time num")}<th class="c-subj">${esc(t.colSubjectOnly)}</th><th class="c-from">${esc(t.colSender)}</th><th class="c-cat">${esc(t.colCategory)}</th><th class="c-applied">${esc(t.colApplied)}</th>
-      </tr></thead><tbody>${rows || `<tr><td colspan="7" class="muted">${esc(t.noMatches)}</td></tr>`}</tbody></table></div>
+      </tr></thead><tbody>${rows || `<tr><td colspan="7" class="muted">${esc(t.noMatches)}</td></tr>`}</tbody></table></div>${W.pagerSlot ? W.pagerSlot("rates") : ""}
       <p class="muted nomatch" hidden>${esc(t.noMatches)}</p>`;
   }
 
@@ -786,16 +788,23 @@ class FriedaPostfachPanel extends HTMLElement {
     if (!table) return;
     const q = String(this._s[SEARCH_KEYS[key]] || "").toLowerCase().trim();
     let shown = 0;
+    const paged = !!W.applyPaging;
     table.querySelectorAll("tbody tr[data-search]").forEach((tr) => {
       // everything shown in the row is searchable, plus the extra terms in data-search (e.g. all conditions)
       const hay = `${tr.dataset.search} ${tr.textContent.replace(/\s+/g, " ")}`.toLowerCase();
       const ok = !q || hay.includes(q);
-      tr.hidden = !ok;
-      const next = tr.nextElementSibling;
-      if (next && !next.dataset.search && next.matches(".rdetail, .adetail")) next.hidden = !ok;
+      tr.dataset.nomatch = ok ? "0" : "1";
+      if (!paged) {
+        tr.hidden = !ok;
+        const next = tr.nextElementSibling;
+        if (next && !next.dataset.search && next.matches(".rdetail, .adetail")) next.hidden = !ok;
+      }
       if (ok) shown++;
     });
-    const hint = table.closest(".scroll")?.nextElementSibling;
+    // the matching rows, a page at a time (an older Frieda without paging shows them all)
+    if (paged) W.applyPaging(this.shadowRoot, this._layout, key, (this._s.pages ||= {}), this.t, PAGE_DEFAULT[key]);
+    let hint = table.closest(".scroll")?.nextElementSibling;
+    while (hint && !hint.classList.contains("nomatch") && hint.classList.contains("pager")) hint = hint.nextElementSibling;
     if (hint?.classList.contains("nomatch")) hint.hidden = shown > 0 || !q;
     return shown;
   }
@@ -1152,7 +1161,7 @@ class FriedaPostfachPanel extends HTMLElement {
             </div>${W.columnStyle(this._layout, "runs", cols)}
             <div class="scroll menus"><table class="dtable htable" data-table="runs"><thead><tr>
               ${sortTh("runs-sort", sort, "time", t.colTime, "c-time")}${sortTh("runs-sort", sort, "trig", t.colTrigger, "c-trig")}<th class="c-scope">${esc(t.colScope)}</th>${sortTh("runs-sort", sort, "checked", t.colMails, "c-checked num")}${sortTh("runs-sort", sort, "matched", t.colMatched, "c-matched num")}<th class="c-rules">${esc(t.colRules)}</th>${sortTh("runs-sort", sort, "ai", t.colAi, "c-ai")}${sortTh("runs-sort", sort, "res", t.colResult, "c-res")}
-            </tr></thead><tbody>${curLine ? `<tr class="pending"><td colspan="8">${curLine}</td></tr>` : ""}${rows || `<tr><td colspan="8" class="muted">${esc(t.noMatches)}</td></tr>`}</tbody></table></div>
+            </tr></thead><tbody>${curLine ? `<tr class="pending"><td colspan="8">${curLine}</td></tr>` : ""}${rows || `<tr><td colspan="8" class="muted">${esc(t.noMatches)}</td></tr>`}</tbody></table></div>${W.pagerSlot ? W.pagerSlot("runs") : ""}
             <p class="muted nomatch" hidden>${esc(t.noMatches)}</p>`
           : curLine || `<p class="muted">${esc(t.noHistory)}</p>`
       }
@@ -1333,7 +1342,7 @@ class FriedaPostfachPanel extends HTMLElement {
       ${sorted ? `<p class="sortnote">${ico("information-outline")}<span>${esc(t.sortedView)}</span><button class="link" data-action="rules-sort" data-k="pos">${esc(t.showOrder)}</button></p>` : ""}
       <div class="scroll menus"><table class="dtable rtable" data-table="rules"><thead><tr>
         ${sortTh("rules-sort", sort, "pos", "#", "c-pos num")}<th class="c-on"><span class="vh">${esc(t.enabled)}</span></th>${sortTh("rules-sort", sort, "name", t.name)}<th class="c-cond">${esc(t.conditions)}</th><th class="c-act">${esc(t.actions)}</th>${sortTh("rules-sort", sort, "hits", t.hits, "c-hits num")}<th class="c-menu"><span class="vh">${esc(t.moreActions)}</span></th>
-      </tr></thead><tbody>${rows || `<tr><td colspan="7" class="muted">${esc(t.noMatches)}</td></tr>`}</tbody></table></div>
+      </tr></thead><tbody>${rows || `<tr><td colspan="7" class="muted">${esc(t.noMatches)}</td></tr>`}</tbody></table></div>${W.pagerSlot ? W.pagerSlot("rules") : ""}
       <p class="muted nomatch" hidden>${esc(t.noMatches)}</p>`;
   }
 
@@ -1515,6 +1524,19 @@ class FriedaPostfachPanel extends HTMLElement {
 
   _bind() {
     const root = this.shadowRoot;
+    if (!this._pageReset) {
+      // a filter shows other rows: start on the first page (capture phase, before the filter redraws)
+      this._pageReset = true;
+      root.addEventListener(
+        "click",
+        (ev) => {
+          const el = ev.target.closest?.("[data-action]");
+          const table = el && FILTER_TABLE[el.dataset.action];
+          if (table) (this._s.pages ||= {})[table] = 0;
+        },
+        true
+      );
+    }
     root.querySelector(".modal")?.addEventListener("keydown", (ev) => {
       if (ev.key === "Escape") this._confirmDone(false);
     });
@@ -1719,6 +1741,7 @@ class FriedaPostfachPanel extends HTMLElement {
     root.querySelectorAll("[data-search-table]").forEach((el) => {
       el.addEventListener("input", () => {
         this._s[SEARCH_KEYS[el.dataset.searchTable]] = el.value;
+        (this._s.pages ||= {})[el.dataset.searchTable] = 0;
         const shown = this._applySearch(el.dataset.searchTable);
         if (shown !== undefined) W.announce(this.shadowRoot, fmt(this.t.searchHits, shown), 700);
       });

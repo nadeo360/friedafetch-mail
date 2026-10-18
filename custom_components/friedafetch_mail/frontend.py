@@ -307,13 +307,13 @@ def _sorter(hass: HomeAssistant, entry_id: str | None) -> Any:
     return sorter
 
 
-def _ai_payload(sorter: Any, limit: int = 50) -> dict[str, Any]:
+def _ai_payload(sorter: Any, limit: int = 200) -> dict[str, Any]:  # all kept ratings; the panel pages them
     return {
         "status": sorter.status(),
         "categories": sorter.categories,
         "ratings": list(reversed(sorter.ratings[-limit:])),
         "examples": len(sorter.examples),
-        "usage": sorter.usage_summary(),
+        "usage": sorter.usage_summary(limit=300),  # the whole log; the panel pages it
     }
 
 
