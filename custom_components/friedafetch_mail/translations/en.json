@@ -66,6 +66,29 @@
     "sensor": {
       "next_birthday": {
         "name": "Next birthday"
+      },
+      "unread_inbox": {
+        "name": "Unread in inbox"
+      },
+      "rule_matches_today": {
+        "name": "Rule matches today"
+      },
+      "push": {
+        "name": "Push",
+        "state": {
+          "off": "Off",
+          "stopped": "Stopped",
+          "connecting": "Connecting",
+          "listening": "Listening",
+          "error": "Error",
+          "unsupported": "Not supported"
+        }
+      },
+      "important_today": {
+        "name": "Important mails today"
+      },
+      "ai_ratings_hour": {
+        "name": "AI ratings this hour"
       }
     }
   },

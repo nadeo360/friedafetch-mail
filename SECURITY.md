@@ -43,6 +43,10 @@ Frieda Postfach extends a Frieda account and inherits its security model
   marking read and flagging – never deleting or sending. A manipulated mail can at worst be sorted into the wrong
   category. The default mode only rates; an hourly limit caps AI calls.
 - **Admin only:** the panel and its websocket commands require an administrator.
+- **Events stay local but are recorded:** the events `friedafetch_mail_rule_matched`, `friedafetch_mail_rated` and
+  `friedafetch_mail_important` carry subject and sender for automations. Like all events they are stored by Home
+  Assistant's recorder; exclude them there (`recorder: exclude: event_types:`) if that is unwanted. Rule events are
+  capped at 25 per run.
 
 ## Checks in the repository
 
@@ -105,6 +109,10 @@ Frieda Postfach erweitert ein Frieda-Konto und übernimmt dessen Sicherheitsmode
   verborgenen/geschützten Postfächern), Gelesen und Markieren – nie Löschen oder Senden. Eine manipulierte Mail kann
   schlimmstenfalls falsch einsortiert werden. Standard ist reines Bewerten; ein Stundenlimit begrenzt die KI-Aufrufe.
 - **Nur Admins:** Panel und WebSocket-Befehle erfordern Administratorrechte.
+- **Ereignisse bleiben lokal, werden aber aufgezeichnet:** Die Ereignisse `friedafetch_mail_rule_matched`,
+  `friedafetch_mail_rated` und `friedafetch_mail_important` enthalten Betreff und Absender für Automationen. Wie alle
+  Ereignisse speichert sie der Recorder von Home Assistant; wer das nicht möchte, schließt sie dort aus
+  (`recorder: exclude: event_types:`). Regel-Ereignisse sind auf 25 pro Lauf begrenzt.
 
 ## Prüfungen im Repository
 

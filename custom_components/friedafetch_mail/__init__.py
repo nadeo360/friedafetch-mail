@@ -168,8 +168,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
         apple_id=core.data[CONF_APPLE_ID],
         rules=rules,
         extension=extension,
+        mail=auto_mail,
     )
     entry.runtime_data = link
+    rules.account = link.label
     clients.extensions[EXTENSION_NAME] = extension
 
     async def _notify_important(rating: dict[str, Any]) -> None:
@@ -194,6 +196,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
         mail=auto_mail,
     )
     await sorter.async_load()
+    sorter.account = link.label
     link.ai = sorter
 
     async def _ai_after_rules(trigger: str) -> None:

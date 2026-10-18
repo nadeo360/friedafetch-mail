@@ -18,6 +18,7 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.storage import Store
 
 from custom_components.friedafetch.guard import QUOTA_MAIL_MODIFY
@@ -40,8 +41,12 @@ from .const import (
     DEFAULT_AI_LIMIT,
     DEFAULT_AI_MODE,
     DEFAULT_AI_NOTIFY,
+    DEFAULT_IMPORTANT_FROM,
     DOMAIN,
+    EVENT_IMPORTANT,
+    EVENT_RATED,
     MAX_AI_LIMIT,
+    SIGNAL_UPDATED,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -202,6 +207,8 @@ class AiSorter:
         mail: Any | None = None,
     ) -> None:
         self._hass = hass
+        self._entry_id = core_entry_id
+        self.account = ""  # label of the account, part of the events
         self._clients = clients
         self._mail = mail or clients.mail  # Frieda Postfach passes its own background connection
         self.settings = ai_settings(opts)
@@ -520,6 +527,7 @@ class AiSorter:
         if report["rated"] or report["errors"]:
             self.last_run = _now_iso()
         await self._save()
+        async_dispatcher_send(self._hass, SIGNAL_UPDATED.format(self._entry_id))
         audit = getattr(self._clients, "audit", None)
         if audit is not None and (report["applied"] or report["errors"]):
             try:
@@ -597,6 +605,7 @@ class AiSorter:
             if self.settings["mode"] == "act":
                 if await self._apply(uid, rating, report):
                     report["applied"] += 1
+            self._fire(rating)
 
     # ------------------------------------------------------- AI interface
     def _mail_text(self, summary: dict[str, Any], body: str | None) -> str:
@@ -694,6 +703,44 @@ class AiSorter:
             "reason": sanitize_text(str(data.get("reason") or ""), 200),
             "suspicious": bool(detect_injection(summary.get("subject"), body)),
         }
+
+    @property
+    def important_from(self) -> int:
+        """Importance from which a mail counts as important (notification threshold, else 4)."""
+        return self.settings["notify"] or DEFAULT_IMPORTANT_FROM
+
+    def _fire(self, rating: dict[str, Any]) -> None:
+        """Events for automations: every rating, and the important ones separately."""
+        data = {
+            "account": self.account,
+            "entry_id": self._entry_id,
+            "mailbox": rating["mailbox"],
+            "uid": rating["uid"],
+            "subject": rating.get("subject") or "",
+            "from": rating.get("from") or "",
+            "from_domain": rating.get("from_domain") or "",
+            "category": rating.get("category"),
+            "importance": rating.get("importance"),
+            "reason": rating.get("reason") or "",
+            "mode": rating.get("mode"),
+            "applied": list(rating.get("applied") or []),
+        }
+        self._hass.bus.async_fire(EVENT_RATED, data)
+        if int(rating.get("importance") or 0) >= self.important_from:
+            self._hass.bus.async_fire(EVENT_IMPORTANT, data)
+
+    def important_today(self) -> list[dict[str, Any]]:
+        """Ratings of today at or above the importance threshold, newest first (sensor)."""
+        today = datetime.now().astimezone().date()
+        out = []
+        for r in reversed(self.ratings):
+            try:
+                day = datetime.fromisoformat(str(r.get("time"))).astimezone().date()
+            except ValueError:
+                continue
+            if day == today and int(r.get("importance") or 0) >= self.important_from:
+                out.append(r)
+        return out
 
     def _record(self, summary: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
         sender = (summary.get("from") or [{}])[0]

@@ -156,25 +156,27 @@ class FriedaPostfachPanel extends HTMLElement {
   }
 
   async _reload() {
-    const [list, boxes] = await Promise.all([
-      this._ws({ type: "friedafetch_mail/rules/list", entry_id: this._s.entryId }),
-      this._ws({ type: "friedafetch_mail/mailboxes", entry_id: this._s.entryId }).catch(() => ({ mailboxes: [] })),
+    const entryId = this._s.entryId;
+    // the mailbox names may need iCloud: fetch them alongside, never block the page on them
+    this._ws({ type: "friedafetch_mail/mailboxes", entry_id: entryId })
+      .then((res) => {
+        if (this._s.entryId !== entryId) return;
+        this._s.mailboxes = res.mailboxes;
+        // an open editor keeps what was typed; it shows the names the next time it opens
+        if (this._s.loaded && !this._s.editing && !this._s.aiEdit) this._render();
+      })
+      .catch(() => {});
+    const [list] = await Promise.all([
+      this._ws({ type: "friedafetch_mail/rules/list", entry_id: entryId }),
+      this._loadAccounts().catch(() => {}),
+      this._loadHistory().catch(() => {}),
+      this._ws({ type: "friedafetch_mail/ai", entry_id: entryId })
+        .then((ai) => (this._s.ai = ai))
+        .catch(() => (this._s.ai = null)), // older backend or AI sorting unavailable
     ]);
     this._s.rules = list.rules;
     this._s.lastRun = list.last_run;
     this._s.automation = list.automation || null;
-    this._s.mailboxes = boxes.mailboxes;
-    try {
-      await this._loadAccounts();
-      await this._loadHistory();
-    } catch (err) {
-      /* account stats and history are optional */
-    }
-    try {
-      this._s.ai = await this._ws({ type: "friedafetch_mail/ai", entry_id: this._s.entryId });
-    } catch (err) {
-      this._s.ai = null; /* older backend or AI sorting unavailable */
-    }
   }
 
   // --------------------------------------------------------------- AI sorting

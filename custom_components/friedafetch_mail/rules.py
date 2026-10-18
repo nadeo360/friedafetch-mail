@@ -19,13 +19,14 @@ from datetime import datetime
 from typing import Any
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.storage import Store
 
 from custom_components.friedafetch.guard import QUOTA_MAIL_MODIFY
 from custom_components.friedafetch.llm_api import ToolNotFoundError
 from custom_components.friedafetch.mail import ICloudMail, MailboxNotFound, MailError
 
-from .const import CORE_DOMAIN
+from .const import CORE_DOMAIN, EVENT_RULE_MATCHED, MAX_EVENTS_PER_RUN, SIGNAL_UPDATED
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -320,6 +321,7 @@ class RuleEngine:
         attachment_saver: Any | None = None,
     ) -> None:
         self._hass = hass
+        self._entry_id = entry_id
         self._mail = mail
         self._guard = guard
         self._audit = audit
@@ -342,6 +344,7 @@ class RuleEngine:
         # run history (newest last); consecutive empty automatic runs are merged into one entry
         self._history: list[dict[str, Any]] = []
         self._history_seq = 0
+        self.account: str = ""  # label of the account, part of the events
 
     # ------------------------------------------------------------ storage
     async def async_load(self) -> None:
@@ -524,6 +527,7 @@ class RuleEngine:
                 }
                 self._add_history(report, mailboxes)
                 await self._save()
+                self._fire_events(report)
             if self._audit is not None and not dry_run and (report["matched"] or report["errors"]):
                 try:
                     await self._audit.async_record(
@@ -543,6 +547,44 @@ class RuleEngine:
                 except Exception as err:  # noqa: BLE001
                     _LOGGER.debug("Audit logging of rule run failed: %s", err)
             return report
+
+    def _fire_events(self, report: dict[str, Any]) -> None:
+        """Tell automations what an executed run did, and let the sensors refresh."""
+        for act in report["actions"][:MAX_EVENTS_PER_RUN]:
+            sender = act.get("from") or []
+            self._hass.bus.async_fire(
+                EVENT_RULE_MATCHED,
+                {
+                    "account": self.account,
+                    "entry_id": self._entry_id,
+                    "trigger": report["trigger"],
+                    "rule": act["rule"],
+                    "rule_id": act["rule_id"],
+                    "mailbox": act["mailbox"],
+                    "uid": act["uid"],
+                    "subject": act.get("subject") or "",
+                    "from": sender[0] if sender else "",
+                    "move_to": act.get("move_to"),
+                    "delete": bool(act.get("delete")),
+                    "mark_seen": act.get("mark_seen"),
+                    "flag": act.get("flag"),
+                },
+            )
+        async_dispatcher_send(self._hass, SIGNAL_UPDATED.format(self._entry_id))
+
+    def history_today(self) -> dict[str, Any]:
+        """Runs and matches since local midnight (sensor)."""
+        today = datetime.now().astimezone().date()
+        runs = matched = 0
+        for item in self._history:
+            try:
+                started = datetime.fromisoformat(str(item.get("finished") or item.get("started")))
+            except ValueError:
+                continue
+            if started.astimezone().date() == today:
+                runs += int(item.get("runs") or 1)
+                matched += int(item.get("matched") or 0)
+        return {"runs": runs, "matched": matched}
 
     def _add_history(self, report: dict[str, Any], mailboxes: list[str]) -> None:
         """Append a finished run to the history; idle automatic runs are merged."""

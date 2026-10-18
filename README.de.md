@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/nadeo360/friedafetch-mail/main/assets/logo@2x.png" alt="Frieda" width="720">
+  <img src="https://raw.githubusercontent.com/nadeo360/friedafetch-mail/main/assets/logo@2x.png" alt="Frieda Postfach" width="720">
 </p>
 
 <p align="center">
@@ -26,7 +26,7 @@ Frieda Postfach ist der Teil, der **selbstständig handelt**:
   Geburtstagen aufs Handy, auf Wunsch von einer KI-Aufgabe in Home Assistant formuliert.
 - **KI-Sortierung (optional, standardmäßig aus):** Eine KI deiner Wahl bewertet neue Mails – Kategorie, Wichtigkeit
   1–5 und eine kurze Begründung – und sortiert sie, wenn du es erlaubst, in Ordner. Siehe [KI-Sortierung](#ki-sortierung).
-- **Geburtstags-Sensor** für den nächsten Geburtstag unter deinen Kontakten.
+- **Sensoren und Ereignisse** für Automationen: ungelesene Mails, Regeltreffer, Push-Status, wichtige Mails und KI-Nutzung; Ereignisse für jeden Regeltreffer und jede KI-Bewertung. Dazu ein Geburtstags-Sensor.
 - **KI-Tools** für die Regeln (`icloud_list_rules`, `icloud_create_rule`, …) und `icloud_daily_overview`; sie
   erscheinen bei den Frieda-Tools des Kontos, also in jedem MCP-Client und Sprachassistenten, der Frieda nutzt.
 
@@ -161,6 +161,37 @@ Protokoll bleibt lokal.
 | Bei wichtigen Mails benachrichtigen | aus, ab Wichtigkeit 3, 4 oder nur 5 (nur im Aktionsmodus) |
 | Killswitch: Absender/Domains | Mails von ihnen nie an eine KI senden, eine pro Zeile |
 | Killswitch: Begriffe | Mails mit einem dieser Begriffe nie an eine KI senden, einer pro Zeile |
+
+## Sensoren und Ereignisse
+
+Neben dem Geburtstags-Sensor bekommt jedes Konto diese Sensoren (wenn Mail in Frieda aktiviert ist):
+
+| Sensor | Wert |
+|---|---|
+| Ungelesen im Posteingang | ungelesene Mails im Posteingang (alle 5 Minuten und nach jedem Regellauf geprüft) |
+| Regeltreffer heute | Mails, auf die Regeln heute angewendet wurden; Attribute: Läufe heute, letzter und nächster Lauf |
+| Push | `listening`, `connecting`, `error`, `unsupported`, `stopped` oder `off` (Diagnose) |
+| Wichtige Mails heute | nur mit KI-Sortierung: Mails ab der Benachrichtigungsschwelle (sonst ab 4), die letzten fünf als Attribute |
+| KI-Bewertungen diese Stunde | nur mit KI-Sortierung: Bewertungen in der laufenden Stunde, Limit und Modus als Attribute (Diagnose) |
+
+Automationen können auf diese Ereignisse reagieren (die Daten bleiben auf dem Ereignisbus von Home Assistant):
+
+| Ereignis | Wann | Daten |
+|---|---|---|
+| `friedafetch_mail_rule_matched` | eine Regel wurde auf eine Mail angewendet (nur echte Läufe, höchstens 25 pro Lauf) | `account`, `rule`, `rule_id`, `trigger`, `mailbox`, `uid`, `subject`, `from`, `move_to`, `delete`, `mark_seen`, `flag` |
+| `friedafetch_mail_rated` | die KI hat eine Mail bewertet | `account`, `uid`, `subject`, `from`, `from_domain`, `category`, `importance`, `reason`, `mode`, `applied` |
+| `friedafetch_mail_important` | wie `rated`, ab der Wichtigkeits-Schwelle | wie bei `rated` |
+
+```yaml
+triggers:
+  - trigger: event
+    event_type: friedafetch_mail_important
+actions:
+  - action: notify.mobile_app_iphone
+    data:
+      title: "{{ trigger.event.data.from }}"
+      message: "{{ trigger.event.data.subject }} ({{ trigger.event.data.reason }})"
+```
 
 ## Tagesüberblick
 

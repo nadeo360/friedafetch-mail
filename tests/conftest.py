@@ -38,6 +38,8 @@ def no_network() -> Generator[None]:
             return_value="https://p01-caldav.icloud.com/1/calendars/",
         ),
         patch("custom_components.friedafetch.carddav_client.ICloudCardDav.async_search", AsyncMock(return_value=[])),
+        # the unread sensor asks the server on setup
+        patch("custom_components.friedafetch.mail.ICloudMail.async_search_uids", AsyncMock(return_value=[])),
     ):
         yield
 

@@ -66,6 +66,29 @@
     "sensor": {
       "next_birthday": {
         "name": "Nächster Geburtstag"
+      },
+      "unread_inbox": {
+        "name": "Ungelesen im Posteingang"
+      },
+      "rule_matches_today": {
+        "name": "Regeltreffer heute"
+      },
+      "push": {
+        "name": "Push",
+        "state": {
+          "off": "Aus",
+          "stopped": "Gestoppt",
+          "connecting": "Verbindet",
+          "listening": "Aktiv",
+          "error": "Gestört",
+          "unsupported": "Nicht unterstützt"
+        }
+      },
+      "important_today": {
+        "name": "Wichtige Mails heute"
+      },
+      "ai_ratings_hour": {
+        "name": "KI-Bewertungen diese Stunde"
       }
     }
   },

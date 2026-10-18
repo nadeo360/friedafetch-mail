@@ -149,7 +149,8 @@ async def ws_accounts(hass: HomeAssistant, connection: websocket_api.ActiveConne
 async def ws_mailboxes(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
     """Mailbox names of an account."""
     link = _entry(hass, msg.get("entry_id")).runtime_data
-    boxes = await link.clients.mail.async_mailboxes()
+    # the background connection of the automation is usually open already; the list is shared anyway
+    boxes = await (link.mail or link.clients.mail).async_mailboxes()
     connection.send_result(msg["id"], {"mailboxes": [b["name"] for b in boxes]})
 
 

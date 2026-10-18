@@ -54,3 +54,11 @@ AI_MODES = ("observe", "act")
 AI_BODY_CHARS = 1000
 
 SERVICE_SEND_DIGEST = "send_digest"
+
+# events for automations (fired on the HA event bus; subject and sender stay local to Home Assistant)
+EVENT_RULE_MATCHED = "friedafetch_mail_rule_matched"  # one per message and rule of an executed run
+EVENT_RATED = "friedafetch_mail_rated"  # every AI rating
+EVENT_IMPORTANT = "friedafetch_mail_important"  # AI rating at or above the importance threshold
+MAX_EVENTS_PER_RUN = 25  # a large run must not flood the event bus
+DEFAULT_IMPORTANT_FROM = 4  # threshold for "important" when no notification threshold is set
+SIGNAL_UPDATED = "friedafetch_mail_updated_{}"  # dispatcher signal per Frieda account: rules/AI state changed

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/nadeo360/friedafetch-mail/main/assets/logo@2x.png" alt="Frieda" width="720">
+  <img src="https://raw.githubusercontent.com/nadeo360/friedafetch-mail/main/assets/logo@2x.png" alt="Frieda Postfach" width="720">
 </p>
 
 <p align="center">
@@ -26,7 +26,7 @@ Frieda Postfach is the part that **acts on its own**:
   phone and optionally phrased by a Home Assistant AI task.
 - **AI sorting (optional, off by default):** an AI of your choice rates new mail – category, importance 1–5 and a
   short reason – and, if you allow it, sorts it into folders. See [AI sorting](#ai-sorting).
-- **Birthday sensor** for the next birthday among your contacts.
+- **Sensors and events** for automations: unread mail, rule matches, push state, important mails and AI usage; events for every rule match and AI rating. Plus a birthday sensor.
 - **AI tools** for the rules (`icloud_list_rules`, `icloud_create_rule`, … ) and `icloud_daily_overview`; they are
   added to Frieda's tools for the account, so every MCP client and conversation agent that uses Frieda gets them.
 
@@ -156,6 +156,37 @@ the fields sent – plus every mail the kill switch held back and why. The log s
 | Notify about important mail | off, from importance 3, 4 or only 5 (act mode) |
 | Kill switch: senders/domains | never send mail from them to an AI, one per line |
 | Kill switch: terms | never send mail containing one of these terms to an AI, one per line |
+
+## Sensors and events
+
+Besides the birthday sensor, every account gets these sensors (when mail is enabled in Frieda):
+
+| Sensor | Value |
+|---|---|
+| Unread in inbox | unread messages in the inbox (checked every 5 minutes and after each rule run) |
+| Rule matches today | messages the rules acted on today; attributes: runs today, last and next run |
+| Push | `listening`, `connecting`, `error`, `unsupported`, `stopped` or `off` (diagnostic) |
+| Important mails today | only with AI sorting: mails rated at or above the notification threshold (else 4), the latest five as attributes |
+| AI ratings this hour | only with AI sorting: ratings in the current hour, limit and mode as attributes (diagnostic) |
+
+Automations can react to these events (data stays on the Home Assistant event bus):
+
+| Event | When | Data |
+|---|---|---|
+| `friedafetch_mail_rule_matched` | a rule acted on a message (real runs only, at most 25 per run) | `account`, `rule`, `rule_id`, `trigger`, `mailbox`, `uid`, `subject`, `from`, `move_to`, `delete`, `mark_seen`, `flag` |
+| `friedafetch_mail_rated` | the AI rated a mail | `account`, `uid`, `subject`, `from`, `from_domain`, `category`, `importance`, `reason`, `mode`, `applied` |
+| `friedafetch_mail_important` | like `rated`, from the importance threshold on | same as `rated` |
+
+```yaml
+triggers:
+  - trigger: event
+    event_type: friedafetch_mail_important
+actions:
+  - action: notify.mobile_app_iphone
+    data:
+      title: "{{ trigger.event.data.from }}"
+      message: "{{ trigger.event.data.subject }} ({{ trigger.event.data.reason }})"
+```
 
 ## Daily overview
 
