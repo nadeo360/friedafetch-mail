@@ -259,7 +259,7 @@ export const STYLE = `
   ol.tl .t-you .dot { background: color-mix(in srgb, var(--primary-color) 14%, transparent); color: var(--primary-color); }
   ol.tl li.now .what strong { font-weight: 600; }
   @media (max-width: 600px) {
-    .sheet { top: auto; left: 0; width: 100vw; max-height: 92vh; border-radius: 16px 16px 0 0; box-shadow: 0 -10px 40px rgba(0,0,0,.25); }
+    .sheet { top: auto; left: 0; width: 100vw; max-height: 92vh; touch-action: pan-y; will-change: transform; border-radius: 16px 16px 0 0; box-shadow: 0 -10px 40px rgba(0,0,0,.25); }
     .sheet .handle { width: 36px; height: 4px; border-radius: 2px; background: var(--divider-color, #e0e0e0); margin: 8px auto 0; }
     .sheet-top { padding-top: 6px; }
     .sheet-head h2 { font-size: 17px; }
@@ -275,6 +275,16 @@ export const STYLE = `
   .update-hint .grow { flex: 1 1 220px; }
   @container (max-width: 720px) {
     table.htable tr.pending, table.htable tr.pending > td { display: block; border-radius: 10px; }
+  }
+
+  /* the long tables (Recently rated, Sent to AI) keep their own scroll area in every layout: if it were switched
+     off (as for the other tables on narrow screens), the rows would spill out of their card */
+  .scroll.aiu-scroll, .widget .scroll.aiu-scroll { overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
+  @media (max-width: 760px) {
+    .scroll.aiu-scroll { max-height: 70vh; }
+  }
+  @container (max-width: 720px) {
+    .scroll.aiu-scroll { overflow-x: hidden; overflow-y: auto; }
   }
 
 `;

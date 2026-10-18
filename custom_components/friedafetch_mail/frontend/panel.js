@@ -869,6 +869,52 @@ class FriedaPostfachPanel extends HTMLElement {
     this._render();
   }
 
+  // Swipe down on the sheet: on its head at any time, in the list once it is scrolled to the top.
+  _bindSwipe(sheet) {
+    const body = sheet.querySelector(".sheet-body");
+    let y0 = null;
+    let t0 = 0;
+    let dy = 0;
+    sheet.addEventListener(
+      "touchstart",
+      (ev) => {
+        if (ev.touches.length !== 1) return;
+        if (body?.contains(ev.target) && body.scrollTop > 0) return; // the list scrolls first
+        y0 = ev.touches[0].clientY;
+        t0 = Date.now();
+        dy = 0;
+        sheet.style.transition = "none";
+      },
+      { passive: true }
+    );
+    sheet.addEventListener(
+      "touchmove",
+      (ev) => {
+        if (y0 === null) return;
+        dy = Math.max(0, ev.touches[0].clientY - y0);
+        if (dy > 0) {
+          ev.preventDefault(); // drag the sheet instead of the page
+          sheet.style.transform = `translateY(${dy}px)`;
+        }
+      },
+      { passive: false }
+    );
+    const end = () => {
+      if (y0 === null) return;
+      const fast = dy / Math.max(1, Date.now() - t0) > 0.6;
+      y0 = null;
+      sheet.style.transition = "transform .2s ease-out";
+      if (dy > 110 || (dy > 40 && fast)) {
+        sheet.style.transform = "translateY(100%)";
+        setTimeout(() => this._closeTimeline(), 180);
+      } else {
+        sheet.style.transform = "";
+      }
+    };
+    sheet.addEventListener("touchend", end);
+    sheet.addEventListener("touchcancel", end);
+  }
+
   _closeTimeline() {
     if (!this._s.sheet) return;
     this._s.sheet = null;
@@ -1658,6 +1704,9 @@ class FriedaPostfachPanel extends HTMLElement {
     root.querySelector(".sheet")?.addEventListener("keydown", (ev) => {
       if (ev.key === "Escape") this._closeTimeline();
     });
+    // phones: the timeline comes from the bottom and closes with a swipe down
+    const sheet = root.querySelector(".sheet");
+    if (sheet && window.matchMedia?.("(max-width: 600px)").matches) this._bindSwipe(sheet);
     // an item of a row menu closes the menu
     root.querySelectorAll("details.rowmenu .menu-list button").forEach((b) => b.addEventListener("click", () => b.closest("details")?.removeAttribute("open")));
     root.querySelectorAll("[data-search-table]").forEach((el) => {
