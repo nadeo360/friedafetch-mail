@@ -11,7 +11,7 @@ const VERSION_QUERY = new URL(import.meta.url).search;
 const [{ I18N }, { STYLE }] = await Promise.all([import(`./i18n.js${VERSION_QUERY}`), import(`./styles.js${VERSION_QUERY}`)]);
 
 // Frieda's design library, served by Frieda itself, so both panels look and behave the same.
-const UI_API = 3;
+const UI_API = 4;
 let W = null;
 try {
   W = await import(`/friedafetch_static/ui.js${VERSION_QUERY}`);
@@ -280,7 +280,9 @@ class FriedaPostfachPanel extends HTMLElement {
     const log = u.log || [];
     if (!st.active && !log.length) return "";
     const num = (n) => Number(n || 0).toLocaleString();
-    const fact = (icon, value, tip, cls = "") => `<span class="fact ${cls}" title="${esc(tip)}">${ico(icon)}${esc(value)}</span>`;
+    // the tip also names the figure for screen readers (unless the value already says it)
+    const fact = (icon, value, tip, cls = "") =>
+      `<span class="fact ${cls}" title="${esc(tip)}">${tip && !String(tip).includes(String(value)) ? `<span class="vh">${esc(tip)}: </span>` : ""}${ico(icon)}${esc(value)}</span>`;
     const charts = this._layout.opt("aiu", "charts", false);
     const COLORS = { sent: "var(--info-color, #039be5)", held: "var(--success-color, #43a047)", err: "var(--error-color, #db4437)" };
     const pie = (w) => {
@@ -353,7 +355,7 @@ class FriedaPostfachPanel extends HTMLElement {
         const title = e.subject || (digest ? t.aiuKindDigest : "–");
         const open = s.aiuOpen === i;
         const fields = (e.fields || [])
-          .map((x) => `<span class="fi ${x === "body" ? "hot" : ""}" title="${esc(t.aiuFields[x] || x)}">${ico(FIELD_ICONS[x] || "circle-small")}</span>`)
+          .map((x) => `<span class="fi ${x === "body" ? "hot" : ""}" role="img" aria-label="${esc(t.aiuFields[x] || x)}" title="${esc(t.aiuFields[x] || x)}">${ico(FIELD_ICONS[x] || "circle-small")}</span>`)
           .join("");
         const heldCount = Array.isArray(e.held_back) ? e.held_back.length : e.held_back ? 1 : 0;
         const fieldsCell = e.sent
@@ -367,7 +369,7 @@ class FriedaPostfachPanel extends HTMLElement {
           </div>`;
         const search = [e.subject, e.sender, e.entity, e.kind].join(" ").toLowerCase();
         return `<tr class="arow ${state} ${state === "err" ? "row-err" : ""} ${open ? "open" : ""}" data-search="${esc(search)}">
-            <td class="c-st"><span class="aiu-st" title="${esc(stText)}" aria-label="${esc(stText)}">${ico(stIcon)}</span></td>
+            <td class="c-st"><span class="aiu-st" role="img" title="${esc(stText)}" aria-label="${esc(stText)}">${ico(stIcon)}</span></td>
             <td class="c-time num dim"><time datetime="${esc(e.time || "")}" title="${esc(fmtDateTime(e.time))}">${esc(fmtShort(e.time))}</time></td>
             <td class="c-subj"><button class="rtext" data-action="aiu-open" data-i="${i}" aria-expanded="${open}" title="${esc(title)}">${esc(title)}</button></td>
             <td class="c-sender dim" title="${esc(e.sender || "")}">${esc(e.sender || "–")}</td>
@@ -387,13 +389,13 @@ class FriedaPostfachPanel extends HTMLElement {
       return `<th class="${cls}" aria-sort="${active ? (sort.dir < 0 ? "descending" : "ascending") : "none"}"><button class="sort ${active ? "on" : ""}" data-action="aiu-sort" data-k="${key}">${esc(label)}${ico(icon)}</button></th>`;
     };
     return `<div class="card" id="ai-usage">
-      <h2><span class="grow">${esc(t.aiu)}</span>${W.cardMenu(
+      <div class="chead"><h2>${esc(t.aiu)}</h2>${W.cardMenu(
         [
           { action: "aiu-charts", icon: charts ? "chart-donut-variant" : "chart-donut", label: charts ? t.chartsHide : t.chartsShow },
           log.length && { action: "aiu-clear", icon: "delete-sweep-outline", label: t.aiuClear, danger: true },
         ],
         t
-      )}</h2>
+      )}</div>
       <p class="muted" style="margin:0 0 10px">${esc(t.aiuHint)}</p>
       <div class="stats">${stat(t.aiuToday, u.today || {})}${stat(t.aiuWeek, u.week || {})}${stat(t.aiuMonth, u.month || {})}</div>${legend}
       ${chips.length ? `<div style="margin-top:10px">${chips.join("")}</div>` : ""}
@@ -439,7 +441,7 @@ class FriedaPostfachPanel extends HTMLElement {
           .map((a) => {
             const moved = a.startsWith("moved:");
             const label = moved ? `→ ${a.slice(6)}` : t[`aiApplied_${a}`] || a;
-            return `<span class="fi ${a === "quota" ? "hot" : ""}" title="${esc(label)}">${ico(moved ? "folder-move-outline" : appliedIcons[a] || "check")}</span>`;
+            return `<span class="fi ${a === "quota" ? "hot" : ""}" role="img" aria-label="${esc(label)}" title="${esc(label)}">${ico(moved ? "folder-move-outline" : appliedIcons[a] || "check")}</span>`;
           })
           .join("");
         const opt = (val, label) => `<option value="${esc(val)}" ${val === cur ? "selected" : ""}>${esc(label)}</option>`;
@@ -453,11 +455,11 @@ class FriedaPostfachPanel extends HTMLElement {
           : "";
         const search = [r.subject, r.from, r.from_domain, cur, r.reason].join(" ").toLowerCase();
         return `<tr class="arow rrate ${open ? "open" : ""}" data-search="${esc(search)}">
-            <td class="c-imp"><span class="imp i${esc(r.importance)}" title="${esc(fmt(t.aiImportance, r.importance))}">${esc(r.importance)}</span></td>
+            <td class="c-imp"><span class="imp i${esc(r.importance)}" role="img" aria-label="${esc(fmt(t.aiImportance, r.importance))}" title="${esc(fmt(t.aiImportance, r.importance))}">${esc(r.importance)}</span></td>
             <td class="c-time num dim" title="${esc(fmtDateTime(r.time))}">${esc(fmtShort(r.time))}</td>
             <td class="c-subj"><button class="rtext" data-action="rate-open" data-id="${esc(r.id)}" aria-expanded="${open}" title="${esc(r.subject || "")}">${esc(r.subject || "–")}</button></td>
             <td class="c-from dim" title="${esc(r.from || "")}">${esc(r.from || "–")}</td>
-            <td class="c-cat"><label class="chipsel ${r.corrected ? "on" : ""}" title="${esc(r.corrected ? `${t.aiCorrected}: ${catLabel(r.category)} → ${catLabel(cur)}` : t.aiCorrect)}">${r.corrected ? `<span class="lead">${ico("pencil-outline")}</span>` : ""}<select data-action="ai-correct" data-id="${esc(r.id)}" aria-label="${esc(t.aiCorrect)}: ${esc(r.subject || "")}">${[...new Set([...cats.map((c) => c.name), "other", cur])].map((n) => opt(n, catLabel(n))).join("")}</select>${ico("chevron-down")}</label>${r.suspicious ? `<span class="fi hot" title="${esc(t.aiSuspicious)}">${ico("alert-outline")}</span>` : ""}</td>
+            <td class="c-cat"><label class="chipsel ${r.corrected ? "on" : ""}" title="${esc(r.corrected ? `${t.aiCorrected}: ${catLabel(r.category)} → ${catLabel(cur)}` : t.aiCorrect)}">${r.corrected ? `<span class="lead">${ico("pencil-outline")}</span>` : ""}<select data-action="ai-correct" data-id="${esc(r.id)}" aria-label="${esc(t.aiCorrect)}: ${esc(r.subject || "")}">${[...new Set([...cats.map((c) => c.name), "other", cur])].map((n) => opt(n, catLabel(n))).join("")}</select>${ico("chevron-down")}</label>${r.suspicious ? `<span class="fi hot" role="img" aria-label="${esc(t.aiSuspicious)}" title="${esc(t.aiSuspicious)}">${ico("alert-outline")}</span>` : ""}</td>
             <td class="c-applied"><span class="fields">${applied || `<span class="muted">–</span>`}</span></td>
           </tr>${detail}`;
       })
@@ -497,7 +499,7 @@ class FriedaPostfachPanel extends HTMLElement {
     if (!ai) return "";
     const st = ai.status || {};
     if (!st.active) {
-      return `<div class="card"><h2><span class="grow">${esc(t.ai)}</span><span class="badge">${esc(t.aiOff)}</span></h2>
+      return `<div class="card"><div class="chead"><h2>${esc(t.ai)}</h2><span class="badge">${esc(t.aiOff)}</span></div>
         <div class="info">${esc(st.enabled ? t.aiNoEntity : t.aiOffHint)}</div></div>`;
     }
     const acc = this._account();
@@ -537,12 +539,12 @@ class FriedaPostfachPanel extends HTMLElement {
       .join("");
     const ratings = this._renderRatings(ai, cats, catLabel);
     return `<div class="card" id="ai">
-      <h2><span class="grow">${esc(t.ai)} <span class="badge ${act ? "warn" : ""}">${esc(act ? t.aiModeActShort : t.aiModeObserveShort)}</span></span>
+      <div class="chead"><h2>${esc(t.ai)} <span class="badge ${act ? "warn" : ""}">${esc(act ? t.aiModeActShort : t.aiModeObserveShort)}</span></h2>
         <button class="pill" data-action="ai-run" ${s.busy ? "disabled" : ""} title="${esc(t.aiRunHint)}">${ico("play")}${esc(t.aiRun)}</button>
-        ${W.cardMenu([(ai.ratings || []).length && { action: "ai-clear", icon: "delete-sweep-outline", label: t.aiClear, danger: true, disabled: s.busy }], t)}</h2>
+        ${W.cardMenu([(ai.ratings || []).length && { action: "ai-clear", icon: "delete-sweep-outline", label: t.aiClear, danger: true, disabled: s.busy }], t)}</div>
       <div class="mode ${warn ? "warn" : ""}"><span class="ic" aria-hidden="true">${act ? "✦" : "👁"}</span><span class="tx"><strong>${esc(act ? t.aiAct : t.aiObserve)}</strong><span class="muted">${esc(sub.join(" · "))}</span>${warn ? `<span class="muted">${esc(warn)}</span>` : ""}</span></div>
       ${acc && !acc.rules_auto ? `<p class="muted" style="margin:-4px 0 10px">${esc(t.aiManualOnly)}</p>` : ""}
-      <h3 class="muted with-add">${esc(t.aiCategories)} <button class="round small" data-action="ai-cat-new" ${edit ? "disabled" : ""} title="${esc(t.aiNewCategory)}" aria-label="${esc(t.aiNewCategory)}">+</button></h3>
+      <div class="with-add"><h3 class="muted">${esc(t.aiCategories)}</h3><button class="round small" data-action="ai-cat-new" ${edit ? "disabled" : ""} title="${esc(t.aiNewCategory)}" aria-label="${esc(t.aiNewCategory)}">+</button></div>
       <p class="muted" style="margin:-4px 0 8px">${esc(t.aiCategoriesHint)}</p>
       <div class="ai-cats">${catRows}${edit && edit.index < 0 ? editor(edit) : ""}</div>
       <h3 class="muted with-add">${esc(t.aiRatings)}</h3>
@@ -700,6 +702,7 @@ class FriedaPostfachPanel extends HTMLElement {
     });
     const hint = table.closest(".scroll")?.nextElementSibling;
     if (hint?.classList.contains("nomatch")) hint.hidden = shown > 0 || !q;
+    return shown;
   }
 
   // Messages a run handled, for the info popup and the expanded row.
@@ -800,7 +803,7 @@ class FriedaPostfachPanel extends HTMLElement {
         const mailList = mails.length ? this._mailList(mails, h.mails_more) : "";
         const open = s.runOpen === h.id && mailList;
         const aiCell = ai && (ai.rated || ai.held || ai.errors.length)
-          ? `<span class="tchip t-ai" title="${esc(fmt(t.runAiTip, ai.rated, ai.applied, ai.held))}">${ico("creation")}<span>${esc(ai.rated)}</span>${ai.applied ? `<span class="sub">· ${esc(fmt(t.runAiApplied, ai.applied))}</span>` : ""}${ai.held ? `<span class="sub">· ${ico("shield-check-outline")}${esc(ai.held)}</span>` : ""}</span>`
+          ? `<span class="tchip t-ai" title="${esc(fmt(t.runAiTip, ai.rated, ai.applied, ai.held))}"><span class="vh">${esc(fmt(t.runAiTip, ai.rated, ai.applied, ai.held))}</span>${ico("creation")}<span aria-hidden="true">${esc(ai.rated)}</span>${ai.applied ? `<span class="sub" aria-hidden="true">· ${esc(fmt(t.runAiApplied, ai.applied))}</span>` : ""}${ai.held ? `<span class="sub" aria-hidden="true">· ${ico("shield-check-outline")}${esc(ai.held)}</span>` : ""}</span>`
           : `<span class="muted">–</span>`;
         const search = [
           time(h), trig, scope, ...rules.map(([n]) => n), res, ...errors,
@@ -810,8 +813,8 @@ class FriedaPostfachPanel extends HTMLElement {
         return `<tr data-search="${esc(search)}" class="${errors.length ? "err row-err" : didSomething(h) ? "hit" : "idle"} ${mailList ? "expandable" : ""} ${open ? "open" : ""}">
             <td class="c-time"><span class="nm"><strong>${esc(time(h))}</strong>${(h.runs || 1) > 1 ? `<small>${esc(fmt(t.runsMerged, h.runs))}</small>` : ""}</span></td>
             <td class="c-trig"><span class="tchip t-${esc(trigIcon[h.trigger] ? h.trigger : "manual")}" title="${esc(trig)}">${ico(trigIcon[h.trigger] || trigIcon.manual)}<span class="tl">${esc(trig)}</span></span></td>
-            <td class="c-scope dim"><span class="scope">${ico(h.scope === "all" ? "email-multiple-outline" : "email-arrow-left-outline", scope)}<span class="sc-txt">${esc(scope)}</span>${(h.mailboxes || []).map((b) => `<span class="chip ic mbox">${ico("inbox-outline")}${esc(b)}</span>`).join("")}</span></td>
-            <td class="c-checked num" title="${esc(t.colMails)}">${mailList ? `<button class="hitchip" data-action="run-open" data-id="${esc(h.id)}" aria-expanded="${!!open}" title="${esc(t.runMails)}">${ico("email-multiple-outline")}<strong>${esc(mailCount(h))}</strong></button>` : esc(mailCount(h))}</td>
+            <td class="c-scope dim"><span class="scope">${ico(h.scope === "all" ? "email-multiple-outline" : "email-arrow-left-outline")}<span class="sc-txt">${esc(scope)}</span>${(h.mailboxes || []).map((b) => `<span class="chip ic mbox">${ico("inbox-outline")}${esc(b)}</span>`).join("")}</span></td>
+            <td class="c-checked num" title="${esc(t.colMails)}">${mailList ? `<button class="hitchip" data-action="run-open" data-id="${esc(h.id)}" aria-expanded="${!!open}" aria-label="${esc(`${t.runMails}: ${mailCount(h)}`)}" title="${esc(t.runMails)}">${ico("email-multiple-outline")}<strong>${esc(mailCount(h))}</strong></button>` : esc(mailCount(h))}</td>
             <td class="c-matched num" title="${esc(t.colMatched)}">${h.matched ? `<strong>${esc(h.matched)}</strong>` : "0"}</td>
             <td class="c-rules">${rules.length ? rules.map(([n, c]) => `<span class="chip">${esc(n)} · ${esc(c)}</span>`).join("") : `<span class="muted">–</span>`}</td>
             <td class="c-ai">${aiCell}</td>
@@ -836,8 +839,8 @@ class FriedaPostfachPanel extends HTMLElement {
     };
     const more = s.historyTotal > s.history.length;
     return `<div class="card">
-      <h2><span class="grow">${esc(t.history)}</span>
-        ${W.cardMenu([s.history.length && { action: "history-clear", icon: "delete-sweep-outline", label: t.clearHistory, danger: true, disabled: s.busy }], t)}</h2>
+      <div class="chead"><h2>${esc(t.history)}</h2>
+        ${W.cardMenu([s.history.length && { action: "history-clear", icon: "delete-sweep-outline", label: t.clearHistory, danger: true, disabled: s.busy }], t)}</div>
       <p class="muted" style="margin:0 0 10px">${esc(t.historyHint)}</p>
       ${
         s.history.length
@@ -940,7 +943,7 @@ class FriedaPostfachPanel extends HTMLElement {
         </button>`;
       })
       .join("");
-    return `<div class="card"><h2><span class="grow">${esc(t.accounts)}</span><span class="muted">${s.accounts.length}</span></h2>
+    return `<div class="card"><div class="chead"><h2>${esc(t.accounts)}</h2><span class="muted">${s.accounts.length}</span></div>
       <div class="tabs">${tabs}</div>
       <p class="muted" style="margin:10px 0 0">${esc(t.switchHint)}</p></div>`;
   }
@@ -1042,10 +1045,10 @@ class FriedaPostfachPanel extends HTMLElement {
     const conds = e.conditions
       .map(
         (c, i) => `<div class="cond" data-index="${i}">
-          <select class="c-field">${FIELDS.map((f) => opt(f, t.fields[f], c.field)).join("")}</select>
-          <select class="c-op">${OPS.map((o) => opt(o, t.ops[o], c.op)).join("")}</select>
-          <input type="text" class="c-value" value="${esc(c.value)}" placeholder="${esc(t.value)}">
-          <button class="icon" data-action="remove-cond" data-index="${i}" ${e.conditions.length === 1 ? "disabled" : ""} title="${esc(t.remove)}" aria-label="${esc(t.remove)}">${ico("close")}</button>
+          <select class="c-field" aria-label="${esc(fmt(t.condField, i + 1))}">${FIELDS.map((f) => opt(f, t.fields[f], c.field)).join("")}</select>
+          <select class="c-op" aria-label="${esc(fmt(t.condOp, i + 1))}">${OPS.map((o) => opt(o, t.ops[o], c.op)).join("")}</select>
+          <input type="text" class="c-value" value="${esc(c.value)}" placeholder="${esc(t.value)}" aria-label="${esc(fmt(t.condValue, i + 1))}">
+          <button class="icon" data-action="remove-cond" data-index="${i}" ${e.conditions.length === 1 ? "disabled" : ""} title="${esc(t.remove)}" aria-label="${esc(fmt(t.condRemove, i + 1))}">${ico("close")}</button>
         </div>`
       )
       .join("");
@@ -1056,7 +1059,7 @@ class FriedaPostfachPanel extends HTMLElement {
       <div class="row"><label for="f-name">${esc(t.name)}</label><input type="text" id="f-name" class="grow" value="${esc(e.name)}"></div>
       <div class="row"><label for="f-mailbox">${esc(t.mailbox)}</label><select id="f-mailbox">${boxes.map((b) => opt(b, b, e.mailbox)).join("")}</select></div>
       <div class="row"><label for="f-match">${esc(t.match)}</label><select id="f-match">${opt("all", t.all, e.match)}${opt("any", t.any, e.match)}</select></div>
-      <h3 class="muted with-add">${esc(t.conditions)} <button class="round small" data-action="add-cond" title="${esc(t.addCondition)}" aria-label="${esc(t.addCondition)}">+</button></h3>
+      <div class="with-add"><h3 class="muted">${esc(t.conditions)}</h3><button class="round small" data-action="add-cond" title="${esc(t.addCondition)}" aria-label="${esc(t.addCondition)}">+</button></div>
       ${conds}
       <h3 class="muted">${esc(t.actions)}</h3>
       <div class="row"><label for="f-move">${esc(t.moveTo)}</label><select id="f-move">${opt("", t.noMove, a.move_to || "")}${this._s.mailboxes.map((b) => opt(b, b, a.move_to || "")).join("")}</select></div>
@@ -1097,7 +1100,7 @@ class FriedaPostfachPanel extends HTMLElement {
       .join("");
     const errors = (r.errors || []).map((e) => `<li>${esc(e.error)}</li>`).join("");
     return `<div class="card" id="report">
-      <h2><span class="grow">${esc(t.report)}${r.dry_run ? ` <span class="chip">${esc(t.dryRun)}</span>` : ""}</span><span class="muted">${r.checked} ${esc(t.checked)} · ${r.matched} ${esc(t.matched)}</span></h2>
+      <div class="chead"><h2>${esc(t.report)}${r.dry_run ? ` <span class="chip">${esc(t.dryRun)}</span>` : ""}</h2><span class="muted">${r.checked} ${esc(t.checked)} · ${r.matched} ${esc(t.matched)}</span></div>
       ${errors ? `<div class="error"><strong>${esc(t.errors)}</strong><ul>${errors}</ul></div>` : ""}
       ${skipped ? `<div class="muted"><strong>${esc(t.skipped)}</strong><ul>${skipped}</ul></div>` : ""}
       ${rows ? `<div class="scroll"><table class="stack"><thead><tr><th>${esc(t.uid)}</th><th>${esc(t.subject)}</th><th>${esc(t.from)}</th><th>${esc(t.rule)}</th><th>${esc(t.action)}</th></tr></thead><tbody>${withLabels(rows, [t.uid, t.subject, t.from, t.rule, t.action])}</tbody></table></div>` : ""}
@@ -1107,8 +1110,9 @@ class FriedaPostfachPanel extends HTMLElement {
   _render() {
     const s = this._s;
     // a deliberate jump (to the report or the editor) wins over keeping the position
-    if (s.scrollToReport || s.focusEditor || s.scrollTo || !W.keepScroll) this._draw();
-    else W.keepScroll(this, () => this._draw());
+    const draw = () => W.keepFocus(this.shadowRoot, () => this._draw());
+    if (s.scrollToReport || s.focusEditor || s.scrollTo) draw();
+    else W.keepScroll(this, draw);
   }
 
   _draw() {
@@ -1136,9 +1140,9 @@ class FriedaPostfachPanel extends HTMLElement {
       : {
           rules: { title: t.rules, html: `
       <div class="card">
-        <h2><span class="grow">${esc(t.rules)}${s.accounts.length > 1 && acc ? ` <span class="chip">${esc(acc.label)}</span>` : ""}</span>
+        <div class="chead"><h2>${esc(t.rules)}${s.accounts.length > 1 && acc ? ` <span class="chip">${esc(acc.label)}</span>` : ""}</h2>
           ${s.rules.length ? runMenu : ""}
-          <button class="round" data-action="new" ${s.editing ? "disabled" : ""} title="${esc(t.newRule)}" aria-label="${esc(t.newRule)}">+</button></h2>
+          <button class="round" data-action="new" ${s.editing ? "disabled" : ""} title="${esc(t.newRule)}" aria-label="${esc(t.newRule)}">+</button></div>
         <div class="mode ${m.cls}"><span class="ic" aria-hidden="true">${esc(m.ic)}</span><span class="tx"><strong>${esc(m.title)}</strong>${m.sub ? `<span class="muted">${esc(m.sub)}</span>` : ""}</span></div>
         <div class="subbar"><span class="muted">${esc([last, ...extra].join(" · "))}</span><span class="grow"></span>
           ${s.rules.length > 1 ? `<button class="link" data-action="expand-all" data-open="${allOpen ? "0" : "1"}">${esc(allOpen ? t.collapseAll : t.expandAll)}</button>` : ""}</div>
@@ -1153,14 +1157,17 @@ class FriedaPostfachPanel extends HTMLElement {
       : !s.entryId
         ? `<div class="card"><p>${esc(t.noAccount)}</p></div>`
         : `
-      ${s.error ? `<div class="error">${esc(s.error)}</div>` : ""}
-      ${s.notice ? `<div class="ok">${esc(s.notice)}</div>` : ""}
+      ${s.error ? `<div class="error" data-announce>${esc(s.error)}</div>` : ""}
+      ${s.notice ? `<div class="ok" data-announce>${esc(s.notice)}</div>` : ""}
       ${this._renderAccounts()}
       ${this._renderReport()}
       ${W.renderWidgets(this._layout, widgets, t)}`;
-    this.shadowRoot.innerHTML = `<style>${W.UI_STYLE}${STYLE}</style>
+    W.mount(
+      this.shadowRoot,
+      `<style>${W.UI_STYLE}${STYLE}</style>
       <div class="toolbar"><ha-menu-button></ha-menu-button><img src="${esc(ICON_URL)}" alt=""><span>${esc(t.title)}</span><span class="grow"></span>${s.loaded && s.entryId ? W.layoutButton(this._layout, t) : ""}</div>
-      <div class="content widgets">${body}</div>${this._renderConfirm()}`;
+      <div class="content widgets">${body}</div>${this._renderConfirm()}`
+    );
     const menu = this.shadowRoot.querySelector("ha-menu-button");
     if (menu && this._hass) {
       menu.hass = this._hass;
@@ -1384,7 +1391,8 @@ class FriedaPostfachPanel extends HTMLElement {
     root.querySelectorAll("[data-search-table]").forEach((el) => {
       el.addEventListener("input", () => {
         this._s[SEARCH_KEYS[el.dataset.searchTable]] = el.value;
-        this._applySearch(el.dataset.searchTable);
+        const shown = this._applySearch(el.dataset.searchTable);
+        if (shown !== undefined) W.announce(this.shadowRoot, fmt(this.t.searchHits, shown), 700);
       });
     });
   }
