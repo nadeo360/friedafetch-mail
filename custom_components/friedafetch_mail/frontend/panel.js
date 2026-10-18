@@ -447,8 +447,6 @@ class FriedaPostfachPanel extends HTMLElement {
           ? `<tr class="detail"><td colspan="7"><div class="det">
               ${r.reason ? `<div><div class="lbl">${esc(t.aiReason)}</div>${esc(r.reason)}</div>` : ""}
               ${r.suspicious ? `<div class="aiu-error">${ico("alert-outline")}${esc(t.aiSuspiciousHint)}</div>` : ""}
-              <div class="corr"><label class="lbl" for="corr-${esc(r.id)}">${esc(t.aiCorrect)}</label>
-                <select id="corr-${esc(r.id)}" data-action="ai-correct" data-id="${esc(r.id)}">${[...cats.map((c) => c.name), "other"].map((n) => opt(n, catLabel(n))).join("")}</select></div>
               ${(r.applied || []).length ? `<div class="muted">${esc((r.applied || []).map((a) => (a.startsWith("moved:") ? `→ ${a.slice(6)}` : t[`aiApplied_${a}`] || a)).join(" · "))}</div>` : ""}
               <div class="muted">${esc([fmtDateTime(r.time), r.from_domain || ""].filter(Boolean).join(" · "))}</div>
             </div></td></tr>`
@@ -459,7 +457,7 @@ class FriedaPostfachPanel extends HTMLElement {
             <td class="c-time num dim" title="${esc(fmtDateTime(r.time))}">${esc(fmtShort(r.time))}</td>
             <td class="c-subj"><button class="rtext" data-action="rate-open" data-id="${esc(r.id)}" aria-expanded="${open}" title="${esc(r.subject || "")}">${esc(r.subject || "–")}</button></td>
             <td class="c-from dim" title="${esc(r.from || "")}">${esc(r.from || "–")}</td>
-            <td class="c-cat"><span class="chip ic ${r.corrected ? "fixed" : ""}" title="${esc(r.corrected ? `${t.aiCorrected}: ${catLabel(r.category)} → ${catLabel(cur)}` : catLabel(cur))}">${r.corrected ? ico("pencil-outline") : ""}${esc(catLabel(cur))}</span>${r.suspicious ? `<span class="fi hot" title="${esc(t.aiSuspicious)}">${ico("alert-outline")}</span>` : ""}</td>
+            <td class="c-cat"><label class="chipsel ${r.corrected ? "on" : ""}" title="${esc(r.corrected ? `${t.aiCorrected}: ${catLabel(r.category)} → ${catLabel(cur)}` : t.aiCorrect)}">${r.corrected ? `<span class="lead">${ico("pencil-outline")}</span>` : ""}<select data-action="ai-correct" data-id="${esc(r.id)}" aria-label="${esc(t.aiCorrect)}: ${esc(r.subject || "")}">${[...new Set([...cats.map((c) => c.name), "other", cur])].map((n) => opt(n, catLabel(n))).join("")}</select>${ico("chevron-down")}</label>${r.suspicious ? `<span class="fi hot" title="${esc(t.aiSuspicious)}">${ico("alert-outline")}</span>` : ""}</td>
             <td class="c-applied"><span class="fields">${applied || `<span class="muted">–</span>`}</span></td>
           </tr>${detail}`;
       })
@@ -707,14 +705,30 @@ class FriedaPostfachPanel extends HTMLElement {
   // Messages a run handled, for the info popup and the expanded row.
   _mailList(mails, more = 0) {
     const t = this.t;
-    const icon = (m) => (m.delete ? "delete-outline" : m.move_to ? "folder-move-outline" : m.flag ? "flag-outline" : m.seen ? "email-open-outline" : "check");
-    const what = (m) => (m.delete ? t.aDelete : m.move_to ? `→ ${m.move_to}` : m.flag ? t.aFlag : m.seen === true ? t.aSeen : m.seen === false ? t.aUnseen : "");
+    const kind = (m) =>
+      m.delete
+        ? { icon: "delete-outline", tone: "err", label: t.aDelete }
+        : m.move_to
+          ? { icon: "folder-move-outline", tone: "move", label: `→ ${m.move_to}` }
+          : m.flag
+            ? { icon: "flag-outline", tone: "warn", label: t.aFlag }
+            : m.seen === true
+              ? { icon: "email-open-outline", tone: "", label: t.aSeen }
+              : m.seen === false
+                ? { icon: "email-mark-as-unread", tone: "", label: t.aUnseen }
+                : { icon: "check", tone: "", label: "" };
     const items = mails
-      .map(
-        (m) => `<li>${ico(icon(m))}<span class="t-subj">${esc(m.subject || "–")}</span><span class="t-meta">${esc([m.from, (m.rules || []).join(", "), what(m)].filter(Boolean).join(" · "))}</span></li>`
-      )
+      .map((m) => {
+        const k = kind(m);
+        return `<li class="${k.tone ? `tone-${k.tone}` : ""}">
+            <span class="i-ic">${ico(k.icon)}</span>
+            <span class="i-main" title="${esc(m.subject || "")}">${esc(m.subject || "–")}</span>
+            ${k.label ? `<span class="i-chip">${esc(k.label)}</span>` : ""}
+            <span class="i-sub">${esc([m.from, (m.rules || []).join(", ")].filter(Boolean).join(" · "))}</span>
+          </li>`;
+      })
       .join("");
-    return `<ul class="tip-list">${items}</ul>${more ? `<div class="muted" style="margin-top:6px">${esc(fmt(t.runMailsMore, more))}</div>` : ""}`;
+    return `<ul class="ilist">${items}${more ? `<li class="i-more">${esc(fmt(t.runMailsMore, more))}</li>` : ""}</ul>`;
   }
 
   _renderHistory() {
