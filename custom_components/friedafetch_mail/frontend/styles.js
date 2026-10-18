@@ -22,7 +22,13 @@ export const STYLE = `
   .atable .c-st { width: 40px; }
   .atable .c-st .aiu-st { width: 30px; height: 30px; --mdc-icon-size: 16px; }
   .atable .c-time { width: 70px; color: var(--secondary-text-color); font-size: 13px; text-align: left; }
-  .atable .c-subj { min-width: 220px; max-width: 420px; }
+  .atable .c-subj { min-width: 200px; max-width: 380px; }
+  .atable .c-sender { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--secondary-text-color); }
+  button.rtext { display: block; width: 100%; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: none; color: inherit; padding: 0; text-align: left; font: inherit; font-size: 14px; min-height: 0; border: none; cursor: pointer; }
+  table.dtable tr.arow { cursor: pointer; }
+  table.dtable tr.arow.open button.rtext { font-weight: 500; }
+  .stat.with-chart { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .stat .stat-tx { min-width: 0; }
   .atable .c-kind, .atable .c-ent { font-size: 12px; color: var(--secondary-text-color); white-space: nowrap; }
   .atable .fields { display: inline-flex; gap: 3px; }
   .atable .fi { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; background: var(--secondary-background-color, #f0f0f0); --mdc-icon-size: 14px; }
@@ -153,10 +159,11 @@ export const STYLE = `
     table.dtable tr.arow > td { display: block; border: none; padding: 1px 0; max-width: none; min-width: 0; }
     .atable .c-st { grid-area: st; }
     .atable .c-subj { grid-area: subj; }
+    .atable .c-sender { grid-row: 2; grid-column: 2 / 4; max-width: none; font-size: 12px; }
     .atable .c-time { grid-area: time; width: auto; text-align: right; }
     .atable .c-kind, .atable .c-fields, .atable .c-chars, .atable .c-ent { grid-row: 2; display: inline-flex !important; align-items: center; }
     .atable tr.arow { grid-template-areas: "st subj time"; grid-auto-flow: row; }
-    .atable .c-kind { grid-column: 2 / 4; }
+    .atable .c-kind { grid-row: 3; grid-column: 2 / 4; }
     .atable .c-fields, .atable .c-chars, .atable .c-ent { display: none !important; }
     .rdet, .adet { padding-left: 0; }
   }

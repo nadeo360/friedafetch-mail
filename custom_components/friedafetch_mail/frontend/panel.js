@@ -11,7 +11,7 @@ const VERSION_QUERY = new URL(import.meta.url).search;
 const [{ I18N }, { STYLE }] = await Promise.all([import(`./i18n.js${VERSION_QUERY}`), import(`./styles.js${VERSION_QUERY}`)]);
 
 // Frieda's design library, served by Frieda itself, so both panels look and behave the same.
-const UI_API = 1;
+const UI_API = 2;
 let W = null;
 try {
   W = await import(`/friedafetch_static/ui.js${VERSION_QUERY}`);
@@ -272,8 +272,22 @@ class FriedaPostfachPanel extends HTMLElement {
     if (!st.active && !log.length) return "";
     const num = (n) => Number(n || 0).toLocaleString();
     const fact = (icon, value, tip, cls = "") => `<span class="fact ${cls}" title="${esc(tip)}">${ico(icon)}${esc(value)}</span>`;
-    const stat = (label, w) => `<div class="stat"><div class="k">${esc(label)}</div><div class="v">${esc(num(w.calls))} <small class="muted">${esc(t.aiuCalls)}</small></div>
-      <div class="facts">${fact("format-text", num(w.chars), t.aiuTipChars)}${fact("text-long", num(w.body), t.aiuTipBody, w.body ? "hot" : "")}${fact("shield-check-outline", num(w.held_back), t.aiuTipHeld)}${w.errors ? fact("alert-circle-outline", num(w.errors), t.aiuTipErrors, "err") : ""}</div></div>`;
+    const charts = this._layout.opt("aiu", "charts", false);
+    const COLORS = { sent: "var(--info-color, #039be5)", held: "var(--success-color, #43a047)", err: "var(--error-color, #db4437)" };
+    const pie = (w) => {
+      const errors = Number(w.errors || 0);
+      const parts = [
+        { value: Math.max(Number(w.calls || 0) - errors, 0), color: COLORS.sent, label: t.aiuSent },
+        { value: Number(w.held_back || 0), color: COLORS.held, label: t.aiuHeldBack },
+        { value: errors, color: COLORS.err, label: t.resError },
+      ];
+      return W.donut(parts, { size: 52 });
+    };
+    const stat = (label, w) => `<div class="stat ${charts ? "with-chart" : ""}"><div class="stat-tx"><div class="k">${esc(label)}</div><div class="v">${esc(num(w.calls))} <small class="muted">${esc(t.aiuCalls)}</small></div>
+      <div class="facts">${fact("format-text", num(w.chars), t.aiuTipChars)}${fact("text-long", num(w.body), t.aiuTipBody, w.body ? "hot" : "")}${fact("shield-check-outline", num(w.held_back), t.aiuTipHeld)}${w.errors ? fact("alert-circle-outline", num(w.errors), t.aiuTipErrors, "err") : ""}</div></div>${charts ? pie(w) : ""}</div>`;
+    const legend = charts
+      ? `<div class="legend" style="margin-top:8px"><span><i style="background:${COLORS.sent}"></i>${esc(t.aiuSent)}</span><span><i style="background:${COLORS.held}"></i>${esc(t.aiuHeldBack)}</span><span><i style="background:${COLORS.err}"></i>${esc(t.resError)}</span></div>`
+      : "";
     const m = u.month || {};
     const chips = [
       ...Object.entries(m.entities || {}).map(([e, n]) => `<span class="chip ic">${ico("robot-outline")}${esc(e.replace(/^ai_task\./, ""))} · ${esc(n)}</span>`),
@@ -312,9 +326,10 @@ class FriedaPostfachPanel extends HTMLElement {
         const b = value(y.e);
         return (a < b ? -1 : a > b ? 1 : 0) * sort.dir || x.i - y.i;
       });
-    const cols = 6 + (showEntity ? 1 : 0);
+    const cols = 7 + (showEntity ? 1 : 0);
     const aiuCols = [
       { key: "time", label: t.colTime },
+      { key: "sender", label: t.colSender },
       { key: "kind", label: t.aiuTipKind },
       { key: "fields", label: t.colFields },
       { key: "chars", label: t.colChars },
@@ -326,7 +341,7 @@ class FriedaPostfachPanel extends HTMLElement {
         const stIcon = { sent: "send-outline", held: "shield-check-outline", err: "alert-circle-outline" }[state];
         const stText = { sent: t.aiuSent, held: t.aiuHeldBack, err: t.resError }[state];
         const digest = e.kind === "digest";
-        const title = e.subject ? `„${e.subject}“` : digest ? t.aiuKindDigest : "–";
+        const title = e.subject || (digest ? t.aiuKindDigest : "–");
         const open = s.aiuOpen === i;
         const fields = (e.fields || [])
           .map((x) => `<span class="fi ${x === "body" ? "hot" : ""}" title="${esc(t.aiuFields[x] || x)}">${ico(FIELD_ICONS[x] || "circle-small")}</span>`)
@@ -345,7 +360,8 @@ class FriedaPostfachPanel extends HTMLElement {
         return `<tr class="arow ${state} ${open ? "open" : ""}" data-search="${esc(search)}">
             <td class="c-st"><span class="aiu-st" title="${esc(stText)}" aria-label="${esc(stText)}">${ico(stIcon)}</span></td>
             <td class="c-time num"><time datetime="${esc(e.time || "")}" title="${esc(fmtDateTime(e.time))}">${esc(fmtShort(e.time))}</time></td>
-            <td class="c-subj"><button class="rname" data-action="aiu-open" data-i="${i}" aria-expanded="${open}">${ico("chevron-right")}<span class="nm"><strong>${esc(title)}</strong>${e.sender ? `<small>${esc(e.sender)}</small>` : ""}</span></button></td>
+            <td class="c-subj"><button class="rtext" data-action="aiu-open" data-i="${i}" aria-expanded="${open}" title="${esc(title)}">${esc(title)}</button></td>
+            <td class="c-sender" title="${esc(e.sender || "")}">${esc(e.sender || "–")}</td>
             <td class="c-kind">${fact(digest ? "newspaper-variant-outline" : "sort-variant", digest ? t.aiuKindDigest : t.aiuKindSort, t.aiuTipKind)}</td>
             <td class="c-fields">${fieldsCell}</td>
             <td class="c-chars num">${e.sent ? esc(num(e.chars)) : "–"}</td>
@@ -362,9 +378,15 @@ class FriedaPostfachPanel extends HTMLElement {
       return `<th class="${cls}" aria-sort="${active ? (sort.dir < 0 ? "descending" : "ascending") : "none"}"><button class="sort ${active ? "on" : ""}" data-action="aiu-sort" data-k="${key}">${esc(label)}${ico(icon)}</button></th>`;
     };
     return `<div class="card" id="ai-usage">
-      <h2><span class="grow">${esc(t.aiu)}</span>${W.cardMenu([log.length && { action: "aiu-clear", icon: "delete-sweep-outline", label: t.aiuClear, danger: true }], t)}</h2>
+      <h2><span class="grow">${esc(t.aiu)}</span>${W.cardMenu(
+        [
+          { action: "aiu-charts", icon: charts ? "chart-donut-variant" : "chart-donut", label: charts ? t.chartsHide : t.chartsShow },
+          log.length && { action: "aiu-clear", icon: "delete-sweep-outline", label: t.aiuClear, danger: true },
+        ],
+        t
+      )}</h2>
       <p class="muted" style="margin:0 0 10px">${esc(t.aiuHint)}</p>
-      <div class="stats">${stat(t.aiuToday, u.today || {})}${stat(t.aiuWeek, u.week || {})}${stat(t.aiuMonth, u.month || {})}</div>
+      <div class="stats">${stat(t.aiuToday, u.today || {})}${stat(t.aiuWeek, u.week || {})}${stat(t.aiuMonth, u.month || {})}</div>${legend}
       ${chips.length ? `<div style="margin-top:10px">${chips.join("")}</div>` : ""}
       ${
         log.length
@@ -374,7 +396,7 @@ class FriedaPostfachPanel extends HTMLElement {
                <span class="grow"></span>${W.columnMenu(this._layout, "aiu", aiuCols, t)}
              </div>${W.columnStyle(this._layout, "aiu", aiuCols)}
              <div class="scroll aiu-scroll"><table class="dtable atable" data-table="aiu"><thead><tr>
-               <th class="c-st"><span class="vh">${esc(t.colStatus)}</span></th>${th("time", t.colTime, "c-time num")}${th("subject", t.colSubject)}<th class="c-kind">${esc(t.aiuTipKind)}</th><th class="c-fields">${esc(t.colFields)}</th>${th("chars", t.colChars, "c-chars num")}${showEntity ? `<th class="c-ent">${esc(t.colEntity)}</th>` : ""}
+               <th class="c-st"><span class="vh">${esc(t.colStatus)}</span></th>${th("time", t.colTime, "c-time num")}${th("subject", t.colSubjectOnly)}<th class="c-sender">${esc(t.colSender)}</th><th class="c-kind">${esc(t.aiuTipKind)}</th><th class="c-fields">${esc(t.colFields)}</th>${th("chars", t.colChars, "c-chars num")}${showEntity ? `<th class="c-ent">${esc(t.colEntity)}</th>` : ""}
              </tr></thead><tbody>${rows || `<tr><td colspan="${cols}" class="muted">${esc(t.aiuEmpty)}</td></tr>`}</tbody></table></div>
              <p class="muted nomatch" hidden>${esc(t.noMatches)}</p>`
           : `<p class="muted" style="margin-top:12px">${esc(t.aiuEmpty)}</p>`
@@ -1116,6 +1138,10 @@ class FriedaPostfachPanel extends HTMLElement {
           this._s.aiuSort = cur.key === key ? { key, dir: -cur.dir } : { key, dir: key === "subject" ? 1 : -1 };
           this._render();
         },
+        "aiu-charts": () => {
+          this._layout.setOpt("aiu", "charts", !this._layout.opt("aiu", "charts", false));
+          this._render();
+        },
         "aiu-open": () => {
           const i = Number(el.dataset.i);
           this._s.aiuOpen = this._s.aiuOpen === i ? null : i;
@@ -1139,6 +1165,13 @@ class FriedaPostfachPanel extends HTMLElement {
         el.addEventListener("click", handler);
       }
     });
+    // the whole row of the AI log opens its details
+    root.querySelectorAll("tr.arow").forEach((tr) =>
+      tr.addEventListener("click", (ev) => {
+        if (ev.target.closest("button, a, input, select, details")) return;
+        tr.querySelector('[data-action="aiu-open"]')?.click();
+      })
+    );
     // an item of a row menu closes the menu
     root.querySelectorAll("details.rowmenu .menu-list button").forEach((b) => b.addEventListener("click", () => b.closest("details")?.removeAttribute("open")));
     root.querySelectorAll("[data-search-table]").forEach((el) => {
