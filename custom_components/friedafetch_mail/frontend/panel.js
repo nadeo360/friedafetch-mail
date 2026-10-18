@@ -702,13 +702,13 @@ class FriedaPostfachPanel extends HTMLElement {
         const a = parseTime(h.started);
         const b = parseTime(h.finished);
         const sameDay = a && b && a.toDateString() === b.toDateString();
-        return `${fmtDateTime(h.started)} – ${sameDay ? fmtClock(h.finished) : fmtDateTime(h.finished)}`;
+        return `${fmtShort(h.started)} – ${sameDay ? fmtClock(h.finished) : fmtShort(h.finished)}`;
       }
-      return fmtDateTime(h.finished || h.started);
+      return fmtShort(h.finished || h.started);
     };
     const kinds = { "": () => true, hits: (h) => h.matched > 0, errors: (h) => (h.errors || []).length > 0 };
     const f = kinds[s.runFilter] ? s.runFilter : "";
-    const trigIcon = { auto: "timer-outline", push: "lightning-bolt-outline", assistant: "robot-outline" };
+    const trigIcon = { auto: "timer-outline", push: "lightning-bolt", assistant: "robot-outline", manual: "gesture-tap" };
     const rows = s.history
       .filter(kinds[f])
       .map((h) => {
@@ -721,8 +721,8 @@ class FriedaPostfachPanel extends HTMLElement {
         const search = [time(h), trig, scope, ...rules.map(([n]) => n), res, ...(h.errors || [])].join(" ").toLowerCase();
         return `<tr data-search="${esc(search)}" class="${errors ? "err" : h.matched ? "hit" : "idle"}">
             <td class="c-time"><span class="nm"><strong>${esc(time(h))}</strong>${(h.runs || 1) > 1 ? `<small>${esc(fmt(t.runsMerged, h.runs))}</small>` : ""}</span></td>
-            <td class="c-trig dim"><span class="fact">${ico(trigIcon[h.trigger] || "gesture-tap")}${esc(trig)}</span></td>
-            <td class="c-scope dim"><span class="nm"><span>${esc(scope)}</span>${h.mailboxes?.length ? `<small>${esc(h.mailboxes.join(", "))}</small>` : ""}</span></td>
+            <td class="c-trig"><span class="tchip t-${esc(trigIcon[h.trigger] ? h.trigger : "manual")}">${ico(trigIcon[h.trigger] || trigIcon.manual)}${esc(trig)}</span></td>
+            <td class="c-scope dim"><span class="scope">${ico(h.scope === "all" ? "email-multiple-outline" : "email-arrow-left-outline", scope)}<span class="sc-txt">${esc(scope)}</span>${(h.mailboxes || []).map((b) => `<span class="chip ic mbox">${ico("inbox-outline")}${esc(b)}</span>`).join("")}</span></td>
             <td class="c-checked num" title="${esc(t.colChecked)}" data-label="${esc(t.colChecked)}">${esc(h.checked ?? 0)}</td>
             <td class="c-matched num" title="${esc(t.colMatched)}" data-label="${esc(t.colMatched)}">${h.matched ? `<strong>${esc(h.matched)}</strong>` : "0"}</td>
             <td class="c-rules">${rules.length ? rules.map(([n, c]) => `<span class="chip">${esc(n)} · ${esc(c)}</span>`).join("") : `<span class="muted">–</span>`}</td>

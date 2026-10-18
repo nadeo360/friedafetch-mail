@@ -52,6 +52,12 @@ export const STYLE = `
   .aiu-scroll { max-height: 560px; overflow-y: auto; }
   .htable .c-time .nm strong { font-weight: 400; }
   .htable .c-trig, .htable .c-res { white-space: nowrap; }
+  .tchip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px 2px 6px; border-radius: 12px; font-size: 13px; white-space: nowrap; --mdc-icon-size: 15px; background: var(--secondary-background-color, #f0f0f0); color: var(--secondary-text-color); }
+  .tchip.t-push { background: color-mix(in srgb, var(--warning-color, #ffa600) 20%, transparent); color: var(--primary-text-color); }
+  .tchip.t-manual { background: color-mix(in srgb, var(--primary-color) 14%, transparent); color: var(--primary-color); }
+  .tchip.t-assistant { background: color-mix(in srgb, var(--info-color, #039be5) 16%, transparent); color: var(--info-color, #039be5); }
+  .htable .scope { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .htable .scope .chip.mbox { margin: 0; font-size: 12px; }
   .htable tr.err .res { color: var(--error-color, #db4437); }
   .htable tr.hit .res { color: var(--success-color, #43a047); }
   .htable tr.idle .res { color: var(--secondary-text-color); }
