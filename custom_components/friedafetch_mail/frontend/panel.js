@@ -11,7 +11,7 @@ const VERSION_QUERY = new URL(import.meta.url).search;
 const [{ I18N }, { STYLE }] = await Promise.all([import(`./i18n.js${VERSION_QUERY}`), import(`./styles.js${VERSION_QUERY}`)]);
 
 // Frieda's design library, served by Frieda itself, so both panels look and behave the same.
-const UI_API = 3;
+const UI_API = 4;
 let W = null;
 try {
   W = await import(`/friedafetch_static/ui.js${VERSION_QUERY}`);
@@ -25,6 +25,14 @@ const { esc, fmt, parseTime, fmtDateTime, fmtClock, fmtShort, ico } = W || { esc
 
 const trigLabel = (t, trig) =>
   trig === "auto" ? t.triggerAuto : trig === "push" ? t.triggerPush : trig === "assistant" ? t.triggerAssistant : t.triggerManual;
+
+// Sortable column header; sort = { key, dir }.
+const sortTh = (action, sort, key, label, cls = "") => {
+  const active = sort.key === key;
+  const icon = active ? (sort.dir < 0 ? "arrow-down" : "arrow-up") : "swap-vertical";
+  return `<th class="${cls}" aria-sort="${active ? (sort.dir < 0 ? "descending" : "ascending") : "none"}"><button class="sort ${active ? "on" : ""}" data-action="${action}" data-k="${key}">${esc(label)}${ico(icon)}</button></th>`;
+};
+const nextSort = (cur, key, firstDir) => (cur.key === key ? { key, dir: -cur.dir } : { key, dir: firstDir });
 
 const SEARCH_KEYS = { rules: "searchRules", aiu: "searchAiu", runs: "searchRuns", rates: "searchRates" };
 
@@ -696,6 +704,19 @@ class FriedaPostfachPanel extends HTMLElement {
     if (hint?.classList.contains("nomatch")) hint.hidden = shown > 0 || !q;
   }
 
+  // Messages a run handled, for the info popup and the expanded row.
+  _mailList(mails, more = 0) {
+    const t = this.t;
+    const icon = (m) => (m.delete ? "delete-outline" : m.move_to ? "folder-move-outline" : m.flag ? "flag-outline" : m.seen ? "email-open-outline" : "check");
+    const what = (m) => (m.delete ? t.aDelete : m.move_to ? `→ ${m.move_to}` : m.flag ? t.aFlag : m.seen === true ? t.aSeen : m.seen === false ? t.aUnseen : "");
+    const items = mails
+      .map(
+        (m) => `<li>${ico(icon(m))}<span class="t-subj">${esc(m.subject || "–")}</span><span class="t-meta">${esc([m.from, (m.rules || []).join(", "), what(m)].filter(Boolean).join(" · "))}</span></li>`
+      )
+      .join("");
+    return `<ul class="tip-list">${items}</ul>${more ? `<div class="muted" style="margin-top:6px">${esc(fmt(t.runMailsMore, more))}</div>` : ""}`;
+  }
+
   _renderHistory() {
     const t = this.t;
     const s = this._s;
@@ -711,25 +732,43 @@ class FriedaPostfachPanel extends HTMLElement {
     const kinds = { "": () => true, hits: (h) => h.matched > 0, errors: (h) => (h.errors || []).length > 0 };
     const f = kinds[s.runFilter] ? s.runFilter : "";
     const trigIcon = { auto: "timer-outline", push: "lightning-bolt", assistant: "robot-outline", manual: "gesture-tap" };
+    const sort = s.runsSort || { key: "time", dir: -1 };
+    const runValue = (h) =>
+      ({
+        time: parseTime(h.finished || h.started)?.getTime() || 0,
+        trig: trigLabel(t, h.trigger),
+        checked: Number(h.checked || 0),
+        matched: Number(h.matched || 0),
+        res: (h.errors || []).length ? 2 : h.matched ? 1 : 0,
+      })[sort.key];
     const rows = s.history
-      .filter(kinds[f])
-      .map((h) => {
+      .map((h, i) => ({ h, i }))
+      .filter(({ h }) => kinds[f](h))
+      .sort((x, y) => {
+        const a = runValue(x.h);
+        const b = runValue(y.h);
+        return (a < b ? -1 : a > b ? 1 : 0) * sort.dir || x.i - y.i;
+      })
+      .map(({ h }) => {
         const trig = trigLabel(t, h.trigger);
         const scope = h.scope === "all" ? t.scopeAll : t.scopeNew;
         const errors = (h.errors || []).length;
         const res = errors ? t.resError : h.matched ? t.resOk : t.resIdle;
         const resIcon = errors ? "alert-circle-outline" : h.matched ? "check-circle-outline" : "minus-circle-outline";
         const rules = Object.entries(h.rules || {});
-        const search = [time(h), trig, scope, ...rules.map(([n]) => n), res, ...(h.errors || [])].join(" ").toLowerCase();
+        const mails = h.mails || [];
+        const mailList = mails.length ? this._mailList(mails, h.mails_more) : "";
+        const open = s.runOpen === h.id && mailList;
+        const search = [time(h), trig, scope, ...rules.map(([n]) => n), res, ...(h.errors || []), ...mails.map((m) => `${m.subject} ${m.from}`)].join(" ").toLowerCase();
         return `<tr data-search="${esc(search)}" class="${errors ? "err row-err" : h.matched ? "hit" : "idle"}">
             <td class="c-time"><span class="nm"><strong>${esc(time(h))}</strong>${(h.runs || 1) > 1 ? `<small>${esc(fmt(t.runsMerged, h.runs))}</small>` : ""}</span></td>
             <td class="c-trig"><span class="tchip t-${esc(trigIcon[h.trigger] ? h.trigger : "manual")}" title="${esc(trig)}">${ico(trigIcon[h.trigger] || trigIcon.manual)}<span class="tl">${esc(trig)}</span></span></td>
             <td class="c-scope dim"><span class="scope">${ico(h.scope === "all" ? "email-multiple-outline" : "email-arrow-left-outline", scope)}<span class="sc-txt">${esc(scope)}</span>${(h.mailboxes || []).map((b) => `<span class="chip ic mbox">${ico("inbox-outline")}${esc(b)}</span>`).join("")}</span></td>
             <td class="c-checked num" title="${esc(t.colChecked)}" data-label="${esc(t.colChecked)}">${esc(h.checked ?? 0)}</td>
-            <td class="c-matched num" title="${esc(t.colMatched)}" data-label="${esc(t.colMatched)}">${h.matched ? `<strong>${esc(h.matched)}</strong>` : "0"}</td>
+            <td class="c-matched num" title="${esc(t.colMatched)}" data-label="${esc(t.colMatched)}">${mailList ? W.infoTip(mailList, { label: t.runMails, action: "run-open", data: { id: h.id } }) : ""}${h.matched ? `<strong>${esc(h.matched)}</strong>` : "0"}</td>
             <td class="c-rules">${rules.length ? rules.map(([n, c]) => `<span class="chip">${esc(n)} · ${esc(c)}</span>`).join("") : `<span class="muted">–</span>`}</td>
             <td class="c-res"><span class="fact res" title="${esc(errors ? h.errors.join("; ") : res)}">${ico(resIcon)}${esc(res)}</span>${errors ? `<div class="muted">${esc(h.errors.join("; "))}</div>` : ""}</td>
-          </tr>`;
+          </tr>${open ? `<tr class="detail"><td colspan="7"><div class="det"><div class="lbl">${esc(t.runMails)}</div>${mailList}</div></td></tr>` : ""}`;
       })
       .join("");
     const cols = [
@@ -755,8 +794,8 @@ class FriedaPostfachPanel extends HTMLElement {
               <div class="segs" role="group">${seg("", "format-list-bulleted", t.filterAllRules)}${seg("hits", "check-circle-outline", t.runsWithHits)}${seg("errors", "alert-circle-outline", t.resError)}</div>
               <span class="grow"></span>${W.columnMenu(this._layout, "runs", cols, t)}
             </div>${W.columnStyle(this._layout, "runs", cols)}
-            <div class="scroll"><table class="dtable htable" data-table="runs"><thead><tr>
-              <th class="c-time">${esc(t.colTime)}</th><th class="c-trig">${esc(t.colTrigger)}</th><th class="c-scope">${esc(t.colScope)}</th><th class="c-checked num">${esc(t.colChecked)}</th><th class="c-matched num">${esc(t.colMatched)}</th><th class="c-rules">${esc(t.colRules)}</th><th class="c-res">${esc(t.colResult)}</th>
+            <div class="scroll menus"><table class="dtable htable" data-table="runs"><thead><tr>
+              ${sortTh("runs-sort", sort, "time", t.colTime, "c-time")}${sortTh("runs-sort", sort, "trig", t.colTrigger, "c-trig")}<th class="c-scope">${esc(t.colScope)}</th>${sortTh("runs-sort", sort, "checked", t.colChecked, "c-checked num")}${sortTh("runs-sort", sort, "matched", t.colMatched, "c-matched num")}<th class="c-rules">${esc(t.colRules)}</th>${sortTh("runs-sort", sort, "res", t.colResult, "c-res")}
             </tr></thead><tbody>${rows || `<tr><td colspan="7" class="muted">${esc(t.noMatches)}</td></tr>`}</tbody></table></div>
             <p class="muted nomatch" hidden>${esc(t.noMatches)}</p>`
           : `<p class="muted">${esc(t.noHistory)}</p>`
@@ -882,8 +921,17 @@ class FriedaPostfachPanel extends HTMLElement {
     const others = s.accounts.filter((a) => a.entry_id !== s.entryId);
     const item = (action, id, icon, label, extra = "", cls = "") =>
       `<button class="${cls}" data-action="${action}" data-id="${esc(id)}" ${extra}>${ico(icon)}<span class="mi"><span>${esc(label)}</span></span></button>`;
+    const sort = s.rulesSort || { key: "pos", dir: 1 };
+    const sorted = sort.key !== "pos" || sort.dir !== 1;
+    const ruleValue = (r, i) => ({ pos: i, name: String(r.name || "").toLowerCase(), hits: Number(r.hits || 0) })[sort.key];
     const rows = s.rules
-      .map((r, i) => {
+      .map((r, i) => ({ r, i }))
+      .sort((x, y) => {
+        const a = ruleValue(x.r, x.i);
+        const b = ruleValue(y.r, y.i);
+        return (a < b ? -1 : a > b ? 1 : 0) * sort.dir || x.i - y.i;
+      })
+      .map(({ r, i }) => {
         if (!tests[f](r)) return "";
         const editingThis = s.editing && s.editing.id === r.id;
         const open = editingThis || s.expanded.has(r.id);
@@ -893,8 +941,8 @@ class FriedaPostfachPanel extends HTMLElement {
         const menu = `<details class="menu rowmenu"><summary aria-label="${esc(t.moreActions)}" title="${esc(t.moreActions)}">${ico("dots-vertical")}</summary><div class="menu-list">
             ${item("edit", r.id, "pencil-outline", t.edit, s.editing ? "disabled" : "")}
             ${item("test", r.id, "play-outline", t.testRuleHint, s.busy ? "disabled" : "")}
-            ${item("up", r.id, "arrow-up", t.up, i === 0 ? "disabled" : "")}
-            ${item("down", r.id, "arrow-down", t.down, i === s.rules.length - 1 ? "disabled" : "")}
+            ${item("up", r.id, "arrow-up", t.up, i === 0 || sorted ? "disabled" : "")}
+            ${item("down", r.id, "arrow-down", t.down, i === s.rules.length - 1 || sorted ? "disabled" : "")}
             ${others.map((a) => item("copy-to", r.id, "content-copy", fmt(t.copyToAccount, a.label), `data-target="${esc(a.entry_id)}"`)).join("")}
             <hr>
             ${item("delete", r.id, "delete-outline", t.remove, "", "danger-item")}
@@ -926,8 +974,9 @@ class FriedaPostfachPanel extends HTMLElement {
         <div class="segs" role="group">${seg("", "format-list-bulleted", t.filterAllRules)}${seg("on", "check-circle-outline", t.enabled)}${seg("off", "pause-circle-outline", t.inactive)}${seg("delete", "delete-outline", t.aDelete)}${seg("move", "folder-move-outline", t.moves)}</div>
         <span class="grow"></span>${W.columnMenu(this._layout, "rules", ruleCols, t)}
       </div>${W.columnStyle(this._layout, "rules", ruleCols)}
+      ${sorted ? `<p class="sortnote">${ico("information-outline")}<span>${esc(t.sortedView)}</span><button class="link" data-action="rules-sort" data-k="pos">${esc(t.showOrder)}</button></p>` : ""}
       <div class="scroll menus"><table class="dtable rtable" data-table="rules"><thead><tr>
-        <th class="c-pos num" title="${esc(t.orderHint)}">#</th><th class="c-on"><span class="vh">${esc(t.enabled)}</span></th><th>${esc(t.name)}</th><th class="c-cond">${esc(t.conditions)}</th><th class="c-act">${esc(t.actions)}</th><th class="c-hits num">${esc(t.hits)}</th><th class="c-menu"><span class="vh">${esc(t.moreActions)}</span></th>
+        ${sortTh("rules-sort", sort, "pos", "#", "c-pos num")}<th class="c-on"><span class="vh">${esc(t.enabled)}</span></th>${sortTh("rules-sort", sort, "name", t.name)}<th class="c-cond">${esc(t.conditions)}</th><th class="c-act">${esc(t.actions)}</th>${sortTh("rules-sort", sort, "hits", t.hits, "c-hits num")}<th class="c-menu"><span class="vh">${esc(t.moreActions)}</span></th>
       </tr></thead><tbody>${rows || `<tr><td colspan="7" class="muted">${esc(t.noMatches)}</td></tr>`}</tbody></table></div>
       <p class="muted nomatch" hidden>${esc(t.noMatches)}</p>`;
   }
@@ -1131,6 +1180,23 @@ class FriedaPostfachPanel extends HTMLElement {
         },
         "expand-all": () => {
           this._s.expanded = el.dataset.open === "1" ? new Set(this._s.rules.map((r) => r.id)) : new Set();
+          this._render();
+        },
+        "runs-sort": () => {
+          const key = el.dataset.k;
+          this._s.runsSort = nextSort(this._s.runsSort || { key: "time", dir: -1 }, key, ["trig"].includes(key) ? 1 : -1);
+          this._render();
+        },
+        "rules-sort": () => {
+          const key = el.dataset.k;
+          const cur = this._s.rulesSort || { key: "pos", dir: 1 };
+          // the note's "show order" link always returns to the execution order
+          this._s.rulesSort = el.closest(".sortnote") ? { key: "pos", dir: 1 } : nextSort(cur, key, key === "hits" ? -1 : 1);
+          this._render();
+        },
+        "run-open": () => {
+          const id = Number(el.dataset.id);
+          this._s.runOpen = this._s.runOpen === id ? null : id;
           this._render();
         },
         "run-filter": () => {

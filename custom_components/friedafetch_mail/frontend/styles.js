@@ -18,6 +18,7 @@ export const STYLE = `
   .rdet .lbl, .adet .lbl { font-size: 12px; color: var(--secondary-text-color); margin-bottom: 3px; }
   .rdet-tools { display: flex; flex-wrap: wrap; gap: 6px; }
   .adet-meta { font-size: 12px; }
+  .sortnote { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 0 0 8px; padding: 6px 10px; border-radius: 8px; font-size: 13px; color: var(--secondary-text-color); background: color-mix(in srgb, var(--info-color, #039be5) 8%, transparent); --mdc-icon-size: 16px; }
   .rule-new { margin-bottom: 10px; border: 1px solid color-mix(in srgb, var(--primary-color) 45%, var(--divider-color, #e0e0e0)); border-radius: 12px; }
   .atable .c-st { width: 40px; }
   .atable .c-st .aiu-st { width: 30px; height: 30px; --mdc-icon-size: 16px; }
@@ -50,7 +51,8 @@ export const STYLE = `
   .atable tr.held .aiu-st { background: color-mix(in srgb, var(--success-color, #43a047) 16%, transparent); color: var(--success-color, #43a047); }
   .atable tr.err .aiu-st { background: color-mix(in srgb, var(--error-color, #db4437) 14%, transparent); color: var(--error-color, #db4437); }
   .aiu-scroll { max-height: 560px; overflow-y: auto; }
-  .htable .c-time .nm strong { font-weight: 400; }
+  .htable .c-time { white-space: nowrap; }
+  .htable .c-time .nm strong { font-weight: 400; overflow: visible; text-overflow: clip; }
   .htable .c-trig, .htable .c-res { white-space: nowrap; }
   .tchip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px 2px 6px; border-radius: 12px; font-size: 13px; white-space: nowrap; --mdc-icon-size: 15px; background: var(--secondary-background-color, #f0f0f0); color: var(--secondary-text-color); }
   .tchip.t-push { background: color-mix(in srgb, var(--warning-color, #ffa600) 20%, transparent); color: var(--primary-text-color); }
@@ -58,6 +60,8 @@ export const STYLE = `
   .tchip.t-assistant { background: color-mix(in srgb, var(--info-color, #039be5) 16%, transparent); color: var(--info-color, #039be5); }
   .htable .scope { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .htable .scope .chip.mbox { margin: 0; font-size: 12px; }
+  .htable .c-matched .infotip { margin-right: 6px; }
+  .htable .c-matched { white-space: nowrap; }
   .htable tr.err .res { color: var(--error-color, #db4437); }
   .htable tr.hit .res { color: var(--success-color, #43a047); }
   .htable tr.idle .res { color: var(--secondary-text-color); }
@@ -156,7 +160,10 @@ export const STYLE = `
     .htable .c-res .muted { display: none; }
     .htable .c-rules { grid-column: 2 / 4; grid-row: 2; }
     .htable .c-rules .chip { margin: 0 4px 0 0; }
-    .htable .c-rules:has(> .muted), .htable .c-scope, .htable .c-checked, .htable .c-matched { display: none !important; }
+    .htable .c-rules:has(> .muted), .htable .c-scope, .htable .c-checked { display: none !important; }
+    .htable .c-matched { grid-column: 1; grid-row: 2; justify-self: center; }
+    .htable .c-matched strong, .htable .c-matched::before { display: none; }
+    .htable .c-matched:not(:has(.infotip)) { display: none !important; }
     .rtable .c-on { grid-area: on; }
     .rtable .c-name { grid-area: name; }
     .rtable .c-hits { grid-area: hits; font-size: 12px; color: var(--secondary-text-color); }

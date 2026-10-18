@@ -376,6 +376,20 @@ async def test_run_history_merges_idle_auto_runs(hass: HomeAssistant) -> None:
     history = engine.history()
     assert [h["runs"] for h in history] == [1, 1, 3]
     assert history[1]["matched"] == 1 and history[1]["rules"] == {"News": 1} and history[1]["trigger"] == "auto"
+    # the run remembers which message it handled (for the info popup in the panel)
+    assert history[1]["mails"] == [
+        {
+            "subject": NEWSLETTER["subject"],
+            "from": NEWSLETTER["from"][0]["email"],
+            "mailbox": "INBOX",
+            "rules": ["News"],
+            "move_to": None,
+            "delete": False,
+            "seen": True,
+            "flag": None,
+        }
+    ]
+    assert history[1]["mails_more"] == 0 and history[2]["mails"] == []
     audit.async_record.assert_awaited_once()
     kwargs = audit.async_record.await_args.kwargs
     assert kwargs["client"] == "rules (auto)" and kwargs["details"]["trigger"] == "auto"
@@ -469,3 +483,16 @@ async def test_new_scope_asks_only_for_new_uids_and_handles_renumbering(hass: Ho
     assert report["skipped"][0]["code"] == "uidvalidity"
     mail.async_delete.assert_not_awaited()
     assert engine._last_uid["INBOX"] == 3 and engine._uidvalidity["INBOX"] == 900  # noqa: SLF001
+
+
+def test_handled_mails_are_merged_and_capped() -> None:
+    from custom_components.friedafetch_mail.rules import HISTORY_MAILS, _handled_mails
+
+    actions = [
+        {"uid": 1, "mailbox": "INBOX", "rule": "A", "subject": "x" * 500, "from": ["a@b.c"], "delete": True},
+        {"uid": 1, "mailbox": "INBOX", "rule": "B", "subject": "x" * 500, "from": ["a@b.c"], "delete": True},
+        *[{"uid": n, "mailbox": "INBOX", "rule": "A", "subject": f"s{n}", "from": []} for n in range(2, 40)],
+    ]
+    mails = _handled_mails(actions)
+    assert len(mails) == 39 and mails[0]["rules"] == ["A", "B"] and len(mails[0]["subject"]) == 200
+    assert mails[1]["from"] == "" and HISTORY_MAILS < len(mails)

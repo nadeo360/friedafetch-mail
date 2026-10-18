@@ -38,6 +38,7 @@ MAX_RULES = 100
 MAX_SCAN_ALL = 2000  # newest messages inspected for scope="all"
 _SUMMARY_CHUNK = 200
 HISTORY_MAX = 200  # stored runs per account
+HISTORY_MAILS = 20  # handled messages remembered per run (subject, sender, rules, action) for the panel
 # Unattended runs (timer, push) and runs requested by an AI client change at most this many messages per run,
 # and they count against Frieda's hourly quota for mail changes; the rest follows in the next run.
 MAX_CHANGES_PER_RUN = 100
@@ -592,6 +593,7 @@ class RuleEngine:
         for act in report["actions"]:
             uids_per_rule.setdefault(act["rule"], set()).add((act.get("mailbox"), act["uid"]))
         per_rule = {name: len(uids) for name, uids in uids_per_rule.items()}
+        mails = _handled_mails(report["actions"])
         idle = report["trigger"] in ("auto", "push") and not report["matched"] and not report["errors"]
         last = self._history[-1] if self._history else None
         if (
@@ -618,6 +620,8 @@ class RuleEngine:
                 "matched": report["matched"],
                 "actions": len(report["actions"]),
                 "rules": per_rule,
+                "mails": mails[:HISTORY_MAILS],
+                "mails_more": max(0, len(mails) - HISTORY_MAILS),
                 "errors": [e.get("error", "") for e in report["errors"]][:5],
                 "skipped": len(report["skipped"]),
                 "saved_files": len(report.get("saved_files") or []),
@@ -861,6 +865,30 @@ class RuleEngine:
             await coro
         except (MailError, MailboxNotFound) as err:
             report["errors"].append({"error": str(err)})
+
+
+def _handled_mails(actions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One entry per handled message (a message can match several rules), in the order of the run."""
+    mails: dict[tuple[Any, Any], dict[str, Any]] = {}
+    for act in actions:
+        key = (act.get("mailbox"), act.get("uid"))
+        sender = act.get("from") or []
+        mail = mails.setdefault(
+            key,
+            {
+                "subject": str(act.get("subject") or "")[:200],
+                "from": str(sender[0] if sender else "")[:200],
+                "mailbox": act.get("mailbox"),
+                "rules": [],
+                "move_to": act.get("move_to"),
+                "delete": bool(act.get("delete")),
+                "seen": act.get("mark_seen"),
+                "flag": act.get("flag"),
+            },
+        )
+        if act.get("rule") and act["rule"] not in mail["rules"]:
+            mail["rules"].append(act["rule"])
+    return list(mails.values())
 
 
 def _now_iso() -> str:

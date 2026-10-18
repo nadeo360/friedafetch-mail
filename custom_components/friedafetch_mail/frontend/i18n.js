@@ -21,6 +21,10 @@ export const I18N = {
     colPos: "Position",
     searchRuns: "Ausführungen durchsuchen",
     runsWithHits: "Mit Treffern",
+    sortedView: "Nur die Ansicht ist sortiert – die Regeln laufen weiter in der Reihenfolge #.",
+    showOrder: "Reihenfolge zeigen",
+    runMails: "Behandelte Mails",
+    runMailsMore: "und {0} weitere",
 
     moreActions: "Weitere Aktionen",
     copyToAccount: "Kopieren nach {0}",
@@ -296,6 +300,10 @@ export const I18N = {
     colPos: "Position",
     searchRuns: "Search runs",
     runsWithHits: "With hits",
+    sortedView: "Only the view is sorted – rules still run in the order #.",
+    showOrder: "Show order",
+    runMails: "Handled messages",
+    runMailsMore: "and {0} more",
 
     moreActions: "More actions",
     copyToAccount: "Copy to {0}",
