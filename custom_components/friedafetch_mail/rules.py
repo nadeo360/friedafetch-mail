@@ -9,8 +9,10 @@ used before 2.0 (``friedafetch.rules.<account>``), so existing rules carry over.
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import re
+import time
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -42,6 +44,116 @@ MAX_DELETES_PER_RUN = 50
 LIMITED_TRIGGERS = ("auto", "push", "assistant")
 
 
+# --------------------------------------------------------------- regex safety
+# Python's re has no timeout: a pattern with nested unbounded repetition such as (a+)+$ needs exponential time on
+# a short subject (35 characters: half an hour) and would block Home Assistant. Rules can be created by an AI,
+# so such patterns are refused when saved and skipped when stored ones are evaluated.
+try:  # the parser of the standard library (stable since Python 3.11)
+    from re import _constants as _sre_c
+    from re import _parser as _sre_parse
+except ImportError:  # pragma: no cover
+    _sre_parse = None
+MAX_REGEX_INPUT = 300  # characters of a header that a regex condition looks at
+REGEX_BUDGET = 0.05  # seconds a pattern may need on a hostile header of MAX_REGEX_INPUT characters
+_UNBOUNDED = 10  # repeating a variable part more often than this counts as nested (e.g. (a|aa){1,50})
+
+
+def _repeats(op: Any) -> bool:
+    return op in (_sre_c.MAX_REPEAT, _sre_c.MIN_REPEAT, getattr(_sre_c, "POSSESSIVE_REPEAT", None))
+
+
+def _variable(items: Any) -> bool:
+    """Can this part match texts of different length in different ways (repetition or alternation)?"""
+    for op, av in items:
+        if _repeats(op):
+            low, high, sub = av
+            if high != low or _variable(sub):
+                return True
+        elif op is _sre_c.BRANCH:
+            return True
+        elif op is _sre_c.SUBPATTERN and _variable(av[-1]):
+            return True
+        elif op in (_sre_c.ASSERT, _sre_c.ASSERT_NOT) and _variable(av[1]):
+            return True
+    return False
+
+
+def _nested_repeat(items: Any) -> bool:
+    for op, av in items:
+        if _repeats(op):
+            _low, high, sub = av
+            if (high == _sre_c.MAXREPEAT or high > _UNBOUNDED) and _variable(sub):
+                return True
+            if _nested_repeat(sub):
+                return True
+        elif op is _sre_c.BRANCH:
+            if any(_nested_repeat(alt) for alt in av[1]):
+                return True
+        elif op is _sre_c.SUBPATTERN:
+            if _nested_repeat(av[-1]):
+                return True
+        elif op in (_sre_c.ASSERT, _sre_c.ASSERT_NOT) and _nested_repeat(av[1]):
+            return True
+    return False
+
+
+def _probe_texts(tree: Any, length: int) -> list[str]:
+    """Hostile headers built from the pattern's own characters (long runs that almost match, then fail)."""
+    chars: list[str] = []
+
+    def collect(items: Any) -> None:
+        for op, av in items:
+            if op is _sre_c.LITERAL and len(chars) < 6:
+                ch = chr(av)
+                if ch.isprintable() and ch not in chars:
+                    chars.append(ch)
+            elif _repeats(op):
+                collect(av[2])
+            elif op is _sre_c.BRANCH:
+                for alt in av[1]:
+                    collect(alt)
+            elif op is _sre_c.SUBPATTERN:
+                collect(av[-1])
+
+    collect(tree)
+    for ch in ("a", " ", "0"):
+        if ch not in chars:
+            chars.append(ch)
+    texts = []
+    for ch in chars:
+        texts += [ch * length, ch * (length - 1) + "!"]
+    texts.append(("ab" * length)[:length])
+    return texts
+
+
+@functools.lru_cache(maxsize=512)
+def risky_regex(pattern: str) -> bool:
+    """True for patterns that can take exponential or high-polynomial time on a short header.
+
+    Nested unbounded repetition (exponential) is refused from the syntax tree. Everything else is measured once
+    against hostile headers of growing length up to MAX_REGEX_INPUT; the result is cached per pattern.
+    """
+    if _sre_parse is None:
+        return False
+    try:
+        tree = _sre_parse.parse(pattern, re.IGNORECASE)
+        if _nested_repeat(tree):
+            return True
+        compiled = re.compile(pattern, re.IGNORECASE)
+    except Exception:  # noqa: BLE001 - unparsable: treat as unsafe
+        return True
+    # grow in steps of two and allow at most quadratic growth towards the budget: anything steeper is caught at a
+    # short length, so a single probe never runs for long
+    for length in (10, 20, 40, 80, 160, MAX_REGEX_INPUT):
+        allowed = max(0.002, REGEX_BUDGET * (length / MAX_REGEX_INPUT) ** 2)
+        for text in _probe_texts(tree, length):
+            start = time.perf_counter()
+            compiled.search(text)
+            if time.perf_counter() - start > allowed:
+                return True
+    return False
+
+
 class RuleError(ValueError):
     """Invalid rule definition (a ValueError, so Frieda's tool base reports it as a failed call)."""
 
@@ -70,6 +182,11 @@ class Condition:
                 re.compile(self.value, re.IGNORECASE)
             except re.error as err:
                 raise RuleError(f"Invalid regex {self.value!r}: {err}") from err
+            if risky_regex(self.value):
+                raise RuleError(
+                    f"Regex {self.value!r} could block Home Assistant on some subjects: avoid repeating a repeated or "
+                    "alternative part (like (a+)+) and chains of open-ended repetitions (like a+a+a+)"
+                )
 
     def matches(self, summary: dict[str, Any]) -> bool:
         haystacks = _field_values(summary, self.field)
@@ -89,8 +206,9 @@ class Condition:
                 for addr in re.findall(r"[\w.+-]+@([\w.-]+)", text):
                     if addr == dom or addr.endswith("." + dom):
                         return True
-            if self.op == "regex" and re.search(self.value, hay, re.IGNORECASE):
-                return True
+            if self.op == "regex" and not risky_regex(self.value):
+                if re.search(self.value, hay[:MAX_REGEX_INPUT], re.IGNORECASE):
+                    return True
         return False
 
 
