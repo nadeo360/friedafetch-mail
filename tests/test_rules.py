@@ -78,6 +78,12 @@ def _mail(uids: list[int], summaries: list[dict]) -> MagicMock:
         return_value=[{"name": n, "special_use": None} for n in ("INBOX", "Archive", "Junk", "Deleted Messages")]
     )
     mail.async_search_uids = AsyncMock(return_value=list(uids))
+    # incremental search: answers from the same uid list (tests change async_search_uids.return_value)
+    mail.async_new_uids = AsyncMock(
+        side_effect=lambda box, after: [u for u in mail.async_search_uids.return_value if u > after]
+    )
+    mail.async_last_uid = AsyncMock(side_effect=lambda box: max(mail.async_search_uids.return_value, default=0))
+    mail.uidvalidity = MagicMock(return_value=None)
     mail.async_summaries = AsyncMock(side_effect=lambda box, wanted: [s for s in summaries if s["uid"] in wanted])
     mail.async_set_flags = AsyncMock(return_value={})
     mail.async_move = AsyncMock(return_value={})
@@ -390,7 +396,8 @@ async def test_run_history_records_errors(hass: HomeAssistant) -> None:
     from custom_components.friedafetch.mail import MailError
 
     mail = _mail([11], [NEWSLETTER])
-    mail.async_search_uids.side_effect = MailError("IMAP timeout")
+    for method in (mail.async_search_uids, mail.async_new_uids, mail.async_last_uid):
+        method.side_effect = MailError("IMAP timeout")
     audit = MagicMock()
     audit.async_record = AsyncMock()
     engine = RuleEngine(hass, "entry-history-err", mail, audit=audit)
@@ -426,3 +433,39 @@ async def test_history_websocket(hass: HomeAssistant, hass_ws_client) -> None:
     await ws.send_json({"id": 2, "type": "friedafetch_mail/rules/history/clear", "entry_id": entry.entry_id})
     msg = await ws.receive_json()
     assert msg["success"] and rules.history() == []
+
+
+async def test_new_scope_asks_only_for_new_uids_and_handles_renumbering(hass: HomeAssistant) -> None:
+    mail = _mail([11, 12, 13], [NEWSLETTER, BOSS, SPAM])
+    mail.uidvalidity.return_value = 777
+    engine = RuleEngine(hass, "e1", mail)
+    await engine.async_load()
+    with patch(
+        "custom_components.friedafetch.mail.ICloudMail.async_mailboxes",
+        AsyncMock(return_value=[{"name": "INBOX"}, {"name": "Archive"}]),
+    ):
+        await engine.async_create(
+            {
+                "name": "Spam",
+                "conditions": [{"field": "from", "op": "domain", "value": "spam.example"}],
+                "actions": {"delete": True},
+            }
+        )
+    report = await engine.async_run(scope="new", trigger="auto")
+    assert report["skipped"][0]["code"] == "baseline"
+    mail.async_last_uid.assert_awaited_once()
+    mail.async_search_uids.assert_not_awaited()  # no full listing for the baseline
+
+    mail.async_search_uids.return_value = [11, 12, 13, 14]
+    await engine.async_run(scope="new", trigger="auto")
+    mail.async_new_uids.assert_awaited_with("INBOX", 13)
+    assert engine._last_uid["INBOX"] == 14  # noqa: SLF001
+
+    # the server renumbers the mailbox: nothing is processed, the baseline is set again
+    mail.uidvalidity.return_value = 900
+    mail.async_search_uids.return_value = [1, 2, 3]
+    mail.async_delete.reset_mock()
+    report = await engine.async_run(scope="new", trigger="auto")
+    assert report["skipped"][0]["code"] == "uidvalidity"
+    mail.async_delete.assert_not_awaited()
+    assert engine._last_uid["INBOX"] == 3 and engine._uidvalidity["INBOX"] == 900  # noqa: SLF001

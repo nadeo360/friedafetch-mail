@@ -144,10 +144,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
     core_opts = core.options
     opts = entry.options
 
+    # own IMAP connection for rules and AI sorting, so background work and AI clients never wait for each other
+    factory = getattr(clients, "mail_factory", None)
+    auto_mail = factory() if callable(factory) else clients.mail
+    if auto_mail is not clients.mail:
+        entry.async_on_unload(auto_mail.async_close)
+
     rules = RuleEngine(
         hass,
         core.entry_id,
-        clients.mail,
+        auto_mail,
         allow_delete=core_opts.get(CONF_ALLOW_DELETE, DEFAULT_ALLOW_DELETE),
         guard=clients.guard,
         audit=clients.audit,
@@ -179,7 +185,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
 
     # AI sorting exists only when it was switched on deliberately and an AI entity is chosen
     sorter = AiSorter(
-        hass, core.entry_id, clients, dict(opts), notify=_notify_important, language=hass.config.language or "en"
+        hass,
+        core.entry_id,
+        clients,
+        dict(opts),
+        notify=_notify_important,
+        language=hass.config.language or "en",
+        mail=auto_mail,
     )
     await sorter.async_load()
     link.ai = sorter

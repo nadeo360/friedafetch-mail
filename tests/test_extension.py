@@ -292,3 +292,16 @@ async def test_birthday_sensor(hass: HomeAssistant) -> None:
     states = [s for s in hass.states.async_all("sensor") if "birthday" in s.entity_id or "geburtstag" in s.entity_id]
     assert len(states) == 1
     assert states[0].state == today.isoformat() and states[0].attributes["names"] == ["Anna"]
+
+
+async def test_background_work_uses_its_own_connection(hass: HomeAssistant) -> None:
+    core = await setup_core(hass)
+    with patch("custom_components.friedafetch.mail.ICloudMail.async_close", AsyncMock()) as close:
+        entry = await setup_postfach(hass, core, rules_auto=False)
+        link = entry.runtime_data
+        clients = core.runtime_data
+        assert link.rules._mail is not clients.mail  # noqa: SLF001 - rules do not wait for AI clients
+        assert link.ai._mail is link.rules._mail  # noqa: SLF001
+        assert await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()
+    close.assert_awaited_once()  # only the extra connection is closed with the entry; Frieda's stays open

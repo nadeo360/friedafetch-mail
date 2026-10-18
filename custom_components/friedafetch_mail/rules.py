@@ -210,6 +210,7 @@ class RuleEngine:
         self._store: Store[dict[str, Any]] = Store(hass, STORAGE_VERSION, f"{CORE_DOMAIN}.rules.{entry_id}")
         self._rules: list[Rule] = []
         self._last_uid: dict[str, int] = {}
+        self._uidvalidity: dict[str, int] = {}
         self._loaded = False
         self._lock = asyncio.Lock()
         self.allow_delete = allow_delete
@@ -231,6 +232,7 @@ class RuleEngine:
         data = await self._store.async_load() or {}
         self._rules = [Rule.from_dict(r) for r in data.get("rules", [])]
         self._last_uid = {k: int(v) for k, v in (data.get("last_uid") or {}).items()}
+        self._uidvalidity = {k: int(v) for k, v in (data.get("uidvalidity") or {}).items()}
         self.last_run = data.get("last_run")
         self.last_check = data.get("last_check")
         self._history = list(data.get("history") or [])[-HISTORY_MAX:]
@@ -241,6 +243,7 @@ class RuleEngine:
         return {
             "rules": [r.to_dict() for r in self._rules],
             "last_uid": self._last_uid,
+            "uidvalidity": self._uidvalidity,
             "last_run": self.last_run,
             "last_check": self.last_check,
             "history": self._history,
@@ -483,22 +486,36 @@ class RuleEngine:
         limit: int,
         report: dict[str, Any],
     ) -> None:
-        uids = await self._mail.async_search_uids(box, ["ALL"])
-        if not uids:
-            return
-        max_uid = max(uids)
         last = self._last_uid.get(box)
         if scope == "new":
             if last is None:
                 # first run: establish a baseline instead of processing the backlog
                 if not dry_run:
-                    self._last_uid[box] = max_uid
+                    self._last_uid[box] = await self._mail.async_last_uid(box)
+                    self._remember_validity(box)
                 report["skipped"].append(
                     {"mailbox": box, "code": "baseline", "reason": "baseline set, run again or use scope 'all'"}
                 )
                 return
-            candidates = [u for u in uids if u > last]
+            # only the new range is fetched from the server, not every UID of the mailbox
+            candidates = await self._mail.async_new_uids(box, last)
+            if self._validity_changed(box):
+                # the server renumbered the mailbox: old UIDs mean nothing, start again from the newest message
+                if not dry_run:
+                    self._last_uid[box] = await self._mail.async_last_uid(box)
+                    self._remember_validity(box)
+                report["skipped"].append(
+                    {"mailbox": box, "code": "uidvalidity", "reason": "the mailbox was renumbered; baseline set again"}
+                )
+                return
+            if not candidates:
+                return
+            max_uid = max(candidates)
         else:
+            uids = await self._mail.async_search_uids(box, ["ALL"])
+            if not uids:
+                return
+            max_uid = max(uids)
             candidates = sorted(uids, reverse=True)[: max(1, min(limit, MAX_SCAN_ALL))]
         if not dry_run and scope == "new":
             self._last_uid[box] = max_uid
@@ -617,6 +634,25 @@ class RuleEngine:
                 targets.setdefault(d["move_to"], []).append(uid)
         for target, group in targets.items():
             await self._safe(report, self._mail.async_move(box, group, target))
+
+    def _current_validity(self, box: str) -> int | None:
+        getter = getattr(self._mail, "uidvalidity", None)
+        value = getter(box) if callable(getter) else None
+        return value if isinstance(value, int) else None
+
+    def _remember_validity(self, box: str) -> None:
+        if (value := self._current_validity(box)) is not None:
+            self._uidvalidity[box] = value
+
+    def _validity_changed(self, box: str) -> bool:
+        current = self._current_validity(box)
+        if current is None:
+            return False
+        known = self._uidvalidity.get(box)
+        if known is None:  # stores from older versions: learn it now
+            self._uidvalidity[box] = current
+            return False
+        return current != known
 
     def _limit_plan(self, box: str, plan: dict[int, dict[str, Any]], scope: str, report: dict[str, Any]) -> None:
         """Per-run cap and hourly quota for unattended and AI-requested runs; defers the rest to the next run."""

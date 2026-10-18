@@ -199,10 +199,11 @@ class AiSorter:
         *,
         notify: Any | None = None,
         language: str = "en",
+        mail: Any | None = None,
     ) -> None:
         self._hass = hass
         self._clients = clients
-        self._mail = clients.mail
+        self._mail = mail or clients.mail  # Frieda Postfach passes its own background connection
         self.settings = ai_settings(opts)
         self._notify = notify  # async (title, message) -> None
         self._language = "de" if language.lower().startswith("de") else "en"
@@ -213,6 +214,7 @@ class AiSorter:
         self.ratings: list[dict[str, Any]] = []
         self.examples: list[dict[str, Any]] = []
         self._last_uid: dict[str, int] = {}
+        self._uidvalidity: int | None = None
         self._hour = ""
         self._hour_count = 0
         self.last_error: str | None = None
@@ -230,6 +232,7 @@ class AiSorter:
         self.ratings = list(data.get("ratings") or [])[-MAX_RATINGS:]
         self.examples = list(data.get("examples") or [])[-MAX_EXAMPLES:]
         self._last_uid = {k: int(v) for k, v in (data.get("last_uid") or {}).items()}
+        self._uidvalidity = int(data["uidvalidity"]) if data.get("uidvalidity") is not None else None
         usage = data.get("usage") or {}
         self._hour, self._hour_count = str(usage.get("hour") or ""), int(usage.get("count") or 0)
         self.last_run = data.get("last_run")
@@ -255,6 +258,7 @@ class AiSorter:
             "ratings": self.ratings[-MAX_RATINGS:],
             "examples": self.examples[-MAX_EXAMPLES:],
             "last_uid": self._last_uid,
+            "uidvalidity": self._uidvalidity,
             "usage": {"hour": self._hour, "count": self._hour_count},
             "last_run": self.last_run,
             "usage_log": self.usage_log[-MAX_LOG:],
@@ -453,16 +457,21 @@ class AiSorter:
             return report
         await self.async_load()
         async with self._lock:
-            uids = await self._mail.async_search_uids(MAILBOX, ["ALL"])
-            if not uids:
-                return report
             last = self._last_uid.get(MAILBOX)
             if last is None:
-                self._last_uid[MAILBOX] = max(uids)
+                self._last_uid[MAILBOX] = await self._mail.async_last_uid(MAILBOX)
+                self._remember_validity()
                 await self._save()
                 report["baseline"] = True
                 return report
-            new = sorted(u for u in uids if u > last)
+            new = sorted(await self._mail.async_new_uids(MAILBOX, last))  # only the new range
+            if self._validity_changed():
+                # the server renumbered the inbox: start again from the newest message
+                self._last_uid[MAILBOX] = await self._mail.async_last_uid(MAILBOX)
+                self._remember_validity()
+                await self._save()
+                report["baseline"] = True
+                return report
             if not new:
                 return report
             await self._rate(new[:PER_RUN], report, advance=True)
@@ -484,6 +493,24 @@ class AiSorter:
             await self._rate(sorted(todo), report, advance=False)
             await self._finish(report)
         return report
+
+    def _current_validity(self) -> int | None:
+        getter = getattr(self._mail, "uidvalidity", None)
+        value = getter(MAILBOX) if callable(getter) else None
+        return value if isinstance(value, int) else None
+
+    def _remember_validity(self) -> None:
+        if (value := self._current_validity()) is not None:
+            self._uidvalidity = value
+
+    def _validity_changed(self) -> bool:
+        current = self._current_validity()
+        if current is None:
+            return False
+        if self._uidvalidity is None:
+            self._uidvalidity = current
+            return False
+        return current != self._uidvalidity
 
     def _report(self, trigger: str) -> dict[str, Any]:
         return {"trigger": trigger, "rated": 0, "applied": 0, "skipped": 0, "errors": [], "budget_left": None}
