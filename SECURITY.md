@@ -20,8 +20,12 @@ Frieda Postfach extends a Frieda account and inherits its security model
   app-specific password stay in Frieda's config entry. The push connection is a second IMAP session that selects the
   inbox and only waits for new-mail notifications.
 - **Frieda's guard rails apply** to every rule run: quotas, protected and hidden mailboxes, "Allow deleting", and
-  the read-only mode (no automatic runs, only dry runs). Runs with hits or errors are written to Frieda's change log
-  and fire `friedafetch_action`.
+  the read-only mode (no automatic runs, only dry runs). Unattended runs (timer, push) and runs requested by an AI
+  change at most 100 messages (50 deletions) per run and count against Frieda's hourly quota for mail changes; the
+  rest is deferred to the next run (runs the admin starts in the panel are counted, not capped). Runs with hits or
+  errors are written to Frieda's change log and fire `friedafetch_action`.
+- **Rule tools are treated as mass actions:** creating or enabling a rule that deletes or moves, and a real run
+  over the whole mailbox, follow Frieda's approvals ("approve deleting", mass threshold) and Frieda's injection lock.
 - **AI tools** of Frieda Postfach are registered through Frieda and follow its options and approvals; writing rule
   tools are hidden in read-only mode.
 - **Attachments** are only stored through Frieda's attachment store (allowed folder, safe file names, no path
@@ -76,8 +80,14 @@ Frieda Postfach erweitert ein Frieda-Konto und übernimmt dessen Sicherheitsmode
   bleiben im Config-Entry von Frieda. Die Push-Verbindung ist eine zweite IMAP-Sitzung, die den Posteingang auswählt
   und nur auf Neueingangs-Meldungen wartet.
 - **Friedas Leitplanken gelten** für jeden Regellauf: Kontingente, geschützte und verborgene Postfächer, „Löschen
-  erlauben“ und der Nur-Lesen-Modus (keine automatischen Läufe, nur Probeläufe). Läufe mit Treffern oder Fehlern
-  landen in Friedas Änderungsprotokoll und lösen `friedafetch_action` aus.
+  erlauben“ und der Nur-Lesen-Modus (keine automatischen Läufe, nur Probeläufe). Unbeaufsichtigte Läufe (Takt, Push)
+  und von einer KI angestoßene Läufe ändern höchstens 100 Mails (50 Löschungen) pro Lauf und zählen gegen Friedas
+  Stundenkontingent für Mail-Änderungen; der Rest folgt im nächsten Lauf (vom Admin im Panel gestartete Läufe werden
+  gezählt, aber nicht begrenzt). Läufe mit Treffern oder Fehlern landen in Friedas Änderungsprotokoll und lösen
+  `friedafetch_action` aus.
+- **Regel-Tools gelten als Massenaktionen:** Eine Regel anlegen oder einschalten, die löscht oder verschiebt, und ein
+  echter Lauf über das ganze Postfach folgen Friedas Freigaben („Löschen freigeben“, Massenschwelle) und Friedas
+  Injection-Sperre.
 - **KI-Tools** von Frieda Postfach werden über Frieda angemeldet und folgen deren Optionen und Freigaben; schreibende
   Regel-Tools sind im Nur-Lesen-Modus ausgeblendet.
 - **Anhänge** werden ausschließlich über Friedas Anhang-Ablage gespeichert (erlaubter Ordner, sichere Dateinamen,

@@ -92,6 +92,11 @@ Beispiel (als Tool-Aufruf):
 }
 ```
 
+**Grenzen.** Unbeaufsichtigte Läufe (Takt, Push) und von einer KI gestartete Läufe ändern höchstens 100 Mails, davon
+50 Löschungen, pro Lauf und zählen gegen Friedas Stundenkontingent für Mail-Änderungen; der Rest folgt im nächsten
+Lauf. Legt eine KI eine Regel an oder schaltet sie ein, die löscht oder verschiebt, oder wendet sie die Regeln auf das
+ganze Postfach an, gelten Friedas Freigaben („Löschen freigeben“, Massenschwelle) und Friedas Injection-Sperre.
+
 ## Panel
 
 **Frieda Postfach** in der Seitenleiste (nur Admins, Deutsch/Englisch). Eine Karte enthält die Regeln und alles, um

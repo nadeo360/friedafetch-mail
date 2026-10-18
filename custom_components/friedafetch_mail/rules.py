@@ -19,6 +19,7 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
+from custom_components.friedafetch.guard import QUOTA_MAIL_MODIFY
 from custom_components.friedafetch.llm_api import ToolNotFoundError
 from custom_components.friedafetch.mail import ICloudMail, MailboxNotFound, MailError
 
@@ -34,6 +35,11 @@ MAX_RULES = 100
 MAX_SCAN_ALL = 2000  # newest messages inspected for scope="all"
 _SUMMARY_CHUNK = 200
 HISTORY_MAX = 200  # stored runs per account
+# Unattended runs (timer, push) and runs requested by an AI client change at most this many messages per run,
+# and they count against Frieda's hourly quota for mail changes; the rest follows in the next run.
+MAX_CHANGES_PER_RUN = 100
+MAX_DELETES_PER_RUN = 50
+LIMITED_TRIGGERS = ("auto", "push", "assistant")
 
 
 class RuleError(ValueError):
@@ -574,9 +580,13 @@ class RuleEngine:
                             "save_attachments": decision["save"] is not None,
                         }
                     )
-                    if not dry_run:
-                        rule.hits += 1
         if dry_run or not plan:
+            return
+        self._limit_plan(box, plan, scope, report)
+        for d in plan.values():
+            for rule in d["rules"]:
+                rule.hits += 1
+        if not plan:
             return
 
         # execute in batches: flags first (while the messages are still here), then moves/deletes
@@ -607,6 +617,47 @@ class RuleEngine:
                 targets.setdefault(d["move_to"], []).append(uid)
         for target, group in targets.items():
             await self._safe(report, self._mail.async_move(box, group, target))
+
+    def _limit_plan(self, box: str, plan: dict[int, dict[str, Any]], scope: str, report: dict[str, Any]) -> None:
+        """Per-run cap and hourly quota for unattended and AI-requested runs; defers the rest to the next run."""
+        trigger = report.get("trigger")
+        guard = self._guard
+        limited = trigger in LIMITED_TRIGGERS
+        budget = MAX_CHANGES_PER_RUN if limited else len(plan)
+        if guard is not None:
+            limit = guard.limit(QUOTA_MAIL_MODIFY)
+            if limit and limited:
+                budget = min(budget, max(0, limit - guard.used(QUOTA_MAIL_MODIFY)))
+        deletes_left = MAX_DELETES_PER_RUN if limited else len(plan)
+        deferred: list[int] = []
+        taken = 0
+        for uid in sorted(plan):
+            d = plan[uid]
+            if taken >= budget or (d["delete"] and deletes_left <= 0):
+                deferred.append(uid)
+                continue
+            taken += 1
+            if d["delete"]:
+                deletes_left -= 1
+        if deferred:
+            for uid in deferred:
+                del plan[uid]
+            report["actions"] = [a for a in report["actions"] if not (a["mailbox"] == box and a["uid"] in deferred)]
+            report["matched"] -= len(deferred)
+            report["deferred"] = report.get("deferred", 0) + len(deferred)
+            report["skipped"].append(
+                {
+                    "mailbox": box,
+                    "code": "limit",
+                    "count": len(deferred),
+                    "reason": f"{len(deferred)} messages deferred to the next run (per-run limit or hourly quota)",
+                }
+            )
+            if scope == "new":
+                # process them next time instead of skipping them for good
+                self._last_uid[box] = min(self._last_uid.get(box, 0), min(deferred) - 1)
+        if guard is not None and plan:
+            guard.consume(QUOTA_MAIL_MODIFY, len(plan))
 
     @staticmethod
     async def _safe(report: dict[str, Any], coro: Any) -> None:

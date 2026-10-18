@@ -20,6 +20,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.storage import Store
 
+from custom_components.friedafetch.guard import QUOTA_MAIL_MODIFY
 from custom_components.friedafetch.mail import MailboxNotFound, MailError
 from custom_components.friedafetch.util import detect_injection, sanitize_text
 
@@ -696,6 +697,16 @@ class AiSorter:
         notify = self.settings["notify"] and rating["importance"] >= self.settings["notify"]
         flag = bool(cat and cat.get("flag")) or bool(notify)
         applied: list[str] = []
+        changes = bool(cat and (cat.get("mark_seen") or cat.get("move_to"))) or flag
+        guard = self._clients.guard
+        if changes and guard is not None:
+            try:
+                guard.check_quota(QUOTA_MAIL_MODIFY, 1)
+            except Exception as err:  # noqa: BLE001 - PolicyError: hourly quota of mail changes used up
+                rating["applied"] = ["quota"]
+                report["limited"] = report.get("limited", 0) + 1
+                _LOGGER.info("AI sorting: no action for message %s: %s", uid, err)
+                return False
         try:
             if cat and cat.get("mark_seen"):
                 await self._mail.async_set_flags(MAILBOX, [uid], seen=True)
@@ -713,5 +724,7 @@ class AiSorter:
                 applied.append(f"moved:{cat['move_to']}")
         except Exception as err:  # noqa: BLE001 - one message must not stop the run
             report["errors"].append(f"UID {uid}: {err}")
+        if changes and guard is not None and applied:
+            guard.consume(QUOTA_MAIL_MODIFY, 1)
         rating["applied"] = applied
         return bool(applied)

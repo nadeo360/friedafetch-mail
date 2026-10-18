@@ -91,6 +91,11 @@ Example (as a tool call):
 }
 ```
 
+**Limits.** Unattended runs (timer, push) and runs an AI starts change at most 100 messages, 50 of them deletions,
+per run and count against Frieda's hourly quota for mail changes; the rest follows in the next run. When an AI
+creates or enables a rule that deletes or moves, or applies the rules to the whole mailbox, Frieda's approvals apply
+(“approve deleting”, mass threshold), and so does Frieda's injection lock.
+
 ## Panel
 
 **Frieda Postfach** in the sidebar (admins only, German/English). One card holds the rules and everything to run

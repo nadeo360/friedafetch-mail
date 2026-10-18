@@ -4,6 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from custom_components.friedafetch.const import (
+    CONF_APPROVAL_DELETE,
+    CONF_APPROVAL_MASS,
+    DEFAULT_APPROVAL_DELETE,
+    DEFAULT_APPROVAL_MASS,
+)
 from custom_components.friedafetch.llm_api import ICloudTool
 from custom_components.friedafetch.schema import vol
 from custom_components.friedafetch.util import UNTRUSTED_NOTICE, clamp
@@ -40,6 +46,49 @@ class RuleTool(ICloudTool):
         if ext is None:
             raise ValueError("Inbox rules are not available (Frieda Postfach is not set up for this account)")
         return ext.rules
+
+    # A rule is a mass action in disguise: an AI could create "delete everything from @" and run it on the whole
+    # mailbox. So rules that delete or move, and real runs over the whole mailbox, follow Frieda's approvals
+    # ("approve deleting" and the mass threshold) and the injection lock.
+    @staticmethod
+    def _destructive(actions: dict[str, Any] | None) -> bool:
+        return bool(actions) and bool(actions.get("delete") or actions.get("move_to"))
+
+    def _reason_for(self, *, deletes: bool, mass: bool) -> str | None:
+        if self.clients.approvals is None:
+            return None
+        opts = self.clients.options
+        if deletes and opts.get(CONF_APPROVAL_DELETE, DEFAULT_APPROVAL_DELETE):
+            return "rule"
+        if mass and int(opts.get(CONF_APPROVAL_MASS, DEFAULT_APPROVAL_MASS) or 0) > 0:
+            return "rule"
+        return None
+
+    def _resulting_actions(self, args: dict[str, Any]) -> dict[str, Any]:
+        return dict(args.get("actions") or {})
+
+    def is_critical(self, args: dict[str, Any]) -> bool:
+        return self._destructive(self._resulting_actions(args))
+
+    def approval_reason(self, args: dict[str, Any]) -> str | None:
+        actions = self._resulting_actions(args)
+        if not self._destructive(actions) or args.get("enabled") is False:
+            return None
+        return self._reason_for(deletes=bool(actions.get("delete")), mass=True)
+
+    def approval_summary(self, args: dict[str, Any]) -> str:
+        actions = self._resulting_actions(args)
+        parts = [f"rule: {args.get('name') or args.get('rule_id') or '?'}"]
+        if actions.get("delete"):
+            parts.append("action: delete (trash)")
+        if actions.get("move_to"):
+            parts.append(f"action: move to {actions['move_to']}")
+        conds = args.get("conditions") or []
+        if conds:
+            parts.append(
+                "conditions: " + ", ".join(f"{c.get('field')} {c.get('op')} {c.get('value')}" for c in conds[:5])
+            )
+        return "; ".join(parts)
 
 
 class ListRules(RuleTool):
@@ -100,6 +149,21 @@ class UpdateRule(RuleTool):
         }
     )
 
+    def _resulting_actions(self, args: dict[str, Any]) -> dict[str, Any]:
+        try:
+            current = self.rules._get(args["rule_id"])  # noqa: SLF001 - same package
+        except Exception:  # noqa: BLE001 - unknown rule: the run reports not_found
+            return dict(args.get("actions") or {})
+        merged = {**current.to_dict().get("actions", {}), **(args.get("actions") or {})}
+        enabled = args.get("enabled", current.enabled)
+        return merged if enabled else {}
+
+    def approval_reason(self, args: dict[str, Any]) -> str | None:
+        actions = self._resulting_actions(args)
+        if not self._destructive(actions):
+            return None
+        return self._reason_for(deletes=bool(actions.get("delete")), mass=True)
+
     async def run(self, hass, args):
         rule_id = args.pop("rule_id")
         if not args:
@@ -137,6 +201,27 @@ class RunRules(RuleTool):
         }
     )
 
+    def _selected(self, args: dict[str, Any]) -> list[Any]:
+        try:
+            rules = self.rules.enabled_rules(args.get("mailbox"))
+        except Exception:  # noqa: BLE001
+            return []
+        wanted = args.get("rule_ids")
+        return [r for r in rules if not wanted or r.id in wanted]
+
+    def is_critical(self, args: dict[str, Any]) -> bool:
+        return not args.get("dry_run")
+
+    def approval_reason(self, args: dict[str, Any]) -> str | None:
+        if args.get("dry_run") or (args.get("scope") or "all") != "all":
+            return None  # "new" does what the automation does anyway
+        deletes = any(r.actions.delete for r in self._selected(args))
+        return self._reason_for(deletes=deletes, mass=True)
+
+    def approval_summary(self, args: dict[str, Any]) -> str:
+        names = ", ".join(r.name for r in self._selected(args)[:8]) or "all enabled rules"
+        return f"apply rules to the whole mailbox ({args.get('mailbox') or 'all rule mailboxes'}): {names}"
+
     async def run(self, hass, args):
         return await self.rules.async_run(
             scope=args.get("scope") or "all",
@@ -144,6 +229,7 @@ class RunRules(RuleTool):
             mailbox=args.get("mailbox"),
             rule_ids=args.get("rule_ids"),
             limit=clamp(args.get("limit"), 2000, 2000),
+            trigger="assistant",
         )
 
 

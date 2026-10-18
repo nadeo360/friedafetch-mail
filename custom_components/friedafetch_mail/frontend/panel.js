@@ -121,6 +121,8 @@ const I18N = {
     filterPh: "filtern …",
     numPh: "z. B. >0",
     triggerPush: "Push",
+    triggerAssistant: "KI-Client",
+    limit: "{0} Mails auf den nächsten Lauf verschoben (Obergrenze pro Lauf oder Stundenkontingent)",
     digestAt: "Tagesüberblick um {0}",
     pushError: "Push gestört: {0}",
     pushUnsupported: "Push nicht verfügbar",
@@ -190,6 +192,7 @@ const I18N = {
     aiApplied_seen: "gelesen",
     aiApplied_flagged: "markiert",
     aiApplied_notified: "gemeldet",
+    aiApplied_quota: "keine Aktion: Stundenkontingent erschöpft",
     aiExamples: "gelernte Korrekturen: {0}",
     aiBlockTerms: "Sperrbegriffe: {0}",
     aiu: "An KI übermittelt",
@@ -335,6 +338,8 @@ const I18N = {
     filterPh: "filter …",
     numPh: "e.g. >0",
     triggerPush: "push",
+    triggerAssistant: "AI client",
+    limit: "{0} messages deferred to the next run (per-run limit or hourly quota)",
     digestAt: "daily overview at {0}",
     pushError: "push disrupted: {0}",
     pushUnsupported: "push unavailable",
@@ -404,6 +409,7 @@ const I18N = {
     aiApplied_seen: "read",
     aiApplied_flagged: "flagged",
     aiApplied_notified: "notified",
+    aiApplied_quota: "no action: hourly quota used up",
     aiExamples: "corrections learned: {0}",
     aiBlockTerms: "blocked terms: {0}",
     aiu: "Sent to AI",
@@ -436,7 +442,8 @@ const I18N = {
   },
 };
 
-const trigLabel = (t, trig) => (trig === "auto" ? t.triggerAuto : trig === "push" ? t.triggerPush : t.triggerManual);
+const trigLabel = (t, trig) =>
+  trig === "auto" ? t.triggerAuto : trig === "push" ? t.triggerPush : trig === "assistant" ? t.triggerAssistant : t.triggerManual;
 
 const fmt = (str, ...args) => String(str).replace(/\{(\d+)\}/g, (_, i) => args[Number(i)]);
 
@@ -1405,7 +1412,7 @@ class FriedaPostfachPanel extends HTMLElement {
       )
       .join("");
     const skipped = (r.skipped || [])
-      .map((s) => `<li>${esc(t[s.code] || s.reason)}${s.uid ? ` (UID ${s.uid})` : ""}${s.rule ? ` – ${esc(s.rule)}` : ""}${s.mailbox ? ` – ${esc(s.mailbox)}` : ""}</li>`)
+      .map((s) => `<li>${esc(t[s.code] ? fmt(t[s.code], s.count ?? "") : s.reason)}${s.uid ? ` (UID ${s.uid})` : ""}${s.rule ? ` – ${esc(s.rule)}` : ""}${s.mailbox ? ` – ${esc(s.mailbox)}` : ""}</li>`)
       .join("");
     const errors = (r.errors || []).map((e) => `<li>${esc(e.error)}</li>`).join("");
     return `<div class="card" id="report">
