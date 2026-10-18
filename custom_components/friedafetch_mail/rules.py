@@ -489,6 +489,7 @@ class RuleEngine:
         rule_ids: list[str] | None = None,
         limit: int = MAX_SCAN_ALL,
         trigger: str = "manual",
+        record: bool = True,
     ) -> dict[str, Any]:
         """Apply rules. scope 'new' = messages since the last run, 'all' = newest messages."""
         await self.async_load()
@@ -526,7 +527,9 @@ class RuleEngine:
                 self.last_run = {k: v for k, v in report.items() if k != "actions"} | {
                     "actions": len(report["actions"])
                 }
-                self._add_history(report, mailboxes)
+                report["mailboxes"] = mailboxes
+                if record:  # timer and push record the pass after the AI sorting (async_record)
+                    self._add_history(report)
                 await self._save()
                 self._fire_events(report)
             if self._audit is not None and not dry_run and (report["matched"] or report["errors"]):
@@ -587,14 +590,58 @@ class RuleEngine:
                 matched += int(item.get("matched") or 0)
         return {"runs": runs, "matched": matched}
 
-    def _add_history(self, report: dict[str, Any], mailboxes: list[str]) -> None:
-        """Append a finished run to the history; idle automatic runs are merged."""
+    async def async_record(self, report: dict[str, Any], ai: dict[str, Any] | None = None) -> None:
+        """Write one pass to the history: the rule run and the AI sorting that followed it (timer and push)."""
+        async with self._lock:
+            self._add_history(report, ai)
+            await self._save()
+        async_dispatcher_send(self._hass, SIGNAL_UPDATED.format(self._entry_id))
+
+    async def async_record_ai(self, trigger: str, ai: dict[str, Any] | None) -> None:
+        """A pass of the AI sorting alone (no rule ran, or "rate newest" in the panel)."""
+        if not ai or not (ai.get("rated") or ai.get("skipped") or ai.get("errors")):
+            return
+        now = _now_iso()
+        report = {
+            "started": ai.get("started") or now,
+            "finished": now,
+            "trigger": trigger,
+            "scope": "new",
+            "checked": 0,
+            "matched": 0,
+            "actions": [],
+            "skipped": [],
+            "errors": [],
+            "mailboxes": ["INBOX"],
+        }
+        await self.async_record(report, ai)
+
+    def _add_history(self, report: dict[str, Any], ai: dict[str, Any] | None = None) -> None:
+        """Append a finished pass to the history; automatic passes without any message are merged."""
+        mailboxes = report.get("mailboxes") or ["INBOX"]
         uids_per_rule: dict[str, set[Any]] = {}
         for act in report["actions"]:
             uids_per_rule.setdefault(act["rule"], set()).add((act.get("mailbox"), act["uid"]))
         per_rule = {name: len(uids) for name, uids in uids_per_rule.items()}
-        mails = _handled_mails(report["actions"])
-        idle = report["trigger"] in ("auto", "push") and not report["matched"] and not report["errors"]
+        mails = _handled_mails(report["actions"], report.get("checked_mails"), ai)
+        ai_part = (
+            {
+                "rated": int(ai.get("rated") or 0),
+                "applied": int(ai.get("applied") or 0),
+                "held": int(ai.get("skipped") or 0),
+                "errors": [str(e) for e in ai.get("errors") or []][:5],
+            }
+            if ai
+            else None
+        )
+        ai_busy = bool(ai_part and (ai_part["rated"] or ai_part["held"] or ai_part["errors"]))
+        idle = (
+            report["trigger"] in ("auto", "push")
+            and not report["checked"]
+            and not report["matched"]
+            and not report["errors"]
+            and not ai_busy
+        )
         last = self._history[-1] if self._history else None
         if (
             idle
@@ -620,6 +667,7 @@ class RuleEngine:
                 "matched": report["matched"],
                 "actions": len(report["actions"]),
                 "rules": per_rule,
+                "ai": ai_part,
                 "mails": mails[:HISTORY_MAILS],
                 "mails_more": max(0, len(mails) - HISTORY_MAILS),
                 "errors": [e.get("error", "") for e in report["errors"]][:5],
@@ -692,6 +740,12 @@ class RuleEngine:
         for i in range(0, len(candidates), _SUMMARY_CHUNK):
             summaries.extend(await self._mail.async_summaries(box, candidates[i : i + _SUMMARY_CHUNK]))
         report["checked"] += len(summaries)
+        checked = report.setdefault("checked_mails", [])
+        for summary in summaries[: max(0, HISTORY_MAILS * 3 - len(checked))]:
+            sender = summary.get("from") or [{}]
+            checked.append(
+                {"mailbox": box, "uid": summary["uid"], "subject": summary.get("subject"), "from": sender[0].get("email")}
+            )
 
         # decide per message
         plan: dict[int, dict[str, Any]] = {}
@@ -867,27 +921,47 @@ class RuleEngine:
             report["errors"].append({"error": str(err)})
 
 
-def _handled_mails(actions: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """One entry per handled message (a message can match several rules), in the order of the run."""
+def _handled_mails(
+    actions: list[dict[str, Any]],
+    checked: list[dict[str, Any]] | None = None,
+    ai: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """One entry per message of a pass: checked by the rules, acted on by rules, rated by the AI."""
     mails: dict[tuple[Any, Any], dict[str, Any]] = {}
-    for act in actions:
-        key = (act.get("mailbox"), act.get("uid"))
-        sender = act.get("from") or []
-        mail = mails.setdefault(
-            key,
+
+    def entry(box: Any, uid: Any, subject: Any, sender: Any) -> dict[str, Any]:
+        return mails.setdefault(
+            (box, uid),
             {
-                "subject": str(act.get("subject") or "")[:200],
-                "from": str(sender[0] if sender else "")[:200],
-                "mailbox": act.get("mailbox"),
+                "subject": str(subject or "")[:200],
+                "from": str(sender or "")[:200],
+                "mailbox": box,
                 "rules": [],
+                "move_to": None,
+                "delete": False,
+                "seen": None,
+                "flag": None,
+            },
+        )
+
+    for item in checked or []:
+        entry(item.get("mailbox"), item.get("uid"), item.get("subject"), item.get("from"))
+    for act in actions:
+        sender = act.get("from") or []
+        mail = entry(act.get("mailbox"), act.get("uid"), act.get("subject"), sender[0] if sender else "")
+        mail.update(
+            {
                 "move_to": act.get("move_to"),
                 "delete": bool(act.get("delete")),
                 "seen": act.get("mark_seen"),
                 "flag": act.get("flag"),
-            },
+            }
         )
         if act.get("rule") and act["rule"] not in mail["rules"]:
             mail["rules"].append(act["rule"])
+    for item in (ai or {}).get("items") or []:
+        mail = entry(item.get("mailbox") or "INBOX", item.get("uid"), item.get("subject"), item.get("from"))
+        mail["ai"] = {k: item.get(k) for k in ("category", "importance", "applied", "held")}
     return list(mails.values())
 
 

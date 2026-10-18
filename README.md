@@ -36,7 +36,7 @@ no file writes unless you install Frieda Postfach.
 ## Requirements
 
 - Home Assistant 2026.10 or newer
-- **Frieda 2.0.9 or newer** (`friedafetch`; older versions work, but the panel then only shows an update hint), set up with at least one iCloud account. Frieda Postfach uses that
+- **Frieda 2.0.10 or newer** (`friedafetch`; older versions work, but the panel then only shows an update hint), set up with at least one iCloud account. Frieda Postfach uses that
   account's connection; it never asks for your Apple ID or password itself.
 
 ## Installation
@@ -111,7 +111,9 @@ the rules and everything to run them:
   ⋮ menu per rule for edit, dry run with only this rule, order, copy and delete.
 - **Run** opens a menu: dry run or real run over the whole mailbox, or new mail only; the per-message report appears
   below the rules.
-- The **Runs** history (consecutive automatic runs without hits are merged) as a table with search and filters.
+- The **Runs** history: one entry per pass of the rules and the AI sorting (automatic passes without new mail are
+  merged), with search, filters and sorting; a click shows every message of the pass with what the rules did, the
+  AI's category and importance, a kill-switch hold or "no action".
 
 With several accounts an account picker appears on top. Approvals and the change log stay in Frieda's own panel,
 whose overview also shows whether Frieda Postfach is running.

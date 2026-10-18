@@ -344,6 +344,8 @@ async def ws_ai_run(hass: HomeAssistant, connection: websocket_api.ActiveConnect
     """Rate the newest unrated inbox mails now (only when AI sorting is switched on)."""
     sorter = _sorter(hass, msg.get("entry_id"))
     report = await sorter.async_rate_latest(int(msg.get("count") or 10))
+    entry = _entry(hass, msg.get("entry_id"))
+    await entry.runtime_data.rules.async_record_ai("manual", report)  # shows up under Runs as well
     connection.send_result(msg["id"], {"report": report, **_ai_payload(sorter)})
 
 

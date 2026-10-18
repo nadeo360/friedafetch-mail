@@ -36,7 +36,7 @@ Aufgaben und ohne Dateizugriffe – solange Frieda Postfach nicht installiert is
 ## Voraussetzungen
 
 - Home Assistant 2026.10 oder neuer
-- **Frieda 2.0.9 oder neuer** (`friedafetch`; ältere Versionen funktionieren, das Panel zeigt dann aber nur einen Update-Hinweis) mit mindestens einem eingerichteten iCloud-Konto. Frieda Postfach nutzt
+- **Frieda 2.0.10 oder neuer** (`friedafetch`; ältere Versionen funktionieren, das Panel zeigt dann aber nur einen Update-Hinweis) mit mindestens einem eingerichteten iCloud-Konto. Frieda Postfach nutzt
   dessen Verbindung und fragt selbst nie nach Apple-ID oder Passwort.
 
 ## Installation
@@ -114,8 +114,9 @@ auszuführen:
   Regel und ein ⋮-Menü pro Regel für Bearbeiten, Probelauf nur mit dieser Regel, Reihenfolge, Kopieren und Löschen.
 - **Ausführen** öffnet ein Menü: Probelauf oder echter Lauf über das ganze Postfach oder nur neue Mails; der Bericht
   pro Mail erscheint unter den Regeln.
-- Der Verlauf **Ausführungen** (aufeinanderfolgende automatische Läufe ohne Treffer werden zusammengefasst) als
-  Tabelle mit Suche und Filtern.
+- Der Verlauf **Ausführungen**: ein Eintrag pro Durchgang von Regeln und KI-Sortierung (automatische Durchgänge ohne
+  neue Mails werden zusammengefasst), mit Suche, Filtern und Sortierung; ein Klick zeigt jede Mail des Durchgangs mit
+  dem, was die Regeln getan haben, der Kategorie und Wichtigkeit der KI, einem Killswitch-Stopp oder „keine Aktion“.
 
 Bei mehreren Konten erscheint oben eine Kontoauswahl. Freigaben und Änderungsprotokoll bleiben im Panel von Frieda,
 dessen Überblick auch zeigt, ob Frieda Postfach läuft.

@@ -496,3 +496,91 @@ def test_handled_mails_are_merged_and_capped() -> None:
     mails = _handled_mails(actions)
     assert len(mails) == 39 and mails[0]["rules"] == ["A", "B"] and len(mails[0]["subject"]) == 200
     assert mails[1]["from"] == "" and HISTORY_MAILS < len(mails)
+
+
+async def test_pass_with_rules_and_ai_is_one_history_entry(hass: HomeAssistant) -> None:
+    mail = _mail([11, 12], [NEWSLETTER, BOSS])
+    engine = RuleEngine(hass, "entry-pass", mail)
+    await engine.async_create(
+        {
+            "name": "News",
+            "conditions": [{"field": "from", "op": "domain", "value": "shop.example.com"}],
+            "actions": {"move_to": "Archive"},
+        }
+    )
+    await engine.async_run(scope="new", trigger="push")  # baseline
+    mail.async_search_uids.return_value = [11, 12, 13, 14]
+    mail.async_summaries.side_effect = lambda box, wanted: [
+        s for s in [dict(NEWSLETTER, uid=13), dict(BOSS, uid=14)] if s["uid"] in wanted
+    ]
+    report = await engine.async_run(scope="new", trigger="push", record=False)
+    assert report["checked"] == 2 and len(engine.history()) == 1  # not written yet
+    ai = {
+        "started": "2026-10-18T10:00:00+02:00",
+        "rated": 1,
+        "applied": 1,
+        "skipped": 0,
+        "errors": [],
+        "items": [
+            {
+                "mailbox": "INBOX",
+                "uid": 14,
+                "subject": BOSS["subject"],
+                "from": "chef@firma.example",
+                "category": "Persönlich & wichtig",
+                "importance": 5,
+                "applied": ["flagged"],
+            }
+        ],
+    }
+    await engine.async_record(report, ai)
+    entry = engine.history()[0]
+    assert entry["trigger"] == "push" and not entry["idle"]
+    assert entry["ai"] == {"rated": 1, "applied": 1, "held": 0, "errors": []}
+    by_uid = {m["subject"]: m for m in entry["mails"]}
+    assert by_uid[NEWSLETTER["subject"]]["rules"] == ["News"] and by_uid[NEWSLETTER["subject"]]["move_to"] == "Archive"
+    assert (
+        by_uid[BOSS["subject"]]["rules"] == [] and by_uid[BOSS["subject"]]["ai"]["category"] == "Persönlich & wichtig"
+    )
+
+
+async def test_checked_mail_without_hit_is_not_merged_away(hass: HomeAssistant) -> None:
+    mail = _mail([11], [NEWSLETTER])
+    engine = RuleEngine(hass, "entry-checked", mail)
+    await engine.async_create(
+        {
+            "name": "Never",
+            "conditions": [{"field": "subject", "op": "contains", "value": "zzz"}],
+            "actions": {"flag": True},
+        }
+    )
+    await engine.async_run(scope="new", trigger="auto")  # baseline
+    await engine.async_run(scope="new", trigger="auto")  # nothing new: idle
+    mail.async_search_uids.return_value = [11, 12]
+    mail.async_summaries.side_effect = lambda box, wanted: [dict(BOSS, uid=12)] if 12 in wanted else []
+    await engine.async_run(scope="new", trigger="auto")  # one message checked, no rule matched
+    newest = engine.history()[0]
+    assert not newest["idle"] and newest["checked"] == 1 and newest["matched"] == 0
+    assert [m["subject"] for m in newest["mails"]] == [BOSS["subject"]] and newest["mails"][0]["rules"] == []
+
+
+async def test_ai_only_pass_is_recorded(hass: HomeAssistant) -> None:
+    engine = RuleEngine(hass, "entry-ai-only", _mail([], []))
+    await engine.async_record_ai("manual", None)
+    await engine.async_record_ai("manual", {"rated": 0, "skipped": 0, "errors": [], "items": []})
+    assert engine.history() == []  # nothing happened, nothing recorded
+    await engine.async_record_ai(
+        "manual",
+        {
+            "rated": 0,
+            "applied": 0,
+            "skipped": 1,
+            "errors": [],
+            "items": [
+                {"mailbox": "INBOX", "uid": 7, "subject": "Diagnose", "from": "arzt@example.com", "held": ["term"]}
+            ],
+        },
+    )
+    entry = engine.history()[0]
+    assert entry["trigger"] == "manual" and entry["checked"] == 0 and entry["ai"]["held"] == 1
+    assert entry["mails"][0]["ai"]["held"] == ["term"]

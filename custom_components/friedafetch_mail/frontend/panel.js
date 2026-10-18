@@ -41,7 +41,7 @@ const WIDGETS = [{ id: "rules" }, { id: "ai" }, { id: "aiu" }, { id: "history" }
 const TABLE_COLUMNS = {
   rules: { pos: true, cond: true, act: true, hits: true },
   aiu: { time: true, kind: true, fields: true, chars: true, ent: true },
-  runs: { trig: true, scope: true, checked: true, matched: true, rules: true, res: true },
+  runs: { trig: true, scope: true, checked: true, matched: true, rules: true, ai: true, res: true },
   rates: { time: true, from: true, cat: true, applied: true },
 };
 
@@ -703,9 +703,10 @@ class FriedaPostfachPanel extends HTMLElement {
   }
 
   // Messages a run handled, for the info popup and the expanded row.
+  // Messages of one pass: what the rules did, what the AI decided, or that nothing applied.
   _mailList(mails, more = 0) {
     const t = this.t;
-    const kind = (m) =>
+    const ruleKind = (m) =>
       m.delete
         ? { icon: "delete-outline", tone: "err", label: t.aDelete }
         : m.move_to
@@ -717,14 +718,28 @@ class FriedaPostfachPanel extends HTMLElement {
               : m.seen === false
                 ? { icon: "email-mark-as-unread", tone: "", label: t.aUnseen }
                 : { icon: "check", tone: "", label: "" };
+    const aiText = (a) => {
+      const moved = (a.applied || []).find((x) => String(x).startsWith("moved:"));
+      return [a.category === "other" ? t.aiOther : a.category, a.importance ? `${a.importance}/5` : "", moved ? `→ ${moved.slice(6)}` : ""]
+        .filter(Boolean)
+        .join(" · ");
+    };
     const items = mails
       .map((m) => {
-        const k = kind(m);
-        return `<li class="${k.tone ? `tone-${k.tone}` : ""}">
+        const ai = m.ai || null;
+        const ruled = (m.rules || []).length > 0;
+        let k;
+        if (ruled) k = ruleKind(m);
+        else if (ai && ai.held) k = { icon: "shield-check-outline", tone: "held", label: t.aiuKill };
+        else if (ai && ai.category) k = { icon: "creation", tone: "ai", label: aiText(ai) };
+        else k = { icon: "minus", tone: "none", label: t.runNoAction };
+        const source = ruled ? (m.rules || []).join(", ") : ai ? t.ai : "";
+        const extra = ruled && ai && ai.category ? `${t.ai}: ${aiText(ai)}` : "";
+        return `<li class="tone-${k.tone || "plain"}">
             <span class="i-ic">${ico(k.icon)}</span>
             <span class="i-main" title="${esc(m.subject || "")}">${esc(m.subject || "–")}</span>
             ${k.label ? `<span class="i-chip">${esc(k.label)}</span>` : ""}
-            <span class="i-sub">${esc([m.from, (m.rules || []).join(", ")].filter(Boolean).join(" · "))}</span>
+            <span class="i-sub">${esc([m.from, source, extra].filter(Boolean).join(" · "))}</span>
           </li>`;
       })
       .join("");
@@ -743,17 +758,27 @@ class FriedaPostfachPanel extends HTMLElement {
       }
       return fmtShort(h.finished || h.started);
     };
-    const kinds = { "": () => true, hits: (h) => h.matched > 0, errors: (h) => (h.errors || []).length > 0 };
+    const aiOf = (h) => h.ai || null;
+    const errorsOf = (h) => [...(h.errors || []), ...(aiOf(h)?.errors || [])];
+    const didSomething = (h) => h.matched > 0 || (aiOf(h) && (aiOf(h).applied > 0 || aiOf(h).rated > 0));
+    const kinds = {
+      "": () => true,
+      hits: (h) => didSomething(h),
+      ai: (h) => !!aiOf(h) && (aiOf(h).rated > 0 || aiOf(h).held > 0 || aiOf(h).errors.length > 0),
+      errors: (h) => errorsOf(h).length > 0,
+    };
     const f = kinds[s.runFilter] ? s.runFilter : "";
     const trigIcon = { auto: "timer-outline", push: "lightning-bolt", assistant: "robot-outline", manual: "gesture-tap" };
     const sort = s.runsSort || { key: "time", dir: -1 };
+    const mailCount = (h) => Math.max(Number(h.checked || 0), (h.mails || []).length + Number(h.mails_more || 0));
     const runValue = (h) =>
       ({
         time: parseTime(h.finished || h.started)?.getTime() || 0,
         trig: trigLabel(t, h.trigger),
-        checked: Number(h.checked || 0),
+        checked: mailCount(h),
         matched: Number(h.matched || 0),
-        res: (h.errors || []).length ? 2 : h.matched ? 1 : 0,
+        ai: Number(aiOf(h)?.rated || 0) + Number(aiOf(h)?.held || 0),
+        res: errorsOf(h).length ? 2 : didSomething(h) ? 1 : 0,
       })[sort.key];
     const rows = s.history
       .map((h, i) => ({ h, i }))
@@ -766,36 +791,49 @@ class FriedaPostfachPanel extends HTMLElement {
       .map(({ h }) => {
         const trig = trigLabel(t, h.trigger);
         const scope = h.scope === "all" ? t.scopeAll : t.scopeNew;
-        const errors = (h.errors || []).length;
-        const res = errors ? t.resError : h.matched ? t.resOk : t.resIdle;
-        const resIcon = errors ? "alert-circle-outline" : h.matched ? "check-circle-outline" : "minus-circle-outline";
+        const errors = errorsOf(h);
+        const ai = aiOf(h);
+        const res = errors.length ? t.resError : didSomething(h) ? t.resOk : t.resIdle;
+        const resIcon = errors.length ? "alert-circle-outline" : didSomething(h) ? "check-circle-outline" : "minus-circle-outline";
         const rules = Object.entries(h.rules || {});
         const mails = h.mails || [];
         const mailList = mails.length ? this._mailList(mails, h.mails_more) : "";
         const open = s.runOpen === h.id && mailList;
-        const search = [time(h), trig, scope, ...rules.map(([n]) => n), res, ...(h.errors || []), ...mails.map((m) => `${m.subject} ${m.from}`)].join(" ").toLowerCase();
-        return `<tr data-search="${esc(search)}" class="${errors ? "err row-err" : h.matched ? "hit" : "idle"} ${mailList ? "expandable" : ""} ${open ? "open" : ""}">
+        const aiCell = ai && (ai.rated || ai.held || ai.errors.length)
+          ? `<span class="tchip t-ai" title="${esc(fmt(t.runAiTip, ai.rated, ai.applied, ai.held))}">${ico("creation")}<span>${esc(ai.rated)}</span>${ai.applied ? `<span class="sub">· ${esc(fmt(t.runAiApplied, ai.applied))}</span>` : ""}${ai.held ? `<span class="sub">· ${ico("shield-check-outline")}${esc(ai.held)}</span>` : ""}</span>`
+          : `<span class="muted">–</span>`;
+        const search = [
+          time(h), trig, scope, ...rules.map(([n]) => n), res, ...errors,
+          ...mails.map((m) => `${m.subject} ${m.from} ${m.ai?.category || ""}`),
+          ai ? t.ai : "",
+        ].join(" ").toLowerCase();
+        return `<tr data-search="${esc(search)}" class="${errors.length ? "err row-err" : didSomething(h) ? "hit" : "idle"} ${mailList ? "expandable" : ""} ${open ? "open" : ""}">
             <td class="c-time"><span class="nm"><strong>${esc(time(h))}</strong>${(h.runs || 1) > 1 ? `<small>${esc(fmt(t.runsMerged, h.runs))}</small>` : ""}</span></td>
             <td class="c-trig"><span class="tchip t-${esc(trigIcon[h.trigger] ? h.trigger : "manual")}" title="${esc(trig)}">${ico(trigIcon[h.trigger] || trigIcon.manual)}<span class="tl">${esc(trig)}</span></span></td>
             <td class="c-scope dim"><span class="scope">${ico(h.scope === "all" ? "email-multiple-outline" : "email-arrow-left-outline", scope)}<span class="sc-txt">${esc(scope)}</span>${(h.mailboxes || []).map((b) => `<span class="chip ic mbox">${ico("inbox-outline")}${esc(b)}</span>`).join("")}</span></td>
-            <td class="c-checked num" title="${esc(t.colChecked)}" data-label="${esc(t.colChecked)}">${esc(h.checked ?? 0)}</td>
-            <td class="c-matched num" title="${esc(t.colMatched)}" data-label="${esc(t.colMatched)}">${mailList ? `<button class="hitchip" data-action="run-open" data-id="${esc(h.id)}" aria-expanded="${!!open}" title="${esc(t.runMails)}">${ico("email-multiple-outline")}<strong>${esc(h.matched)}</strong></button>` : h.matched ? `<strong>${esc(h.matched)}</strong>` : "0"}</td>
+            <td class="c-checked num" title="${esc(t.colMails)}">${mailList ? `<button class="hitchip" data-action="run-open" data-id="${esc(h.id)}" aria-expanded="${!!open}" title="${esc(t.runMails)}">${ico("email-multiple-outline")}<strong>${esc(mailCount(h))}</strong></button>` : esc(mailCount(h))}</td>
+            <td class="c-matched num" title="${esc(t.colMatched)}">${h.matched ? `<strong>${esc(h.matched)}</strong>` : "0"}</td>
             <td class="c-rules">${rules.length ? rules.map(([n, c]) => `<span class="chip">${esc(n)} · ${esc(c)}</span>`).join("") : `<span class="muted">–</span>`}</td>
-            <td class="c-res"><span class="fact res" title="${esc(errors ? h.errors.join("; ") : res)}">${ico(resIcon)}${esc(res)}</span>${errors ? `<div class="muted">${esc(h.errors.join("; "))}</div>` : ""}</td>
-          </tr>${open ? `<tr class="detail"><td colspan="7"><div class="det"><div class="lbl">${esc(t.runMails)}</div>${mailList}</div></td></tr>` : ""}`;
+            <td class="c-ai">${aiCell}</td>
+            <td class="c-res"><span class="fact res" title="${esc(errors.length ? errors.join("; ") : res)}">${ico(resIcon)}${esc(res)}</span>${errors.length ? `<div class="muted">${esc(errors.join("; "))}</div>` : ""}</td>
+          </tr>${open ? `<tr class="detail"><td colspan="8"><div class="det"><div class="lbl">${esc(t.runMails)}</div>${mailList}</div></td></tr>` : ""}`;
       })
       .join("");
     const cols = [
       { key: "trig", label: t.colTrigger },
       { key: "scope", label: t.colScope },
-      { key: "checked", label: t.colChecked },
+      { key: "checked", label: t.colMails },
       { key: "matched", label: t.colMatched },
       { key: "rules", label: t.colRules },
+      { key: "ai", label: t.colAi },
       { key: "res", label: t.colResult },
     ];
     const count = (k) => s.history.filter(kinds[k]).length;
-    const seg = (val, icon, label) =>
-      `<button class="seg ${f === val ? "on" : ""}" data-action="run-filter" data-v="${val}" aria-pressed="${f === val}">${ico(icon)}${esc(label)}<span class="n">${count(val)}</span></button>`;
+    const seg = (val, icon, label) => {
+      const n = count(val);
+      if (val && !n && f !== val) return "";
+      return `<button class="seg ${f === val ? "on" : ""}" data-action="run-filter" data-v="${val}" aria-pressed="${f === val}">${ico(icon)}${esc(label)}<span class="n">${n}</span></button>`;
+    };
     const more = s.historyTotal > s.history.length;
     return `<div class="card">
       <h2><span class="grow">${esc(t.history)}</span>
@@ -805,12 +843,12 @@ class FriedaPostfachPanel extends HTMLElement {
         s.history.length
           ? `<div class="tbar">
               <label class="search">${ico("magnify")}<input type="search" data-search-table="runs" value="${esc(s.searchRuns || "")}" placeholder="${esc(t.searchRuns)}" aria-label="${esc(t.searchRuns)}"></label>
-              <div class="segs" role="group">${seg("", "format-list-bulleted", t.filterAllRules)}${seg("hits", "check-circle-outline", t.runsWithHits)}${seg("errors", "alert-circle-outline", t.resError)}</div>
+              <div class="segs" role="group">${seg("", "format-list-bulleted", t.filterAllRules)}${seg("hits", "check-circle-outline", t.runsWithHits)}${seg("ai", "creation", t.ai)}${seg("errors", "alert-circle-outline", t.resError)}</div>
               <span class="grow"></span>${W.columnMenu(this._layout, "runs", cols, t)}
             </div>${W.columnStyle(this._layout, "runs", cols)}
             <div class="scroll menus"><table class="dtable htable" data-table="runs"><thead><tr>
-              ${sortTh("runs-sort", sort, "time", t.colTime, "c-time")}${sortTh("runs-sort", sort, "trig", t.colTrigger, "c-trig")}<th class="c-scope">${esc(t.colScope)}</th>${sortTh("runs-sort", sort, "checked", t.colChecked, "c-checked num")}${sortTh("runs-sort", sort, "matched", t.colMatched, "c-matched num")}<th class="c-rules">${esc(t.colRules)}</th>${sortTh("runs-sort", sort, "res", t.colResult, "c-res")}
-            </tr></thead><tbody>${rows || `<tr><td colspan="7" class="muted">${esc(t.noMatches)}</td></tr>`}</tbody></table></div>
+              ${sortTh("runs-sort", sort, "time", t.colTime, "c-time")}${sortTh("runs-sort", sort, "trig", t.colTrigger, "c-trig")}<th class="c-scope">${esc(t.colScope)}</th>${sortTh("runs-sort", sort, "checked", t.colMails, "c-checked num")}${sortTh("runs-sort", sort, "matched", t.colMatched, "c-matched num")}<th class="c-rules">${esc(t.colRules)}</th>${sortTh("runs-sort", sort, "ai", t.colAi, "c-ai")}${sortTh("runs-sort", sort, "res", t.colResult, "c-res")}
+            </tr></thead><tbody>${rows || `<tr><td colspan="8" class="muted">${esc(t.noMatches)}</td></tr>`}</tbody></table></div>
             <p class="muted nomatch" hidden>${esc(t.noMatches)}</p>`
           : `<p class="muted">${esc(t.noHistory)}</p>`
       }
@@ -1198,7 +1236,7 @@ class FriedaPostfachPanel extends HTMLElement {
         },
         "runs-sort": () => {
           const key = el.dataset.k;
-          this._s.runsSort = nextSort(this._s.runsSort || { key: "time", dir: -1 }, key, ["trig"].includes(key) ? 1 : -1);
+          this._s.runsSort = nextSort(this._s.runsSort || { key: "time", dir: -1 }, key, key === "trig" ? 1 : -1);
           this._render();
         },
         "rules-sort": () => {

@@ -57,6 +57,9 @@ export const STYLE = `
   .tchip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px 2px 6px; border-radius: 12px; font-size: 13px; white-space: nowrap; --mdc-icon-size: 15px; background: var(--secondary-background-color, #f0f0f0); color: var(--secondary-text-color); }
   .tchip.t-push { background: color-mix(in srgb, var(--warning-color, #ffa600) 20%, transparent); color: var(--primary-text-color); }
   .tchip.t-manual { background: color-mix(in srgb, var(--primary-color) 14%, transparent); color: var(--primary-color); }
+  .tchip.t-ai { background: color-mix(in srgb, var(--frieda-ai-color, #8e6bd8) 14%, transparent); color: var(--frieda-ai-color, #8e6bd8); }
+  .tchip .sub { display: inline-flex; align-items: center; gap: 2px; color: var(--secondary-text-color); --mdc-icon-size: 13px; }
+  .htable .c-ai { white-space: nowrap; }
   .tchip.t-assistant { background: color-mix(in srgb, var(--info-color, #039be5) 16%, transparent); color: var(--info-color, #039be5); }
   .htable .scope { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .htable .scope .chip.mbox { margin: 0; font-size: 12px; }
@@ -164,10 +167,14 @@ export const STYLE = `
     .htable .c-res .muted { display: none; }
     .htable .c-rules { grid-column: 2 / 4; grid-row: 2; }
     .htable .c-rules .chip { margin: 0 4px 0 0; }
-    .htable .c-rules:has(> .muted), .htable .c-scope, .htable .c-checked { display: none !important; }
-    .htable .c-matched { grid-column: 3; grid-row: 2; justify-self: end; align-self: start; }
-    .htable .c-matched:not(:has(.hitchip)) { display: none !important; }
+    .htable .c-rules:has(> .muted), .htable .c-scope { display: none !important; }
+    .htable .c-matched { display: none !important; }
+    .htable .c-checked { display: block !important; grid-column: 3; grid-row: 2; justify-self: end; align-self: start; }
+    .htable .c-checked:not(:has(.hitchip)) { display: none !important; }
     .htable tr:has(.hitchip) .c-rules { grid-column: 2; }
+    .htable .c-ai { grid-column: 2; grid-row: 3; }
+    .htable .c-ai:has(> .muted) { display: none !important; }
+    .htable tr:has(.c-rules > .muted) .c-ai { grid-row: 2; }
     .rtable .c-on { grid-area: on; }
     .rtable .c-name { grid-area: name; }
     .rtable .c-hits { grid-area: hits; font-size: 12px; color: var(--secondary-text-color); }

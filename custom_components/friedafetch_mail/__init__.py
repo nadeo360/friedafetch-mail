@@ -199,13 +199,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
     sorter.account = link.label
     link.ai = sorter
 
-    async def _ai_after_rules(trigger: str) -> None:
+    async def _ai_after_rules(trigger: str) -> dict[str, Any] | None:
         if not sorter.settings["active"]:
-            return
+            return None
         try:
-            await sorter.async_process(trigger)
+            return await sorter.async_process(trigger)
         except Exception as err:  # noqa: BLE001 - never break the rule automation
             _LOGGER.warning("AI sorting failed: %s", err)
+            return None
 
     @callback
     def _detach() -> None:
@@ -228,16 +229,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
             next_run = dt_util.as_local(now) + interval
             if not rules.has_enabled_rules:
                 rules.note_check("no_enabled_rules", next_run)
-                await _ai_after_rules("auto")
+                await rules.async_record_ai("auto", await _ai_after_rules("auto"))
                 return
             try:
-                report = await rules.async_run(scope="new", trigger="auto")
+                # one history entry per pass: rules first, then the AI sorting (recorded together below)
+                report = await rules.async_run(scope="new", trigger="auto", record=False)
             except Exception as err:  # noqa: BLE001 - keep the timer alive
                 _LOGGER.warning("Automatic inbox rules failed: %s", err)
                 rules.note_check("error", next_run, str(err))
                 return
             rules.note_check("error" if report["errors"] else "ran", next_run)
-            await _ai_after_rules("auto")
+            await rules.async_record(report, await _ai_after_rules("auto"))
             if report["matched"]:
                 _LOGGER.info("Inbox rules: %s messages checked, %s matched", report["checked"], report["matched"])
 
@@ -246,10 +248,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
         if opts.get(CONF_RULES_PUSH, DEFAULT_RULES_PUSH):
 
             async def _on_new_mail() -> None:
+                report = None
                 if any(r.mailbox == "INBOX" for r in rules.enabled_rules()):
-                    report = await rules.async_run(scope="new", trigger="push", mailbox="INBOX")
+                    report = await rules.async_run(scope="new", trigger="push", mailbox="INBOX", record=False)
                     rules.note_check("error" if report["errors"] else "ran", None)
-                await _ai_after_rules("push")
+                ai = await _ai_after_rules("push")
+                if report is not None:
+                    await rules.async_record(report, ai)
+                else:
+                    await rules.async_record_ai("push", ai)
 
             watcher = MailWatcher(
                 username=core.data[CONF_APPLE_ID],

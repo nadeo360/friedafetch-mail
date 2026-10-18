@@ -99,6 +99,11 @@ async def test_observe_mode_rates_without_changing_anything(hass: HomeAssistant)
         assert first.get("baseline") and generate.await_count == 0  # no backlog on the first run
         report = await sorter.async_process("push")
     assert report["rated"] == 2 and report["applied"] == 0
+    # every rated message is reported for the run history
+    assert [(i["uid"], i["category"]) for i in report["items"]] == [
+        (3, "Personal & important"),
+        (4, "Personal & important"),
+    ]
     move.assert_not_awaited()
     flags.assert_not_awaited()
     delete.assert_not_awaited()
@@ -236,10 +241,14 @@ async def test_websocket_ai(hass: HomeAssistant, hass_ws_client) -> None:
         await ws.send_json({"id": 3, "type": "friedafetch_mail/ai/run", "count": 5})
         result = (await ws.receive_json())["result"]
     assert result["report"]["rated"] == 2 and result["ratings"][0]["category"] == "Wichtig"
+    # "rate newest" also shows up under Runs, as an AI-only pass
+    await ws.send_json({"id": 30, "type": "friedafetch_mail/rules/history"})
+    runs = (await ws.receive_json())["result"]["runs"]
+    assert runs[0]["trigger"] == "manual" and runs[0]["ai"]["rated"] == 2 and len(runs[0]["mails"]) == 2
     rating_id = result["ratings"][0]["id"]
-    await ws.send_json({"id": 4, "type": "friedafetch_mail/ai/correct", "rating_id": rating_id, "category": "other"})
+    await ws.send_json({"id": 31, "type": "friedafetch_mail/ai/correct", "rating_id": rating_id, "category": "other"})
     assert (await ws.receive_json())["result"]["rating"]["corrected"] == "other"
-    await ws.send_json({"id": 5, "type": "friedafetch_mail/ai/clear"})
+    await ws.send_json({"id": 32, "type": "friedafetch_mail/ai/clear"})
     assert (await ws.receive_json())["result"]["ratings"] == []
 
 

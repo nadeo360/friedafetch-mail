@@ -520,7 +520,16 @@ class AiSorter:
         return current != self._uidvalidity
 
     def _report(self, trigger: str) -> dict[str, Any]:
-        return {"trigger": trigger, "rated": 0, "applied": 0, "skipped": 0, "errors": [], "budget_left": None}
+        return {
+            "trigger": trigger,
+            "started": _now_iso(),
+            "rated": 0,
+            "applied": 0,
+            "skipped": 0,
+            "errors": [],
+            "budget_left": None,
+            "items": [],  # one per message: rating or held back (for the run history)
+        }
 
     async def _finish(self, report: dict[str, Any]) -> None:
         report["budget_left"] = self._budget()
@@ -573,6 +582,15 @@ class AiSorter:
                 body = full[:AI_BODY_CHARS] if self.settings["include_body"] else None
             if held:
                 report["skipped"] += 1
+                report["items"].append(
+                    {
+                        "mailbox": MAILBOX,
+                        "uid": uid,
+                        "subject": summary.get("subject"),
+                        "from": sender.get("email"),
+                        "held": sorted({str(r.get("type")) for r in held}),
+                    }
+                )
                 self.record_usage(
                     "sort",
                     entity=self.settings["entity"],
@@ -606,6 +624,17 @@ class AiSorter:
                 if await self._apply(uid, rating, report):
                     report["applied"] += 1
             self._fire(rating)
+            report["items"].append(
+                {
+                    "mailbox": MAILBOX,
+                    "uid": uid,
+                    "subject": summary.get("subject"),
+                    "from": sender.get("email"),
+                    "category": rating.get("category"),
+                    "importance": rating.get("importance"),
+                    "applied": list(rating.get("applied") or []),
+                }
+            )
 
     # ------------------------------------------------------- AI interface
     def _mail_text(self, summary: dict[str, Any], body: str | None) -> str:
