@@ -40,6 +40,18 @@ const fmtClock = (iso) => {
   return d && !isNaN(d) ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "–";
 };
 
+// Material Design Icons from Home Assistant's own icon set, so the panel looks like the rest of HA.
+const ico = (name, title = "") =>
+  `<ha-icon icon="mdi:${name}"${title ? ` title="${esc(title)}"` : ""} aria-hidden="${title ? "false" : "true"}"></ha-icon>`;
+
+// Short time for lists: only the time today, otherwise date and time.
+const fmtShort = (iso) => {
+  const d = parseTime(iso);
+  if (!d || isNaN(d)) return "–";
+  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return d.toDateString() === new Date().toDateString() ? time : `${d.toLocaleDateString([], { day: "2-digit", month: "2-digit" })} ${time}`;
+};
+
 // Adds data-label attributes to the cells of each row so the CSS can stack tables on phones.
 const withLabels = (rowsHtml, labels) =>
   rowsHtml
@@ -113,7 +125,7 @@ class FriedaPostfachPanel extends HTMLElement {
 
   async _autoRefresh() {
     const s = this._s;
-    if (!this._hass || !s.loaded || !s.entryId || s.busy || s.editing || s.aiEdit || document.visibilityState !== "visible") return;
+    if (!this._hass || !s.loaded || !s.entryId || s.busy || s.confirm || s.editing || s.aiEdit || document.visibilityState !== "visible") return;
     const active = this.shadowRoot.activeElement;
     if (active && ["SELECT", "INPUT", "TEXTAREA"].includes(active.tagName)) return;
     if (this.shadowRoot.querySelector("details.menu[open]")) return;
@@ -229,34 +241,51 @@ class FriedaPostfachPanel extends HTMLElement {
   }
 
   async _aiClear() {
-    if (!confirm(this.t.aiConfirmClear)) return;
+    const t = this.t;
+    if (!(await this._confirm({ title: t.aiConfirmClearTitle, text: t.aiConfirmClear, ok: t.clearOk }))) return;
     await this._call(async () => {
       this._s.ai = await this._ws({ type: "friedafetch_mail/ai/clear", entry_id: this._s.entryId });
     });
   }
 
   async _aiUsageClear() {
-    if (!confirm(this.t.aiuConfirmClear)) return;
+    const t = this.t;
+    if (!(await this._confirm({ title: t.aiuConfirmClearTitle, text: t.aiuConfirmClear, ok: t.clearOk }))) return;
     await this._call(async () => {
       this._s.ai = await this._ws({ type: "friedafetch_mail/ai/usage/clear", entry_id: this._s.entryId });
     });
   }
 
-  // Kill-switch reasons: a list of {type, value, where} (older entries: "sender" or "term:<x>").
-  _heldReasons(held) {
+  // Confirmation in the panel's own design (window.confirm looks foreign and is not shown by every app).
+  _confirm({ title, text, ok, irreversible = true }) {
+    if (this._confirmResolve) this._confirmResolve(false);
+    return new Promise((resolve) => {
+      this._confirmResolve = resolve;
+      this._s.confirm = { title, text, ok, irreversible };
+      this._render();
+      this.shadowRoot.querySelector('.modal [data-action="confirm-no"]')?.focus();
+    });
+  }
+
+  _confirmDone(value) {
+    const resolve = this._confirmResolve;
+    this._confirmResolve = null;
+    this._s.confirm = null;
+    this._render();
+    if (resolve) resolve(value);
+  }
+
+  _renderConfirm() {
+    const c = this._s.confirm;
+    if (!c) return "";
     const t = this.t;
-    const list = Array.isArray(held)
-      ? held
-      : held === "sender"
-        ? [{ type: "sender", value: "", where: [] }]
-        : [{ type: "term", value: String(held || "").replace(/^term:/, ""), where: [] }];
-    return list
-      .map((r) => {
-        const where = (r.where || []).map((w) => t.aiuWhere[w] || w).join(", ");
-        const text = r.type === "sender" ? (r.value ? fmt(t.aiuHeldSenderV, r.value) : t.aiuHeldSender) : fmt(t.aiuHeldTerm, r.value);
-        return where && r.type !== "sender" ? `${text} (${where})` : text;
-      })
-      .join(" · ");
+    return `<div class="modal-backdrop" data-action="confirm-no"></div>
+      <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-text">
+        <div class="modal-head"><span class="modal-icon"><ha-icon icon="mdi:alert-outline"></ha-icon></span><h3 id="confirm-title">${esc(c.title)}</h3></div>
+        <p id="confirm-text">${esc(c.text)}</p>
+        ${c.irreversible ? `<p class="modal-warn">${esc(t.irreversible)}</p>` : ""}
+        <div class="modal-actions"><button class="secondary" data-action="confirm-no">${esc(t.cancel)}</button><button class="danger" data-action="confirm-yes">${esc(c.ok)}</button></div>
+      </div>`;
   }
 
   _renderAiUsage() {
@@ -267,40 +296,79 @@ class FriedaPostfachPanel extends HTMLElement {
     const st = s.ai.status || {};
     const log = u.log || [];
     if (!st.active && !log.length) return "";
-    const stat = (label, w) => `<div class="stat"><div class="k">${esc(label)}</div><div class="v">${esc(Number(w.calls || 0).toLocaleString())} <small class="muted">${esc(t.aiuCalls)}</small></div>
-      <div class="s">${esc([fmt(t.aiuChars, Number(w.chars || 0).toLocaleString()), fmt(t.aiuBody, w.body || 0), fmt(t.aiuHeld, w.held_back || 0), w.errors ? fmt(t.aiuErrors, w.errors) : ""].filter(Boolean).join(" · "))}</div></div>`;
+    const num = (n) => Number(n || 0).toLocaleString();
+    const fact = (icon, value, tip, cls = "") => `<span class="fact ${cls}" title="${esc(tip)}">${ico(icon)}${esc(value)}</span>`;
+    const stat = (label, w) => `<div class="stat"><div class="k">${esc(label)}</div><div class="v">${esc(num(w.calls))} <small class="muted">${esc(t.aiuCalls)}</small></div>
+      <div class="facts">${fact("format-text", num(w.chars), t.aiuTipChars)}${fact("text-long", num(w.body), t.aiuTipBody, w.body ? "hot" : "")}${fact("shield-check-outline", num(w.held_back), t.aiuTipHeld)}${w.errors ? fact("alert-circle-outline", num(w.errors), t.aiuTipErrors, "err") : ""}</div></div>`;
     const m = u.month || {};
     const chips = [
-      ...Object.entries(m.entities || {}).map(([e, n]) => `${e} · ${n}`),
-      m.sort ? `${t.aiuKindSort} · ${m.sort}` : "",
-      m.digest ? `${t.aiuKindDigest} · ${m.digest}` : "",
+      ...Object.entries(m.entities || {}).map(([e, n]) => `<span class="chip ic">${ico("robot-outline")}${esc(e.replace(/^ai_task\./, ""))} · ${esc(n)}</span>`),
+      m.sort ? `<span class="chip ic">${ico("sort-variant")}${esc(t.aiuKindSort)} · ${esc(m.sort)}</span>` : "",
+      m.digest ? `<span class="chip ic">${ico("newspaper-variant-outline")}${esc(t.aiuKindDigest)} · ${esc(m.digest)}</span>` : "",
     ].filter(Boolean);
-    const f = s.aiuFilter;
+    const FIELD_ICONS = {
+      from: "account-outline",
+      to: "account-multiple-outline",
+      subject: "format-title",
+      date: "calendar-outline",
+      body: "text-long",
+      unread: "email-outline",
+      events: "calendar-month-outline",
+      birthdays: "cake-variant-outline",
+      rules: "filter-outline",
+    };
+    const reasons = (held) =>
+      (Array.isArray(held) ? held : held === "sender" ? [{ type: "sender", value: "" }] : [{ type: "term", value: String(held || "").replace(/^term:/, "") }])
+        .map((r) => {
+          const where = (r.where || []).map((w) => t.aiuWhere[w] || w).join(", ");
+          const text = r.type === "sender" ? (r.value ? fmt(t.aiuHeldSenderV, r.value) : t.aiuHeldSender) : fmt(t.aiuHeldTerm, r.value);
+          return `<span class="chip ic held">${ico(r.type === "sender" ? "account-cancel-outline" : "text-search")}${esc(where && r.type !== "sender" ? `${text} (${where})` : text)}</span>`;
+        })
+        .join("");
+    const f = s.aiuFilter || "";
     const rows = log
       .filter((e) => !f || (f === "sent" ? e.sent : !e.sent))
       .map((e) => {
-        const kind = e.kind === "digest" ? t.aiuKindDigest : t.aiuKindSort;
-        const what = e.sent
-          ? `${(e.fields || []).map((x) => t.aiuFields[x] || x).join(", ")} · ${fmt(t.aiuChars, Number(e.chars || 0).toLocaleString())}${e.items != null ? " · " + fmt(t.aiuItems, e.items) : ""}`
-          : this._heldReasons(e.held_back);
-        return `<div class="aiu-row">
-          <span class="badge ${e.sent ? (e.ok ? "" : "warn") : "ok-held"}">${esc(e.sent ? (e.ok ? t.aiuSent : t.resError) : t.aiuHeldBack)}</span>${!e.sent && Array.isArray(e.held_back) && e.held_back.length > 1 ? `<span class="badge">${esc(fmt(t.aiuReasons, e.held_back.length))}</span>` : ""}
-          <span class="tx"><span><strong>${esc(kind)}</strong> → ${esc(e.entity || "–")} <span class="muted">· ${esc(fmtDateTime(e.time))}</span></span>
-            <span class="muted">${esc(what)}</span>
-            ${e.subject || e.sender ? `<span class="muted">${esc([e.sender, e.subject ? `„${e.subject}“` : ""].filter(Boolean).join(" · "))}</span>` : ""}
-            ${e.error ? `<span class="muted">${esc(e.error)}</span>` : ""}</span>
+        const state = !e.sent ? "held" : e.ok ? "sent" : "err";
+        const stIcon = { sent: "send-outline", held: "shield-check-outline", err: "alert-circle-outline" }[state];
+        const stText = { sent: t.aiuSent, held: t.aiuHeldBack, err: t.resError }[state];
+        const digest = e.kind === "digest";
+        const title = e.subject ? `„${e.subject}“` : digest ? t.aiuKindDigest : "–";
+        const fields = (e.fields || [])
+          .map((x) => `<span class="fi ${x === "body" ? "hot" : ""}" title="${esc(t.aiuFields[x] || x)}">${ico(FIELD_ICONS[x] || "circle-small")}</span>`)
+          .join("");
+        const meta = [
+          fact(digest ? "newspaper-variant-outline" : "sort-variant", digest ? t.aiuKindDigest : t.aiuKindSort, t.aiuTipKind),
+          e.entity ? fact("robot-outline", e.entity.replace(/^ai_task\./, ""), e.entity) : "",
+          e.sent && fields ? `<span class="fields" title="${esc(t.aiuTipFields)}">${fields}</span>` : "",
+          e.sent ? fact("format-text", num(e.chars), t.aiuTipChars) : "",
+          e.sent && e.items != null ? fact("format-list-bulleted", num(e.items), fmt(t.aiuItems, e.items)) : "",
+        ].join("");
+        return `<div class="aiu-row ${state}">
+          <span class="aiu-st" title="${esc(stText)}">${ico(stIcon)}</span>
+          <div class="aiu-main">
+            <div class="aiu-title">${esc(title)}</div>
+            ${e.sender ? `<div class="aiu-sub">${esc(e.sender)}</div>` : ""}
+            <div class="aiu-meta">${meta}</div>
+            ${!e.sent ? `<div class="aiu-reasons">${reasons(e.held_back)}</div>` : ""}
+            ${e.error ? `<div class="aiu-error">${ico("alert-circle-outline")}${esc(e.error)}</div>` : ""}
+          </div>
+          <time class="aiu-time" datetime="${esc(e.time || "")}" title="${esc(fmtDateTime(e.time))}">${esc(fmtShort(e.time))}</time>
         </div>`;
       })
       .join("");
-    const opt = (val, label) => `<option value="${val}" ${f === val ? "selected" : ""}>${esc(label)}</option>`;
+    const sentCount = log.filter((e) => e.sent).length;
+    const seg = (val, icon, label, count) =>
+      `<button class="seg ${f === val ? "on" : ""}" data-action="aiu-filter" data-v="${val}" aria-pressed="${f === val}">${ico(icon)}${esc(label)}<span class="n">${esc(count)}</span></button>`;
     return `<div class="card" id="ai-usage">
       <h2><span class="grow">${esc(t.aiu)}</span>${log.length ? `<button class="link" data-action="aiu-clear">${esc(t.aiuClear)}</button>` : ""}</h2>
       <p class="muted" style="margin:0 0 10px">${esc(t.aiuHint)}</p>
       <div class="stats">${stat(t.aiuToday, u.today || {})}${stat(t.aiuWeek, u.week || {})}${stat(t.aiuMonth, u.month || {})}</div>
-      ${chips.length ? `<div style="margin-top:10px">${chips.map((c) => `<span class="chip">${esc(c)}</span>`).join("")}</div>` : ""}
+      ${chips.length ? `<div style="margin-top:10px">${chips.join("")}</div>` : ""}
       ${
         log.length
-          ? `<div class="fbar" style="margin-top:12px"><select data-action="aiu-filter" aria-label="${esc(t.aiuAll)}">${opt("", t.aiuAll)}${opt("sent", t.aiuOnlySent)}${opt("held", t.aiuOnlyHeld)}</select></div><div class="aiu-list">${rows}</div>`
+          ? `<div class="segs" role="group" aria-label="${esc(t.aiuAll)}">${seg("", "format-list-bulleted", t.aiuAll, log.length)}${seg("sent", "send-outline", t.aiuOnlySent, sentCount)}${seg("held", "shield-check-outline", t.aiuOnlyHeld, log.length - sentCount)}</div>
+             <div class="aiu-list">${rows || `<p class="muted">${esc(t.aiuEmpty)}</p>`}</div>`
           : `<p class="muted" style="margin-top:12px">${esc(t.aiuEmpty)}</p>`
       }
     </div>`;
@@ -340,7 +408,7 @@ class FriedaPostfachPanel extends HTMLElement {
         <div class="row"><label></label><label><input type="checkbox" id="ai-flag" ${e.data.flag ? "checked" : ""}> ${esc(t.aiCatFlag)}</label></div>
         ${act ? "" : `<p class="muted" style="margin:0 0 10px">${esc(t.aiCatActionsObserve)}</p>`}
         <div class="actionsbar"><button data-action="ai-cat-save" ${s.busy ? "disabled" : ""}>${esc(t.save)}</button><button class="secondary" data-action="ai-cat-cancel">${esc(t.cancel)}</button>
-          ${e.index >= 0 ? `<button class="secondary" data-action="ai-cat-delete">🗑 ${esc(t.aiCatDelete)}</button>` : ""}</div>
+          ${e.index >= 0 ? `<button class="secondary ib danger" data-action="ai-cat-delete">${ico("delete-outline")}${esc(t.aiCatDelete)}</button>` : ""}</div>
       </div>`;
     const catRows = cats
       .map((c, i) => {
@@ -348,7 +416,7 @@ class FriedaPostfachPanel extends HTMLElement {
         const acts = [c.move_to ? `→ ${c.move_to}` : "", c.mark_seen ? t.aSeen : "", c.flag ? t.aFlag : ""].filter(Boolean);
         return `<div class="ai-cat"><span class="tx"><strong>${esc(c.name)}</strong><span class="muted">${esc(c.description)}</span></span>
           <span>${acts.map((a) => `<span class="chip">${esc(a)}</span>`).join("")}</span>
-          <button class="icon" data-action="ai-cat-edit" data-index="${i}" ${edit ? "disabled" : ""} title="${esc(t.edit)}" aria-label="${esc(t.edit)}: ${esc(c.name)}">✎</button></div>`;
+          <button class="icon" data-action="ai-cat-edit" data-index="${i}" ${edit ? "disabled" : ""} title="${esc(t.edit)}" aria-label="${esc(t.edit)}: ${esc(c.name)}">${ico("pencil-outline")}</button></div>`;
       })
       .join("");
     const ratings = (ai.ratings || [])
@@ -454,7 +522,9 @@ class FriedaPostfachPanel extends HTMLElement {
   }
 
   async _delete(id) {
-    if (!confirm(this.t.confirmDelete)) return;
+    const t = this.t;
+    const name = this._s.rules.find((r) => r.id === id)?.name || "";
+    if (!(await this._confirm({ title: t.confirmDeleteTitle, text: fmt(t.confirmDelete, name), ok: t.remove }))) return;
     await this._call(async () => {
       await this._ws({ type: "friedafetch_mail/rules/delete", entry_id: this._s.entryId, rule_id: id });
       await this._reload();
@@ -503,7 +573,8 @@ class FriedaPostfachPanel extends HTMLElement {
   }
 
   async _clearHistory() {
-    if (!confirm(this.t.confirmClearHistory)) return;
+    const t = this.t;
+    if (!(await this._confirm({ title: t.confirmClearHistoryTitle, text: t.confirmClearHistory, ok: t.clearOk }))) return;
     await this._call(async () => {
       await this._ws({ type: "friedafetch_mail/rules/history/clear", entry_id: this._s.entryId });
       await this._loadHistory();
@@ -632,7 +703,12 @@ class FriedaPostfachPanel extends HTMLElement {
   }
 
   async _run(scope, dryRun, ruleIds = null) {
-    if (!dryRun && scope === "all" && !confirm(this.t.confirmRun)) return;
+    if (
+      !dryRun &&
+      scope === "all" &&
+      !(await this._confirm({ title: this.t.confirmRunTitle, text: this.t.confirmRun, ok: this.t.confirmRunOk, irreversible: false }))
+    )
+      return;
     await this._call(async () => {
       const msg = { type: "friedafetch_mail/rules/run", entry_id: this._s.entryId, scope, dry_run: dryRun };
       if (ruleIds) msg.rule_ids = ruleIds;
@@ -735,11 +811,13 @@ class FriedaPostfachPanel extends HTMLElement {
                 <div><div class="lbl">${esc(t.conditions)}</div>${conds}</div>
                 <div><div class="lbl">${esc(t.actions)}</div>${acts || `<span class="muted">${esc(t.noActions)}</span>`}${r.actions.stop === false ? `<div class="muted">↓ ${esc(t.continueRules)}</div>` : ""}</div>
                 <div class="rule-tools">
-                  <button class="secondary" data-action="edit" data-id="${esc(r.id)}" ${s.editing ? "disabled" : ""}>✎ ${esc(t.edit)}</button>
-                  <button class="secondary" data-action="test" data-id="${esc(r.id)}" ${s.busy ? "disabled" : ""} title="${esc(t.testRuleHint)}">▶ ${esc(t.testRule)}</button>
-                  <button class="icon" data-action="up" data-id="${esc(r.id)}" ${i === 0 ? "disabled" : ""} title="${esc(t.up)}" aria-label="${esc(t.up)}">▲</button>
-                  <button class="icon" data-action="down" data-id="${esc(r.id)}" ${i === s.rules.length - 1 ? "disabled" : ""} title="${esc(t.down)}" aria-label="${esc(t.down)}">▼</button>
-                  <button class="icon" data-action="delete" data-id="${esc(r.id)}" title="${esc(t.remove)}" aria-label="${esc(t.remove)}">🗑</button>
+                  <button class="secondary ib" data-action="edit" data-id="${esc(r.id)}" ${s.editing ? "disabled" : ""}>${ico("pencil-outline")}${esc(t.edit)}</button>
+                  <button class="secondary ib" data-action="test" data-id="${esc(r.id)}" ${s.busy ? "disabled" : ""} title="${esc(t.testRuleHint)}">${ico("play-outline")}${esc(t.testRule)}</button>
+                  <button class="secondary ib danger" data-action="delete" data-id="${esc(r.id)}">${ico("delete-outline")}${esc(t.remove)}</button>
+                  <span class="move">
+                    <button class="icon" data-action="up" data-id="${esc(r.id)}" ${i === 0 ? "disabled" : ""} title="${esc(t.up)}" aria-label="${esc(t.up)}">${ico("arrow-up")}</button>
+                    <button class="icon" data-action="down" data-id="${esc(r.id)}" ${i === s.rules.length - 1 ? "disabled" : ""} title="${esc(t.down)}" aria-label="${esc(t.down)}">${ico("arrow-down")}</button>
+                  </span>
                   ${copy}
                 </div>
               </div>`
@@ -770,7 +848,7 @@ class FriedaPostfachPanel extends HTMLElement {
           <select class="c-field">${FIELDS.map((f) => opt(f, t.fields[f], c.field)).join("")}</select>
           <select class="c-op">${OPS.map((o) => opt(o, t.ops[o], c.op)).join("")}</select>
           <input type="text" class="c-value" value="${esc(c.value)}" placeholder="${esc(t.value)}">
-          <button class="icon" data-action="remove-cond" data-index="${i}" ${e.conditions.length === 1 ? "disabled" : ""}>✕</button>
+          <button class="icon" data-action="remove-cond" data-index="${i}" ${e.conditions.length === 1 ? "disabled" : ""} title="${esc(t.remove)}" aria-label="${esc(t.remove)}">${ico("close")}</button>
         </div>`
       )
       .join("");
@@ -842,12 +920,12 @@ class FriedaPostfachPanel extends HTMLElement {
     const m = this._mode(acc, au);
     const extra = [au?.enabled && au.next_run && au.push?.state !== "listening" ? fmt(t.nextAt, fmtClock(au.next_run)) : "", acc?.digest_time ? fmt(t.digestAt, acc.digest_time) : ""].filter(Boolean);
     const allOpen = s.rules.length > 0 && s.rules.every((r) => s.expanded.has(r.id));
-    const runItem = (scope, dry, label, hint, disabled) =>
-      `<button data-action="run" data-scope="${scope}" data-dry="${dry ? 1 : 0}" ${s.busy || disabled ? "disabled" : ""}><span>${esc(label)}</span><small>${esc(hint)}</small></button>`;
-    const runMenu = `<details class="menu" id="run-menu"><summary role="button"><span class="play" aria-hidden="true">▶</span>${esc(t.runMenu)}</summary><div class="menu-list">
-        ${runItem("all", true, t.dryRunAll, t.dryRunHint, false)}
-        ${runItem("all", false, t.runAll, t.runAllHint, readOnly)}
-        ${runItem("new", false, t.runNew, t.runNewHint, readOnly)}
+    const runItem = (scope, dry, icon, label, hint, disabled) =>
+      `<button data-action="run" data-scope="${scope}" data-dry="${dry ? 1 : 0}" ${s.busy || disabled ? "disabled" : ""}>${ico(icon)}<span class="mi"><span>${esc(label)}</span><small>${esc(hint)}</small></span></button>`;
+    const runMenu = `<details class="menu" id="run-menu"><summary role="button">${ico("play")}${esc(t.runMenu)}</summary><div class="menu-list">
+        ${runItem("all", true, "eye-outline", t.dryRunAll, t.dryRunHint, false)}
+        ${runItem("all", false, "playlist-play", t.runAll, t.runAllHint, readOnly)}
+        ${runItem("new", false, "email-arrow-right-outline", t.runNew, t.runNewHint, readOnly)}
       </div></details>`;
     const body = !s.loaded
       ? `<p class="muted">${esc(t.loading)}</p>`
@@ -872,7 +950,7 @@ class FriedaPostfachPanel extends HTMLElement {
       ${this._renderHistory()}`;
     this.shadowRoot.innerHTML = `<style>${STYLE}</style>
       <div class="toolbar"><ha-menu-button></ha-menu-button><img src="${esc(ICON_URL)}" alt=""><span>${esc(t.title)}</span><span class="grow"></span></div>
-      <div class="content">${body}</div>`;
+      <div class="content">${body}</div>${this._renderConfirm()}`;
     const menu = this.shadowRoot.querySelector("ha-menu-button");
     if (menu && this._hass) {
       menu.hass = this._hass;
@@ -917,6 +995,9 @@ class FriedaPostfachPanel extends HTMLElement {
 
   _bind() {
     const root = this.shadowRoot;
+    root.querySelector(".modal")?.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") this._confirmDone(false);
+    });
     root.querySelectorAll("[data-action]").forEach((el) => {
       const action = el.dataset.action;
       const handler = {
@@ -1008,14 +1089,19 @@ class FriedaPostfachPanel extends HTMLElement {
           else cats.push(e.data);
           this._aiSaveCategories(cats);
         },
-        "ai-cat-delete": () => {
+        "ai-cat-delete": async () => {
           const e = this._s.aiEdit;
+          const t = this.t;
+          const name = this._s.ai.categories[e.index]?.name || "";
+          if (!(await this._confirm({ title: t.aiCatConfirmDeleteTitle, text: fmt(t.aiCatConfirmDelete, name), ok: t.remove }))) return;
           this._aiSaveCategories(this._s.ai.categories.filter((_, i) => i !== e.index));
         },
+        "confirm-yes": () => this._confirmDone(true),
+        "confirm-no": () => this._confirmDone(false),
       }[action];
       if (action === "aiu-filter") {
-        el.addEventListener("change", () => {
-          this._s.aiuFilter = el.value;
+        el.addEventListener("click", () => {
+          this._s.aiuFilter = el.dataset.v;
           this._render();
         });
       } else if (action === "ai-correct") {
