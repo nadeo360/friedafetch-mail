@@ -23,6 +23,14 @@ const plain = (s) =>
   String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const { esc, fmt, parseTime, fmtDateTime, fmtClock, fmtShort, ico } = W || { esc: plain, fmt: String, parseTime: () => null, fmtDateTime: String, fmtClock: String, fmtShort: String, ico: () => "" };
 
+// Time with seconds for the details (timeline, a pass in progress): only the time today, otherwise date and time.
+const fmtSeconds = (iso) => {
+  const d = parseTime(iso);
+  if (!d || isNaN(d)) return "–";
+  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  return d.toDateString() === new Date().toDateString() ? time : `${d.toLocaleDateString([], { day: "2-digit", month: "2-digit" })} ${time}`;
+};
+
 const trigLabel = (t, trig) =>
   trig === "auto" ? t.triggerAuto : trig === "push" ? t.triggerPush : trig === "assistant" ? t.triggerAssistant : t.triggerManual;
 
@@ -222,7 +230,8 @@ class FriedaPostfachPanel extends HTMLElement {
   async _init() {
     this._render();
     try {
-      const [{ accounts }] = await Promise.all([this._ws({ type: "friedafetch_mail/accounts" }), this._layout.load(this._hass)]);
+      const [{ accounts, version }] = await Promise.all([this._ws({ type: "friedafetch_mail/accounts" }), this._layout.load(this._hass)]);
+      this._s.serverVersion = version || null;
       this._s.accounts = accounts;
       const linked = this._linkedAccount();
       this._s.entryId = (linked || accounts[0])?.entry_id || null;
@@ -746,7 +755,8 @@ class FriedaPostfachPanel extends HTMLElement {
   }
 
   async _loadAccounts() {
-    const { accounts } = await this._ws({ type: "friedafetch_mail/accounts" });
+    const { accounts, version } = await this._ws({ type: "friedafetch_mail/accounts" });
+    this._s.serverVersion = version || null;
     this._s.accounts = accounts;
     if (!accounts.some((a) => a.entry_id === this._s.entryId)) this._s.entryId = accounts[0]?.entry_id || null;
   }
@@ -754,6 +764,7 @@ class FriedaPostfachPanel extends HTMLElement {
   // live: runs that were not there before are highlighted briefly (merged runs keep their id and stay calm)
   async _loadHistory(live = false) {
     const res = await this._ws({ type: "friedafetch_mail/rules/history", entry_id: this._s.entryId, limit: this._s.historyLimit });
+    this._s.historyCurrent = res.current || null;
     const known = new Set((this._s.history || []).map((h) => h.id));
     this._s.history = res.runs || [];
     if (live && known.size) this._fresh = new Set(this._s.history.filter((h) => !known.has(h.id)).map((h) => h.id));
@@ -968,8 +979,17 @@ class FriedaPostfachPanel extends HTMLElement {
         <div class="what"><strong>${esc(title)}</strong>${sub ? `<span class="sub">${esc(sub)}</span>` : ""}${quote ? `<span class="quote">${esc(quote)}</span>` : ""}${
           minis.length ? `<span class="chips">${minis.map((m) => `<span class="mini">${esc(m)}</span>`).join("")}</span>` : ""
         }</div>
-        <span class="when">${e.time ? `<time datetime="${esc(e.time)}">${esc(fmtShort(e.time))}</time>` : ""}</span>
+        <span class="when">${e.time ? `<time datetime="${esc(e.time)}" title="${esc(fmtDateTime(e.time))}">${esc(fmtSeconds(e.time))}</time>` : ""}</span>
       </li>`;
+  }
+
+  // After an update Home Assistant keeps the old code of an open panel until it is reloaded.
+  _renderUpdateHint() {
+    const loaded = new URLSearchParams(VERSION_QUERY).get("v");
+    const server = this._s.serverVersion;
+    if (!loaded || !server || loaded === server) return "";
+    const t = this.t;
+    return `<div class="info update-hint" data-announce>${ico("update")}<span class="grow">${esc(t.updateReady)}</span><button class="small" data-action="reload">${esc(t.reloadNow)}</button></div>`;
   }
 
   _renderHistory() {
@@ -1061,6 +1081,11 @@ class FriedaPostfachPanel extends HTMLElement {
       return `<button class="seg ${f === val ? "on" : ""}" data-action="run-filter" data-v="${val}" aria-pressed="${f === val}">${ico(icon)}${esc(label)}<span class="n">${n}</span></button>`;
     };
     const more = s.historyTotal > s.history.length;
+    // a push pass that is still running (rules and AI rating take a few seconds)
+    const cur = s.historyCurrent;
+    const curLine = cur
+      ? `<span class="working pending-run" role="status"><span class="spinner" aria-hidden="true"></span><strong>${esc(fmtSeconds(cur.started))}</strong><span class="tchip t-${esc(trigIcon[cur.trigger] ? cur.trigger : "manual")}">${ico(trigIcon[cur.trigger] || trigIcon.manual)}<span class="tl">${esc(trigLabel(t, cur.trigger))}</span></span><span>${esc(cur.ai ? t.runPendingAi : t.runPending)}</span></span>`
+      : "";
     return `<div class="card">
       <div class="chead"><h2>${esc(t.history)}</h2>
         ${W.cardMenu([s.history.length && { action: "history-clear", icon: "delete-sweep-outline", label: t.clearHistory, danger: true, disabled: s.busy }], t)}</div>
@@ -1074,9 +1099,9 @@ class FriedaPostfachPanel extends HTMLElement {
             </div>${W.columnStyle(this._layout, "runs", cols)}
             <div class="scroll menus"><table class="dtable htable" data-table="runs"><thead><tr>
               ${sortTh("runs-sort", sort, "time", t.colTime, "c-time")}${sortTh("runs-sort", sort, "trig", t.colTrigger, "c-trig")}<th class="c-scope">${esc(t.colScope)}</th>${sortTh("runs-sort", sort, "checked", t.colMails, "c-checked num")}${sortTh("runs-sort", sort, "matched", t.colMatched, "c-matched num")}<th class="c-rules">${esc(t.colRules)}</th>${sortTh("runs-sort", sort, "ai", t.colAi, "c-ai")}${sortTh("runs-sort", sort, "res", t.colResult, "c-res")}
-            </tr></thead><tbody>${rows || `<tr><td colspan="8" class="muted">${esc(t.noMatches)}</td></tr>`}</tbody></table></div>
+            </tr></thead><tbody>${curLine ? `<tr class="pending"><td colspan="8">${curLine}</td></tr>` : ""}${rows || `<tr><td colspan="8" class="muted">${esc(t.noMatches)}</td></tr>`}</tbody></table></div>
             <p class="muted nomatch" hidden>${esc(t.noMatches)}</p>`
-          : `<p class="muted">${esc(t.noHistory)}</p>`
+          : curLine || `<p class="muted">${esc(t.noHistory)}</p>`
       }
       ${more ? `<button class="morelink" data-action="history-more" ${s.busy ? "disabled" : ""}>${ico("chevron-down")}${esc(t.showMore)}</button>` : ""}
     </div>`;
@@ -1380,6 +1405,7 @@ class FriedaPostfachPanel extends HTMLElement {
       : !s.entryId
         ? `<div class="card"><p>${esc(t.noAccount)}</p></div>`
         : `
+      ${this._renderUpdateHint()}
       ${s.error ? `<div class="error" data-announce>${esc(s.error)}</div>` : ""}
       ${s.notice ? `<div class="ok" data-announce>${esc(s.notice)}</div>` : ""}
       ${this._renderAccounts()}
@@ -1584,6 +1610,7 @@ class FriedaPostfachPanel extends HTMLElement {
           if (m) this._openTimeline({ message_id: m.message_id || null, subject: m.subject || "", sender: m.from || "" });
         },
         "sheet-close": () => this._closeTimeline(),
+        reload: () => window.location.reload(),
         "aiu-charts": () => {
           this._layout.setOpt("aiu", "charts", !this._layout.opt("aiu", "charts", false));
           this._render();

@@ -343,6 +343,7 @@ class RuleEngine:
         self.next_run: str | None = None
         self.last_check: dict[str, Any] | None = None
         self.push: Any | None = None  # IMAP IDLE watcher, if push delivery is active
+        self.current: dict[str, Any] | None = None  # a pass in progress (push), shown in the panel right away
         # run history (newest last); consecutive empty automatic runs are merged into one entry
         self._history: list[dict[str, Any]] = []
         self._history_seq = 0
@@ -579,6 +580,17 @@ class RuleEngine:
                 },
             )
         async_dispatcher_send(self._hass, SIGNAL_UPDATED.format(self._entry_id))
+
+    # -------------------------------------------------------- pass in progress
+    def begin_pass(self, trigger: str, *, ai: bool) -> None:
+        """New mail was noticed: the panel shows the pass at once, before rules and AI have finished."""
+        self.current = {"trigger": trigger, "started": _now_iso(), "ai": ai}
+        async_notify(self._hass, self._entry_id, "rules")
+
+    def end_pass(self) -> None:
+        if self.current is not None:
+            self.current = None
+            async_notify(self._hass, self._entry_id, "rules")
 
     def history_today(self) -> dict[str, Any]:
         """Runs and matches since local midnight (sensor)."""

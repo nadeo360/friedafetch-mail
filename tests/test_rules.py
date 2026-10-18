@@ -601,3 +601,27 @@ async def test_subscribe_sends_live_updates(hass: HomeAssistant, hass_ws_client)
     event = await ws.receive_json()
     assert event["id"] == 1 and event["event"] == {"entry_id": entry.entry_id, "topic": "rules"}
     assert (await ws.receive_json())["id"] == 2  # the result of the clear call follows
+
+
+async def test_pass_in_progress_is_shown_and_announced(hass: HomeAssistant, hass_ws_client) -> None:
+    """Push shows its pass at once; the history query carries it until the pass is recorded."""
+    core = await setup_core(hass)
+    entry = await setup_postfach(hass, core, rules_auto=False)
+    rules = entry.runtime_data.rules
+    ws = await hass_ws_client(hass)
+    await ws.send_json({"id": 1, "type": "friedafetch_mail/subscribe"})
+    assert (await ws.receive_json())["success"]
+
+    rules.begin_pass("push", ai=True)
+    assert (await ws.receive_json())["event"]["topic"] == "rules"
+    await ws.send_json({"id": 2, "type": "friedafetch_mail/rules/history", "entry_id": entry.entry_id})
+    current = (await ws.receive_json())["result"]["current"]
+    assert current["trigger"] == "push" and current["ai"] is True and current["started"]
+
+    rules.end_pass()
+    assert (await ws.receive_json())["event"]["topic"] == "rules"
+    await ws.send_json({"id": 3, "type": "friedafetch_mail/rules/history", "entry_id": entry.entry_id})
+    assert (await ws.receive_json())["result"]["current"] is None
+
+    await ws.send_json({"id": 4, "type": "friedafetch_mail/accounts"})
+    assert (await ws.receive_json())["result"]["version"]

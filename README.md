@@ -112,7 +112,7 @@ the rules and everything to run them:
 - **Run** opens a menu: dry run or real run over the whole mailbox, or new mail only; the per-message report appears
   below the rules.
 - The **Runs** history: one entry per pass of the rules and the AI sorting (automatic passes without new mail are
-  merged), with search, filters and sorting; a click shows every message of the pass with what the rules did, the
+  merged), with search, filters and sorting; a push pass shows up at once as "New mail – being rated …"; a click shows every message of the pass with what the rules did, the
   AI's category and importance, a kill-switch hold or "no action".
 - The **message timeline**: a click on a message (in a run, under *Recently rated* or *Sent to AI*) opens its whole
   path as a timeline – received, rules checked, sent to the AI or held back by the kill switch, rating, action, your

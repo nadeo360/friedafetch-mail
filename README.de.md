@@ -115,7 +115,8 @@ auszuführen:
 - **Ausführen** öffnet ein Menü: Probelauf oder echter Lauf über das ganze Postfach oder nur neue Mails; der Bericht
   pro Mail erscheint unter den Regeln.
 - Der Verlauf **Ausführungen**: ein Eintrag pro Durchgang von Regeln und KI-Sortierung (automatische Durchgänge ohne
-  neue Mails werden zusammengefasst), mit Suche, Filtern und Sortierung; ein Klick zeigt jede Mail des Durchgangs mit
+  neue Mails werden zusammengefasst), mit Suche, Filtern und Sortierung; ein Push-Durchgang erscheint sofort als
+  „Neue Mail – wird bewertet …“; ein Klick zeigt jede Mail des Durchgangs mit
   dem, was die Regeln getan haben, der Kategorie und Wichtigkeit der KI, einem Killswitch-Stopp oder „keine Aktion“.
 - Der **Verlauf einer Mail**: Ein Klick auf eine Mail (in einer Ausführung, unter *Zuletzt bewertet* oder *An KI
   übermittelt*) öffnet ihren ganzen Weg als Zeitleiste – eingegangen, Regeln geprüft, an die KI übermittelt oder vom

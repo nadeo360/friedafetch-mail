@@ -248,15 +248,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
         if opts.get(CONF_RULES_PUSH, DEFAULT_RULES_PUSH):
 
             async def _on_new_mail() -> None:
-                report = None
-                if any(r.mailbox == "INBOX" for r in rules.enabled_rules()):
-                    report = await rules.async_run(scope="new", trigger="push", mailbox="INBOX", record=False)
-                    rules.note_check("error" if report["errors"] else "ran", None)
-                ai = await _ai_after_rules("push")
-                if report is not None:
-                    await rules.async_record(report, ai)
-                else:
-                    await rules.async_record_ai("push", ai)
+                # the panel shows the pass right away; rules and the AI rating may take a few seconds
+                rules.begin_pass("push", ai=bool(sorter.settings["active"]))
+                try:
+                    report = None
+                    if any(r.mailbox == "INBOX" for r in rules.enabled_rules()):
+                        report = await rules.async_run(scope="new", trigger="push", mailbox="INBOX", record=False)
+                        rules.note_check("error" if report["errors"] else "ran", None)
+                    ai = await _ai_after_rules("push")
+                    if report is not None:
+                        await rules.async_record(report, ai)
+                    else:
+                        await rules.async_record_ai("push", ai)
+                finally:
+                    rules.end_pass()
 
             watcher = MailWatcher(
                 username=core.data[CONF_APPLE_ID],

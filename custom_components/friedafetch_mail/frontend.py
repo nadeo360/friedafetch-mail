@@ -38,10 +38,12 @@ PANEL_URL_PATH = "frieda-postfach"
 STATIC_URL = f"/{DOMAIN}_static"
 WEBCOMPONENT = "friedafetch-mail-panel"
 DATA_FRONTEND: HassKey[bool] = HassKey(f"{DOMAIN}_frontend")
+DATA_VERSION: HassKey[str] = HassKey(f"{DOMAIN}_frontend_version")
 
 
 async def async_setup_frontend(hass: HomeAssistant, version: str) -> None:
     """Register static files, the sidebar panel and the websocket commands (once)."""
+    hass.data[DATA_VERSION] = version  # open panels compare it with the code they loaded
     if hass.data.get(DATA_FRONTEND):
         return
     hass.data[DATA_FRONTEND] = True
@@ -163,7 +165,7 @@ async def ws_accounts(hass: HomeAssistant, connection: websocket_api.ActiveConne
                 "attachments": link.clients.attachments is not None,
             }
         )
-    connection.send_result(msg["id"], {"accounts": accounts})
+    connection.send_result(msg["id"], {"accounts": accounts, "version": hass.data.get(DATA_VERSION)})
 
 
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/mailboxes", vol.Optional("entry_id"): str})
@@ -279,7 +281,9 @@ async def ws_rules_history(
     rules = _entry(hass, msg.get("entry_id")).runtime_data.rules
     await rules.async_load()
     limit = max(1, min(int(msg.get("limit") or 50), 200))
-    connection.send_result(msg["id"], {"runs": rules.history(limit), "total": len(rules.history(200))})
+    connection.send_result(
+        msg["id"], {"runs": rules.history(limit), "total": len(rules.history(200)), "current": rules.current}
+    )
 
 
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/rules/history/clear", vol.Optional("entry_id"): str})

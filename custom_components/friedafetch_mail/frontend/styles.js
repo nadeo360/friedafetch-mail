@@ -266,4 +266,15 @@ export const STYLE = `
     .sheet-foot { padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
   }
 
+  /* a pass that is still running, and the hint to reload after an update */
+  table.htable tr.pending > td { padding: 8px; background: color-mix(in srgb, var(--primary-color) 6%, transparent); }
+  .pending-run { flex-wrap: wrap; gap: 8px 10px; font-size: 14px; }
+  .pending-run .tchip .tl { display: inline; }
+  .content.widgets > .update-hint { grid-column: 1 / -1; }
+  .update-hint { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; --mdc-icon-size: 20px; }
+  .update-hint .grow { flex: 1 1 220px; }
+  @container (max-width: 720px) {
+    table.htable tr.pending, table.htable tr.pending > td { display: block; border-radius: 10px; }
+  }
+
 `;
