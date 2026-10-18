@@ -18,6 +18,13 @@
     "step": {
       "init": {
         "title": "Frieda Postfach",
+        "menu_options": {
+          "automation": "Automatik und Tagesüberblick",
+          "ai": "KI-Sortierung (optional)"
+        }
+      },
+      "automation": {
+        "title": "Frieda Postfach",
         "description": "Tagesüberblick: morgens eine kurze Zusammenfassung mit ungelesenen Mails, Regelaktivität, heutigen Terminen und Geburtstagen.",
         "data": {
           "rules_auto": "Posteingangsregeln automatisch auf neue E-Mails anwenden",
@@ -28,10 +35,31 @@
           "digest_ai_task": "Überblick mit dieser KI-Aufgabe formulieren (optional)",
           "birthday_sensor": "Sensor für den nächsten Geburtstag"
         }
+      },
+      "ai": {
+        "title": "KI-Sortierung",
+        "description": "Aus, solange du sie hier nicht einschaltest UND eine KI-Entität auswählst. Danach bewertet diese KI neue Mails im Posteingang, die keine Regel erledigt hat: eine deiner Kategorien, Wichtigkeit 1–5 und eine kurze Begründung. Die KI erhält Absender, Empfänger und Betreff; die ersten 1.000 Zeichen des Textes nur, wenn du es unten erlaubst. Bei einer Cloud-KI verlassen diese Daten Home Assistant. Die KI kann nichts löschen und nichts senden. Starte mit „Nur bewerten“ und prüfe die Bewertungen im Panel, bevor du sie handeln lässt.",
+        "data": {
+          "ai_enabled": "KI-Sortierung verwenden",
+          "ai_entity": "KI-Entität (AI Task)",
+          "ai_mode": "Was die KI darf",
+          "ai_include_body": "Auch die ersten 1.000 Zeichen des Textes senden",
+          "ai_hourly_limit": "Höchstens so viele Bewertungen pro Stunde",
+          "ai_notify_importance": "Bei wichtigen Mails benachrichtigen (nur „Aktionen ausführen“)",
+          "ai_exclude": "Killswitch: diese Absender oder Domains nie an eine KI senden (eine pro Zeile)",
+          "ai_block_terms": "Killswitch: Mails mit diesen Begriffen nie an eine KI senden (einer pro Zeile)"
+        },
+        "data_description": {
+          "ai_entity": "Eine AI-Task-Entität, z. B. von Google Generative AI, OpenAI oder einem lokalen Ollama-Modell.",
+          "ai_exclude": "Zum Beispiel Bank, Arzt oder Arbeitgeber: bank.example, praxis@example.com",
+          "ai_block_terms": "Wird lokal in Betreff, Absender und Text geprüft, bevor etwas gesendet wird – auch für den KI-Tagesüberblick. Beispiel: Diagnose, Gehalt, Passwort"
+        }
       }
     },
     "error": {
-      "invalid_time": "Bitte eine Uhrzeit im Format HH:MM eingeben, z. B. 07:30."
+      "invalid_time": "Bitte eine Uhrzeit im Format HH:MM eingeben, z. B. 07:30.",
+      "ai_entity_required": "Wähle eine KI-Entität oder schalte die KI-Sortierung aus.",
+      "ai_entity_invalid": "Diese KI-Entität gibt es nicht (mehr)."
     }
   },
   "entity": {
@@ -50,6 +78,22 @@
           "name": "Konto",
           "description": "Bezeichnung oder Apple-ID des Kontos (Standard: alle Konten)."
         }
+      }
+    }
+  },
+  "selector": {
+    "ai_mode": {
+      "options": {
+        "observe": "Nur bewerten (es wird nichts verändert)",
+        "act": "Aktionen der Kategorie ausführen (verschieben, gelesen, markieren)"
+      }
+    },
+    "ai_notify": {
+      "options": {
+        "0": "aus",
+        "3": "ab Wichtigkeit 3",
+        "4": "ab Wichtigkeit 4",
+        "5": "nur Wichtigkeit 5"
       }
     }
   }

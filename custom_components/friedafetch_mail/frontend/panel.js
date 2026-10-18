@@ -149,6 +149,73 @@ const I18N = {
     modeReadOnly: "Das Konto steht in Frieda auf Nur-Lesen – Regeln laufen nur als Probelauf.",
     modeNoMail: "Mail-Tools sind in Frieda deaktiviert.",
     nextAt: "nächste Prüfung {0}",
+    ai: "KI-Sortierung",
+    aiOff: "aus",
+    aiOffHint: "Die KI bewertet keine Mails. Einschalten nur bewusst: Einstellungen → Geräte & Dienste → Frieda Postfach → Konfigurieren → KI-Sortierung, dort die KI-Entität wählen.",
+    aiNoEntity: "Eingeschaltet, aber keine KI-Entität gewählt – es wird nichts bewertet. Wähle sie in den Optionen unter KI-Sortierung.",
+    aiEntityMissing: "Die gewählte KI-Entität {0} ist nicht verfügbar.",
+    aiObserve: "Nur bewerten – es wird nichts verändert",
+    aiAct: "Aktiv – die Aktionen der Kategorien werden ausgeführt",
+    aiModeObserveShort: "Beobachten",
+    aiModeActShort: "Aktiv",
+    aiSendsHeaders: "sendet Absender, Empfänger und Betreff",
+    aiSendsBody: "sendet Absender, Empfänger, Betreff und die ersten {0} Zeichen",
+    aiUsage: "diese Stunde {0} / {1}",
+    aiExcluded: "Ausnahmen: {0}",
+    aiNotify: "Benachrichtigung ab Wichtigkeit {0}",
+    aiManualOnly: "Die Automatik ist aus: Neue Mails werden nur bewertet, wenn du „Neueste bewerten“ wählst.",
+    aiRun: "Neueste bewerten",
+    aiRunHint: "Bewertet die 10 neuesten noch nicht bewerteten Mails im Posteingang",
+    aiRated: "{0} Mails bewertet.",
+    aiError: "Letzter Fehler: {0}",
+    aiCategories: "Kategorien",
+    aiCategoriesHint: "Die KI wählt genau eine Kategorie. Beschreibe in Alltagssprache, was hineingehört.",
+    aiNewCategory: "Neue Kategorie",
+    aiCatName: "Name",
+    aiCatDesc: "Was gehört hinein?",
+    aiCatMove: "Verschieben nach",
+    aiCatSeen: "als gelesen markieren",
+    aiCatFlag: "markieren",
+    aiCatDelete: "Kategorie entfernen",
+    aiCatActionsObserve: "Aktionen greifen erst im Modus „Aktionen ausführen“.",
+    aiRatings: "Zuletzt bewertet",
+    aiNoRatings: "Noch keine Bewertungen. Neue Mails im Posteingang werden ab jetzt bewertet, sobald sie eintreffen.",
+    aiClear: "Liste leeren",
+    aiConfirmClear: "Bewertungen leeren? Kategorien und Korrekturen bleiben erhalten.",
+    aiCorrect: "Richtige Kategorie",
+    aiCorrected: "korrigiert",
+    aiSuspicious: "verdächtig",
+    aiOther: "Sonstiges",
+    aiImportance: "Wichtigkeit {0} von 5",
+    aiApplied_seen: "gelesen",
+    aiApplied_flagged: "markiert",
+    aiApplied_notified: "gemeldet",
+    aiExamples: "gelernte Korrekturen: {0}",
+    aiBlockTerms: "Sperrbegriffe: {0}",
+    aiu: "An KI übermittelt",
+    aiuHint: "Lokales Protokoll: was Frieda Postfach an eine KI gegeben hat (KI-Sortierung und KI-Tagesüberblick) und was der Killswitch zurückgehalten hat.",
+    aiuCalls: "Aufrufe",
+    aiuToday: "Heute",
+    aiuWeek: "7 Tage",
+    aiuMonth: "30 Tage",
+    aiuChars: "{0} Zeichen",
+    aiuBody: "{0} mit Mailtext",
+    aiuHeld: "{0} zurückgehalten",
+    aiuErrors: "{0} Fehler",
+    aiuKindSort: "Sortierung",
+    aiuKindDigest: "Tagesüberblick",
+    aiuSent: "gesendet",
+    aiuHeldBack: "zurückgehalten",
+    aiuHeldSender: "Absender gesperrt",
+    aiuHeldTerm: "Sperrbegriff „{0}“",
+    aiuAll: "Alle Einträge",
+    aiuOnlySent: "Nur gesendet",
+    aiuOnlyHeld: "Nur zurückgehalten",
+    aiuClear: "Protokoll leeren",
+    aiuConfirmClear: "Protokoll der KI-Übermittlungen leeren?",
+    aiuEmpty: "Noch nichts an eine KI übermittelt.",
+    aiuItems: "{0} Einträge",
+    aiuFields: { from: "Absender", to: "Empfänger", subject: "Betreff", date: "Datum", body: "Textauszug", unread: "ungelesene Mails (Absender, Betreff)", events: "Termine", birthdays: "Geburtstage", rules: "Regelstatistik" },
   },
   en: {
     title: "Frieda Postfach",
@@ -293,6 +360,73 @@ const I18N = {
     modeReadOnly: "The account is read-only in Frieda – rules only run as dry runs.",
     modeNoMail: "Mail tools are disabled in Frieda.",
     nextAt: "next check {0}",
+    ai: "AI sorting",
+    aiOff: "off",
+    aiOffHint: "The AI rates no mail. Switch it on deliberately: Settings → Devices & services → Frieda Postfach → Configure → AI sorting, and choose the AI entity there.",
+    aiNoEntity: "Switched on, but no AI entity chosen – nothing is rated. Choose it in the options under AI sorting.",
+    aiEntityMissing: "The chosen AI entity {0} is not available.",
+    aiObserve: "Only rating – nothing is changed",
+    aiAct: "Active – the category actions are run",
+    aiModeObserveShort: "Observe",
+    aiModeActShort: "Active",
+    aiSendsHeaders: "sends sender, recipients and subject",
+    aiSendsBody: "sends sender, recipients, subject and the first {0} characters",
+    aiUsage: "this hour {0} / {1}",
+    aiExcluded: "exceptions: {0}",
+    aiNotify: "notification from importance {0}",
+    aiManualOnly: "The automation is off: new mail is only rated when you choose “Rate newest”.",
+    aiRun: "Rate newest",
+    aiRunHint: "Rates the 10 newest inbox mails that have no rating yet",
+    aiRated: "{0} messages rated.",
+    aiError: "Last error: {0}",
+    aiCategories: "Categories",
+    aiCategoriesHint: "The AI picks exactly one category. Describe in plain words what belongs in it.",
+    aiNewCategory: "New category",
+    aiCatName: "Name",
+    aiCatDesc: "What belongs here?",
+    aiCatMove: "Move to",
+    aiCatSeen: "mark as read",
+    aiCatFlag: "flag",
+    aiCatDelete: "Remove category",
+    aiCatActionsObserve: "Actions only apply in the mode “Run the category actions”.",
+    aiRatings: "Recently rated",
+    aiNoRatings: "No ratings yet. New inbox mail is rated from now on as it arrives.",
+    aiClear: "Clear list",
+    aiConfirmClear: "Clear the ratings? Categories and corrections are kept.",
+    aiCorrect: "Correct category",
+    aiCorrected: "corrected",
+    aiSuspicious: "suspicious",
+    aiOther: "Other",
+    aiImportance: "Importance {0} of 5",
+    aiApplied_seen: "read",
+    aiApplied_flagged: "flagged",
+    aiApplied_notified: "notified",
+    aiExamples: "corrections learned: {0}",
+    aiBlockTerms: "blocked terms: {0}",
+    aiu: "Sent to AI",
+    aiuHint: "Local log: what Frieda Postfach gave to an AI (AI sorting and the AI daily overview) and what the kill switch held back.",
+    aiuCalls: "calls",
+    aiuToday: "Today",
+    aiuWeek: "7 days",
+    aiuMonth: "30 days",
+    aiuChars: "{0} characters",
+    aiuBody: "{0} with text",
+    aiuHeld: "{0} held back",
+    aiuErrors: "{0} errors",
+    aiuKindSort: "Sorting",
+    aiuKindDigest: "Daily overview",
+    aiuSent: "sent",
+    aiuHeldBack: "held back",
+    aiuHeldSender: "sender blocked",
+    aiuHeldTerm: "blocked term “{0}”",
+    aiuAll: "All entries",
+    aiuOnlySent: "Sent only",
+    aiuOnlyHeld: "Held back only",
+    aiuClear: "Clear log",
+    aiuConfirmClear: "Clear the log of AI transmissions?",
+    aiuEmpty: "Nothing sent to an AI yet.",
+    aiuItems: "{0} items",
+    aiuFields: { from: "sender", to: "recipients", subject: "subject", date: "date", body: "text excerpt", unread: "unread mail (sender, subject)", events: "events", birthdays: "birthdays", rules: "rule statistics" },
   },
 };
 
@@ -418,6 +552,35 @@ const STYLE = `
   details.menu .menu-list button { background: none; color: var(--primary-text-color); text-align: left; display: grid; gap: 1px; padding: 8px 10px; border-radius: 6px; }
   details.menu .menu-list button:hover:not(:disabled) { background: var(--secondary-background-color, #f0f0f0); }
   details.menu .menu-list button small { color: var(--secondary-text-color); font-size: 12px; }
+  .ai-cats { display: grid; gap: 6px; }
+  .ai-cat { border: 1px solid var(--divider-color, #e0e0e0); border-radius: 10px; padding: 8px 10px; display: flex; gap: 10px; align-items: center; }
+  .ai-cat .tx { flex: 1; min-width: 0; display: grid; gap: 2px; }
+  .ai-cat .tx .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ai-edit { border: 1px solid color-mix(in srgb, var(--primary-color) 45%, var(--divider-color, #e0e0e0)); border-radius: 10px; padding: 12px; }
+  .ai-rates { display: grid; }
+  .ai-rate { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 2px 10px; padding: 9px 2px; border-bottom: 1px solid var(--divider-color, #e0e0e0); align-items: start; }
+  .ai-rate .imp { grid-row: span 3; width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; font-weight: 600; font-size: 15px; background: var(--secondary-background-color, #eee); color: var(--secondary-text-color); }
+  .ai-rate .imp.i5 { background: color-mix(in srgb, var(--error-color, #db4437) 18%, transparent); color: var(--error-color, #db4437); }
+  .ai-rate .imp.i4 { background: color-mix(in srgb, var(--warning-color, #ffa600) 22%, transparent); color: var(--primary-text-color); }
+  .ai-rate .imp.i3 { background: color-mix(in srgb, var(--primary-color) 14%, transparent); color: var(--primary-color); }
+  .ai-rate .subj { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ai-rate .meta { font-size: 12.5px; color: var(--secondary-text-color); }
+  .ai-rate .side { grid-row: span 3; display: grid; gap: 4px; justify-items: end; }
+  .ai-rate select { min-width: 0; max-width: 180px; padding: 3px 6px; font-size: 12.5px; }
+  .ai-rate .why { font-size: 12.5px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+  .stat { background: var(--secondary-background-color, #f5f5f5); border-radius: 10px; padding: 10px 12px; }
+  .stat .k { font-size: 12px; color: var(--secondary-text-color); }
+  .stat .v { font-size: 24px; font-weight: 500; line-height: 1.25; }
+  .stat .v small { font-size: 12px; font-weight: 400; }
+  .stat .s { font-size: 12px; color: var(--secondary-text-color); }
+  .aiu-list { display: grid; max-height: 520px; overflow-y: auto; }
+  .aiu-row { display: flex; gap: 10px; align-items: flex-start; padding: 8px 2px; border-bottom: 1px solid var(--divider-color, #e0e0e0); }
+  .aiu-row .badge { flex: none; margin-top: 2px; }
+  .aiu-row .badge.ok-held { background: color-mix(in srgb, var(--success-color, #43a047) 16%, transparent); color: var(--primary-text-color); }
+  .aiu-row .tx { display: grid; gap: 2px; min-width: 0; font-size: 13.5px; }
+  .aiu-row .tx .muted { overflow-wrap: anywhere; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 16px 0 12px; border-radius: 18px; font-size: 14px; font-weight: 500; }
   .empty { text-align: center; padding: 18px 8px; display: grid; gap: 10px; justify-items: center; }
   .editor h3.title { margin: 0 0 12px; font-size: 16px; font-weight: 500; }
   .fbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
@@ -464,6 +627,15 @@ const STYLE = `
     button.icon { min-width: 44px; min-height: 44px; font-size: 18px; }
     button.round { min-height: 0; width: 42px; height: 42px; }
     details.menu > summary { height: 42px; border-radius: 21px; }
+    .pill { height: 42px; border-radius: 21px; }
+    .card h2 button.pill { flex: none; }
+    .ai-rate { grid-template-columns: 40px minmax(0, 1fr); }
+    .ai-rate .imp { grid-row: span 4; }
+    .ai-rate > :not(.imp) { grid-column: 2; }
+    .ai-rate .side { grid-row: auto; justify-items: start; display: flex; flex-wrap: wrap; gap: 4px; }
+    .ai-cat { flex-wrap: wrap; }
+    .ai-cat .tx { flex: 1 1 calc(100% - 60px); }
+    .ai-rate select { max-width: none; width: 100%; }
     button.round.small { width: 36px; height: 36px; }
     input[type=text], select, select.copy { width: 100%; max-width: none; min-width: 0; box-sizing: border-box; min-height: 44px; font-size: 16px; }
     .row { gap: 4px; }
@@ -490,6 +662,9 @@ class FriedaPostfachPanel extends HTMLElement {
       history: [],
       historyTotal: 0,
       historyLimit: 50,
+      ai: null,
+      aiEdit: null,
+      aiuFilter: "",
       expanded: new Set(),
       filters: {},
       filterOpen: {},
@@ -521,7 +696,7 @@ class FriedaPostfachPanel extends HTMLElement {
 
   async _autoRefresh() {
     const s = this._s;
-    if (!this._hass || !s.loaded || !s.entryId || s.busy || s.editing || document.visibilityState !== "visible") return;
+    if (!this._hass || !s.loaded || !s.entryId || s.busy || s.editing || s.aiEdit || document.visibilityState !== "visible") return;
     const active = this.shadowRoot.activeElement;
     if (active && ["SELECT", "INPUT", "TEXTAREA"].includes(active.tagName)) return;
     if (this.shadowRoot.querySelector("details.menu[open]")) return;
@@ -588,6 +763,187 @@ class FriedaPostfachPanel extends HTMLElement {
     } catch (err) {
       /* account stats and history are optional */
     }
+    try {
+      this._s.ai = await this._ws({ type: "friedafetch_mail/ai", entry_id: this._s.entryId });
+    } catch (err) {
+      this._s.ai = null; /* older backend or AI sorting unavailable */
+    }
+  }
+
+  // --------------------------------------------------------------- AI sorting
+  async _aiRun() {
+    await this._call(async () => {
+      const res = await this._ws({ type: "friedafetch_mail/ai/run", entry_id: this._s.entryId, count: 10 });
+      this._s.ai = res;
+      this._s.notice = fmt(this.t.aiRated, res.report?.rated ?? 0);
+      if (res.report?.errors?.length) this._s.error = res.report.errors.join("; ");
+    });
+  }
+
+  async _aiSaveCategories(categories) {
+    await this._call(async () => {
+      this._s.ai = await this._ws({ type: "friedafetch_mail/ai/categories", entry_id: this._s.entryId, categories });
+      this._s.aiEdit = null;
+    });
+  }
+
+  _aiReadEdit() {
+    const root = this.shadowRoot;
+    const e = this._s.aiEdit;
+    if (!e) return null;
+    e.data = {
+      ...e.data,
+      name: root.querySelector("#ai-name")?.value ?? e.data.name,
+      description: root.querySelector("#ai-desc")?.value ?? e.data.description,
+      move_to: root.querySelector("#ai-move")?.value || null,
+      mark_seen: !!root.querySelector("#ai-seen")?.checked,
+      flag: !!root.querySelector("#ai-flag")?.checked,
+    };
+    return e;
+  }
+
+  async _aiCorrect(ratingId, category) {
+    await this._call(async () => {
+      await this._ws({ type: "friedafetch_mail/ai/correct", entry_id: this._s.entryId, rating_id: ratingId, category });
+      this._s.ai = await this._ws({ type: "friedafetch_mail/ai", entry_id: this._s.entryId });
+    });
+  }
+
+  async _aiClear() {
+    if (!confirm(this.t.aiConfirmClear)) return;
+    await this._call(async () => {
+      this._s.ai = await this._ws({ type: "friedafetch_mail/ai/clear", entry_id: this._s.entryId });
+    });
+  }
+
+  async _aiUsageClear() {
+    if (!confirm(this.t.aiuConfirmClear)) return;
+    await this._call(async () => {
+      this._s.ai = await this._ws({ type: "friedafetch_mail/ai/usage/clear", entry_id: this._s.entryId });
+    });
+  }
+
+  _renderAiUsage() {
+    const t = this.t;
+    const s = this._s;
+    const u = s.ai?.usage;
+    if (!u) return "";
+    const st = s.ai.status || {};
+    const log = u.log || [];
+    if (!st.active && !log.length) return "";
+    const stat = (label, w) => `<div class="stat"><div class="k">${esc(label)}</div><div class="v">${esc(Number(w.calls || 0).toLocaleString())} <small class="muted">${esc(t.aiuCalls)}</small></div>
+      <div class="s">${esc([fmt(t.aiuChars, Number(w.chars || 0).toLocaleString()), fmt(t.aiuBody, w.body || 0), fmt(t.aiuHeld, w.held_back || 0), w.errors ? fmt(t.aiuErrors, w.errors) : ""].filter(Boolean).join(" · "))}</div></div>`;
+    const m = u.month || {};
+    const chips = [
+      ...Object.entries(m.entities || {}).map(([e, n]) => `${e} · ${n}`),
+      m.sort ? `${t.aiuKindSort} · ${m.sort}` : "",
+      m.digest ? `${t.aiuKindDigest} · ${m.digest}` : "",
+    ].filter(Boolean);
+    const f = s.aiuFilter;
+    const rows = log
+      .filter((e) => !f || (f === "sent" ? e.sent : !e.sent))
+      .map((e) => {
+        const kind = e.kind === "digest" ? t.aiuKindDigest : t.aiuKindSort;
+        const what = e.sent
+          ? `${(e.fields || []).map((x) => t.aiuFields[x] || x).join(", ")} · ${fmt(t.aiuChars, Number(e.chars || 0).toLocaleString())}${e.items != null ? " · " + fmt(t.aiuItems, e.items) : ""}`
+          : e.held_back === "sender"
+            ? t.aiuHeldSender
+            : fmt(t.aiuHeldTerm, String(e.held_back || "").replace(/^term:/, ""));
+        return `<div class="aiu-row">
+          <span class="badge ${e.sent ? (e.ok ? "" : "warn") : "ok-held"}">${esc(e.sent ? (e.ok ? t.aiuSent : t.resError) : t.aiuHeldBack)}</span>
+          <span class="tx"><span><strong>${esc(kind)}</strong> → ${esc(e.entity || "–")} <span class="muted">· ${esc(fmtDateTime(e.time))}</span></span>
+            <span class="muted">${esc(what)}</span>
+            ${e.subject || e.sender ? `<span class="muted">${esc([e.sender, e.subject ? `„${e.subject}“` : ""].filter(Boolean).join(" · "))}</span>` : ""}
+            ${e.error ? `<span class="muted">${esc(e.error)}</span>` : ""}</span>
+        </div>`;
+      })
+      .join("");
+    const opt = (val, label) => `<option value="${val}" ${f === val ? "selected" : ""}>${esc(label)}</option>`;
+    return `<div class="card" id="ai-usage">
+      <h2><span class="grow">${esc(t.aiu)}</span>${log.length ? `<button class="link" data-action="aiu-clear">${esc(t.aiuClear)}</button>` : ""}</h2>
+      <p class="muted" style="margin:0 0 10px">${esc(t.aiuHint)}</p>
+      <div class="stats">${stat(t.aiuToday, u.today || {})}${stat(t.aiuWeek, u.week || {})}${stat(t.aiuMonth, u.month || {})}</div>
+      ${chips.length ? `<div style="margin-top:10px">${chips.map((c) => `<span class="chip">${esc(c)}</span>`).join("")}</div>` : ""}
+      ${
+        log.length
+          ? `<div class="fbar" style="margin-top:12px"><select data-action="aiu-filter" aria-label="${esc(t.aiuAll)}">${opt("", t.aiuAll)}${opt("sent", t.aiuOnlySent)}${opt("held", t.aiuOnlyHeld)}</select></div><div class="aiu-list">${rows}</div>`
+          : `<p class="muted" style="margin-top:12px">${esc(t.aiuEmpty)}</p>`
+      }
+    </div>`;
+  }
+
+  _renderAi() {
+    const t = this.t;
+    const s = this._s;
+    const ai = s.ai;
+    if (!ai) return "";
+    const st = ai.status || {};
+    if (!st.active) {
+      return `<div class="card"><h2><span class="grow">${esc(t.ai)}</span><span class="badge">${esc(t.aiOff)}</span></h2>
+        <div class="info">${esc(st.enabled ? t.aiNoEntity : t.aiOffHint)}</div></div>`;
+    }
+    const acc = this._account();
+    const act = st.mode === "act";
+    const sub = [
+      st.entity,
+      st.include_body ? fmt(t.aiSendsBody, st.body_chars) : t.aiSendsHeaders,
+      fmt(t.aiUsage, st.used_this_hour, st.limit),
+      st.excluded ? fmt(t.aiExcluded, st.excluded) : "",
+      st.block_terms ? fmt(t.aiBlockTerms, st.block_terms) : "",
+      act && st.notify ? fmt(t.aiNotify, st.notify) : "",
+      ai.examples ? fmt(t.aiExamples, ai.examples) : "",
+    ].filter(Boolean);
+    const warn = !st.entity_ok ? fmt(t.aiEntityMissing, st.entity) : st.last_error ? fmt(t.aiError, st.last_error) : "";
+    const catLabel = (name) => (name === "other" ? t.aiOther : name);
+    const cats = ai.categories || [];
+    const opt = (val, label, cur) => `<option value="${esc(val)}" ${String(cur ?? "") === String(val) ? "selected" : ""}>${esc(label)}</option>`;
+    const edit = s.aiEdit;
+    const editor = (e) => `<div class="ai-edit" id="ai-editor">
+        <div class="row"><label for="ai-name">${esc(t.aiCatName)}</label><input type="text" id="ai-name" class="grow" value="${esc(e.data.name)}" maxlength="40"></div>
+        <div class="row"><label for="ai-desc">${esc(t.aiCatDesc)}</label><input type="text" id="ai-desc" class="grow" value="${esc(e.data.description)}" maxlength="300"></div>
+        <div class="row"><label for="ai-move">${esc(t.aiCatMove)}</label><select id="ai-move">${opt("", t.noMove, e.data.move_to || "")}${s.mailboxes.map((b) => opt(b, b, e.data.move_to || "")).join("")}</select></div>
+        <div class="row"><label></label><label><input type="checkbox" id="ai-seen" ${e.data.mark_seen ? "checked" : ""}> ${esc(t.aiCatSeen)}</label></div>
+        <div class="row"><label></label><label><input type="checkbox" id="ai-flag" ${e.data.flag ? "checked" : ""}> ${esc(t.aiCatFlag)}</label></div>
+        ${act ? "" : `<p class="muted" style="margin:0 0 10px">${esc(t.aiCatActionsObserve)}</p>`}
+        <div class="actionsbar"><button data-action="ai-cat-save" ${s.busy ? "disabled" : ""}>${esc(t.save)}</button><button class="secondary" data-action="ai-cat-cancel">${esc(t.cancel)}</button>
+          ${e.index >= 0 ? `<button class="secondary" data-action="ai-cat-delete">🗑 ${esc(t.aiCatDelete)}</button>` : ""}</div>
+      </div>`;
+    const catRows = cats
+      .map((c, i) => {
+        if (edit && edit.index === i) return editor(edit);
+        const acts = [c.move_to ? `→ ${c.move_to}` : "", c.mark_seen ? t.aSeen : "", c.flag ? t.aFlag : ""].filter(Boolean);
+        return `<div class="ai-cat"><span class="tx"><strong>${esc(c.name)}</strong><span class="muted">${esc(c.description)}</span></span>
+          <span>${acts.map((a) => `<span class="chip">${esc(a)}</span>`).join("")}</span>
+          <button class="icon" data-action="ai-cat-edit" data-index="${i}" ${edit ? "disabled" : ""} title="${esc(t.edit)}" aria-label="${esc(t.edit)}: ${esc(c.name)}">✎</button></div>`;
+      })
+      .join("");
+    const ratings = (ai.ratings || [])
+      .map((r) => {
+        const cur = r.corrected || r.category;
+        const applied = (r.applied || []).map((a) => (a.startsWith("moved:") ? `→ ${a.slice(6)}` : t[`aiApplied_${a}`] || a));
+        return `<div class="ai-rate">
+          <span class="imp i${r.importance}" title="${esc(fmt(t.aiImportance, r.importance))}">${esc(r.importance)}</span>
+          <span class="subj">${esc(r.subject || "–")}</span>
+          <span class="side">
+            <select data-action="ai-correct" data-id="${esc(r.id)}" title="${esc(t.aiCorrect)}" aria-label="${esc(t.aiCorrect)}">${[...cats.map((c) => c.name), "other"].map((n) => opt(n, catLabel(n), cur)).join("")}</select>
+            ${r.corrected ? `<span class="badge">${esc(t.aiCorrected)}</span>` : ""}${r.suspicious ? `<span class="badge warn">${esc(t.aiSuspicious)}</span>` : ""}
+          </span>
+          <span class="meta">${esc(r.from || "")} · ${esc(fmtDateTime(r.time))}${applied.length ? " · " + applied.map(esc).join(", ") : ""}</span>
+          <span class="why muted">${esc(r.reason || "")}</span>
+        </div>`;
+      })
+      .join("");
+    return `<div class="card" id="ai">
+      <h2><span class="grow">${esc(t.ai)} <span class="badge ${act ? "warn" : ""}">${esc(act ? t.aiModeActShort : t.aiModeObserveShort)}</span></span>
+        <button class="pill" data-action="ai-run" ${s.busy ? "disabled" : ""} title="${esc(t.aiRunHint)}"><span aria-hidden="true" style="font-size:11px">▶</span>${esc(t.aiRun)}</button></h2>
+      <div class="mode ${warn ? "warn" : ""}"><span class="ic" aria-hidden="true">${act ? "✦" : "👁"}</span><span class="tx"><strong>${esc(act ? t.aiAct : t.aiObserve)}</strong><span class="muted">${esc(sub.join(" · "))}</span>${warn ? `<span class="muted">${esc(warn)}</span>` : ""}</span></div>
+      ${acc && !acc.rules_auto ? `<p class="muted" style="margin:-4px 0 10px">${esc(t.aiManualOnly)}</p>` : ""}
+      <h3 class="muted with-add">${esc(t.aiCategories)} <button class="round small" data-action="ai-cat-new" ${edit ? "disabled" : ""} title="${esc(t.aiNewCategory)}" aria-label="${esc(t.aiNewCategory)}">+</button></h3>
+      <p class="muted" style="margin:-4px 0 8px">${esc(t.aiCategoriesHint)}</p>
+      <div class="ai-cats">${catRows}${edit && edit.index < 0 ? editor(edit) : ""}</div>
+      <h3 class="muted with-add">${esc(t.aiRatings)}${(ai.ratings || []).length ? ` <button class="link" data-action="ai-clear">${esc(t.aiClear)}</button>` : ""}</h3>
+      ${ratings ? `<div class="ai-rates">${ratings}</div>` : `<p class="muted">${esc(t.aiNoRatings)}</p>`}
+    </div>`;
   }
 
   async _call(fn) {
@@ -1076,6 +1432,8 @@ class FriedaPostfachPanel extends HTMLElement {
           ${s.rules.length > 1 ? `<button class="link" data-action="expand-all" data-open="${allOpen ? "0" : "1"}">${esc(allOpen ? t.collapseAll : t.expandAll)}</button>` : ""}</div>
         ${this._renderRules()}
       </div>
+      ${this._renderAi()}
+      ${this._renderAiUsage()}
       ${this._renderReport()}
       ${this._renderHistory()}`;
     this.shadowRoot.innerHTML = `<style>${STYLE}</style>
@@ -1191,8 +1549,44 @@ class FriedaPostfachPanel extends HTMLElement {
           this._run(el.dataset.scope, el.dataset.dry === "1");
         },
         test: () => this._run("all", true, [el.dataset.id]),
+        "ai-run": () => this._aiRun(),
+        "aiu-clear": () => this._aiUsageClear(),
+        "ai-clear": () => this._aiClear(),
+        "ai-cat-new": () => {
+          this._s.aiEdit = { index: -1, data: { name: "", description: "", move_to: null, mark_seen: false, flag: false } };
+          this._render();
+          this.shadowRoot.querySelector("#ai-name")?.focus();
+        },
+        "ai-cat-edit": () => {
+          const i = Number(el.dataset.index);
+          this._s.aiEdit = { index: i, data: { ...this._s.ai.categories[i] } };
+          this._render();
+          this.shadowRoot.querySelector("#ai-name")?.focus();
+        },
+        "ai-cat-cancel": () => {
+          this._s.aiEdit = null;
+          this._render();
+        },
+        "ai-cat-save": () => {
+          const e = this._aiReadEdit();
+          const cats = [...this._s.ai.categories];
+          if (e.index >= 0) cats[e.index] = e.data;
+          else cats.push(e.data);
+          this._aiSaveCategories(cats);
+        },
+        "ai-cat-delete": () => {
+          const e = this._s.aiEdit;
+          this._aiSaveCategories(this._s.ai.categories.filter((_, i) => i !== e.index));
+        },
       }[action];
-      if (action === "toggle") {
+      if (action === "aiu-filter") {
+        el.addEventListener("change", () => {
+          this._s.aiuFilter = el.value;
+          this._render();
+        });
+      } else if (action === "ai-correct") {
+        el.addEventListener("change", () => this._aiCorrect(el.dataset.id, el.value));
+      } else if (action === "toggle") {
         el.addEventListener("change", () => this._toggle(el.dataset.id, el.checked));
       } else if (action === "copy") {
         el.addEventListener("change", () => el.value && this._copy(el.dataset.id, el.value));

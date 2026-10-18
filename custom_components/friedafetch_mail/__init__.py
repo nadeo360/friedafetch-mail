@@ -21,6 +21,7 @@ from homeassistant.util.ssl import client_context
 
 from .const import (
     CONF_ACCOUNT,
+    CONF_DIGEST_NOTIFY,
     CONF_DIGEST_TIME,
     CONF_RULES_AUTO,
     CONF_RULES_INTERVAL,
@@ -83,7 +84,12 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
             if wanted and wanted not in (link.label.lower(), link.apple_id.lower(), entry.entry_id):
                 continue
             result = await async_send_digest(
-                hass, link.clients, dict(entry.options), link.rules, link.label if len(entries) > 1 else ""
+                hass,
+                link.clients,
+                dict(entry.options),
+                link.rules,
+                link.label if len(entries) > 1 else "",
+                ledger=getattr(link, "ai", None),
             )
             results.append({"account": link.label, "sent_to": result["sent_to"], "message": result["message"]})
         if not results:
@@ -118,6 +124,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
     )
     from custom_components.friedafetch.util import clamp  # noqa: PLC0415
 
+    from .ai import AiSorter  # noqa: PLC0415
     from .digest import async_send_digest  # noqa: PLC0415
     from .frontend import async_setup_frontend  # noqa: PLC0415
     from .idle import MailWatcher  # noqa: PLC0415
@@ -159,6 +166,32 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
     entry.runtime_data = link
     clients.extensions[EXTENSION_NAME] = extension
 
+    async def _notify_important(rating: dict[str, Any]) -> None:
+        title = f"Frieda Postfach: {rating['category']} ({rating['importance']}/5)"
+        message = f"{rating.get('from') or ''}: {rating.get('subject') or ''}\n{rating.get('reason') or ''}".strip()
+        service = str(opts.get(CONF_DIGEST_NOTIFY) or "").removeprefix("notify.")
+        if service and hass.services.has_service("notify", service):
+            await hass.services.async_call("notify", service, {"title": title, "message": message}, blocking=True)
+        else:
+            await hass.services.async_call(
+                "persistent_notification", "create", {"title": title, "message": message}, blocking=True
+            )
+
+    # AI sorting exists only when it was switched on deliberately and an AI entity is chosen
+    sorter = AiSorter(
+        hass, core.entry_id, clients, dict(opts), notify=_notify_important, language=hass.config.language or "en"
+    )
+    await sorter.async_load()
+    link.ai = sorter
+
+    async def _ai_after_rules(trigger: str) -> None:
+        if not sorter.settings["active"]:
+            return
+        try:
+            await sorter.async_process(trigger)
+        except Exception as err:  # noqa: BLE001 - never break the rule automation
+            _LOGGER.warning("AI sorting failed: %s", err)
+
     @callback
     def _detach() -> None:
         if clients.extensions.get(EXTENSION_NAME) is extension:
@@ -180,6 +213,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
             next_run = dt_util.as_local(now) + interval
             if not rules.has_enabled_rules:
                 rules.note_check("no_enabled_rules", next_run)
+                await _ai_after_rules("auto")
                 return
             try:
                 report = await rules.async_run(scope="new", trigger="auto")
@@ -188,6 +222,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
                 rules.note_check("error", next_run, str(err))
                 return
             rules.note_check("error" if report["errors"] else "ran", next_run)
+            await _ai_after_rules("auto")
             if report["matched"]:
                 _LOGGER.info("Inbox rules: %s messages checked, %s matched", report["checked"], report["matched"])
 
@@ -196,10 +231,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
         if opts.get(CONF_RULES_PUSH, DEFAULT_RULES_PUSH):
 
             async def _on_new_mail() -> None:
-                if not any(r.mailbox == "INBOX" for r in rules.enabled_rules()):
-                    return
-                report = await rules.async_run(scope="new", trigger="push", mailbox="INBOX")
-                rules.note_check("error" if report["errors"] else "ran", None)
+                if any(r.mailbox == "INBOX" for r in rules.enabled_rules()):
+                    report = await rules.async_run(scope="new", trigger="push", mailbox="INBOX")
+                    rules.note_check("error" if report["errors"] else "ran", None)
+                await _ai_after_rules("push")
 
             watcher = MailWatcher(
                 username=core.data[CONF_APPLE_ID],
@@ -222,7 +257,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
         async def _digest(now: datetime) -> None:
             several = len(hass.config_entries.async_loaded_entries(DOMAIN)) > 1
             try:
-                await async_send_digest(hass, clients, dict(entry.options), rules, link.label if several else "")
+                await async_send_digest(
+                    hass, clients, dict(entry.options), rules, link.label if several else "", ledger=link.ai
+                )
             except Exception as err:  # noqa: BLE001 - keep the schedule alive
                 _LOGGER.warning("Daily overview failed: %s", err)
 

@@ -24,6 +24,8 @@ Frieda Postfach is the part that **acts on its own**:
 - **Receipts:** a rule action that stores attachments (e.g. invoices) in a folder.
 - **Daily overview:** a morning summary of unread mail, rule activity, today's events and birthdays, sent to your
   phone and optionally phrased by a Home Assistant AI task.
+- **AI sorting (optional, off by default):** an AI of your choice rates new mail – category, importance 1–5 and a
+  short reason – and, if you allow it, sorts it into folders. See [AI sorting](#ai-sorting).
 - **Birthday sensor** for the next birthday among your contacts.
 - **AI tools** for the rules (`icloud_list_rules`, `icloud_create_rule`, … ) and `icloud_daily_overview`; they are
   added to Frieda's tools for the account, so every MCP client and conversation agent that uses Frieda gets them.
@@ -49,6 +51,9 @@ no file writes unless you install Frieda Postfach.
 with stored rules, and no rules run.
 
 ## Options
+
+The options have two parts: **Automation and daily overview** (below) and **AI sorting** (see
+[AI sorting](#ai-sorting)).
 
 | Option | Effect |
 |--------|--------|
@@ -101,6 +106,49 @@ them:
 
 With several accounts an account picker appears on top. Approvals and the change log stay in Frieda's own panel,
 whose overview also shows whether Frieda Postfach is running.
+
+## AI sorting
+
+AI sorting is **off** and analyses nothing until you switch it on deliberately: *Settings → Devices & services →
+Frieda Postfach → Configure → AI sorting*, turn on **Use AI sorting** and choose an **AI entity** (an `ai_task`
+entity, e.g. from Google Generative AI, OpenAI or a local Ollama model). Without both, no mail is sent to any AI.
+
+How it works:
+
+1. New inbox mail first goes through your inbox rules. Only mail still in the inbox afterwards is rated, with push
+   or on the timer (with the automation off, only via **Rate newest** in the panel). The first run only sets a
+   starting point; older mail is never rated automatically.
+2. The AI receives sender, recipients and subject – and the first 1,000 characters of the text only if you allow
+   it.
+3. **Kill switch:** mail from senders or domains on the block list (e.g. bank, doctor) and mail that contains a
+   blocked term (e.g. diagnosis, salary, password) in subject, sender or text never reaches any AI – even with AI
+   sorting switched on. The check runs locally in Home Assistant before anything is sent and also applies to the AI
+   daily overview.
+4. It answers with one of your **categories**, an **importance** from 1 (irrelevant) to 5 (needs attention today)
+   and a short reason. Categories are plain-language descriptions you edit in the panel.
+5. In the mode **Only rate** (default) nothing is changed; the ratings appear in the panel. In the mode **Run the
+   category actions** each category can move the mail to a folder, mark it read and flag it, and mail from a chosen
+   importance on can be flagged and announced (notify service of the daily overview, else a notification in Home
+   Assistant). The AI can never delete or send.
+
+In the panel you correct a rating by choosing the right category; up to 30 corrections are passed to the AI as
+examples. An hourly limit (default 30) caps the number of AI calls; every mail is rated at most once. Actions that
+changed mail are written to Frieda's change log.
+
+The panel card **Sent to AI** shows what went to an AI: calls and characters today, in 7 and 30 days, how many of
+them included text, per AI entity and per purpose (sorting, daily overview), and a log of every transmission with
+the fields sent – plus every mail the kill switch held back and why. The log stays local.
+
+| Option | Effect |
+|--------|--------|
+| Use AI sorting | master switch, off by default |
+| AI entity | the `ai_task` entity that rates; required |
+| What the AI may do | *Only rate* (default) or *Run the category actions* |
+| Also send the text | first 1,000 characters of the text (default: off – sender, recipients and subject only) |
+| Maximum ratings per hour | 1–200, default 30 |
+| Notify about important mail | off, from importance 3, 4 or only 5 (act mode) |
+| Kill switch: senders/domains | never send mail from them to an AI, one per line |
+| Kill switch: terms | never send mail containing one of these terms to an AI, one per line |
 
 ## Daily overview
 

@@ -34,4 +34,23 @@ LEGACY_OPTIONS = (
     CONF_DIGEST_AI_TASK,
 )
 
+# AI sorting: off unless switched on deliberately AND an ai_task entity is chosen
+CONF_AI_ENABLED = "ai_enabled"
+CONF_AI_ENTITY = "ai_entity"  # ai_task entity that rates the e-mails
+CONF_AI_BODY = "ai_include_body"  # also send the first characters of the text (default: sender and subject only)
+CONF_AI_MODE = "ai_mode"  # observe = only rate, act = run the category actions
+CONF_AI_LIMIT = "ai_hourly_limit"  # ratings per hour
+CONF_AI_EXCLUDE = "ai_exclude"  # senders/domains that are never sent to the AI
+CONF_AI_BLOCK_TERMS = "ai_block_terms"  # kill switch: mails containing one of these terms never go to an AI
+CONF_AI_NOTIFY = "ai_notify_importance"  # 0 = off, else notify from this importance on (act mode)
+
+DEFAULT_AI_ENABLED = False
+DEFAULT_AI_BODY = False
+DEFAULT_AI_MODE = "observe"
+DEFAULT_AI_LIMIT = 30
+MAX_AI_LIMIT = 200
+DEFAULT_AI_NOTIFY = 0
+AI_MODES = ("observe", "act")
+AI_BODY_CHARS = 1000
+
 SERVICE_SEND_DIGEST = "send_digest"

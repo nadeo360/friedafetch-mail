@@ -28,6 +28,16 @@ Frieda Postfach extends a Frieda account and inherits its security model
   traversal, size limit).
 - **Daily overview:** mail subjects are passed to an optional AI task as data with the instruction to ignore
   instructions inside them; without an AI task the text is assembled locally.
+- **AI sorting** is off until an administrator switches it on and chooses an `ai_task` entity; without both no
+  mail data reaches any AI. By default only sender, recipients and subject are sent; the text (first 1,000
+  characters) only with a separate option. A kill switch (blocked senders/domains and blocked terms, checked
+  locally in subject, sender and text) keeps matching mail away from every AI, including the AI daily overview;
+  every transmission and every held-back mail is logged locally in the panel ("Sent to AI"). With a cloud AI this data leaves
+  Home Assistant. The mail is passed as untrusted data between markers with the instruction to ignore requests in
+  it; the AI gets no tools, its answer is checked against the user's category list and an importance of 1–5, and
+  the only possible actions are moving into the category folder (subject to Frieda's hidden/protected mailboxes),
+  marking read and flagging – never deleting or sending. A manipulated mail can at worst be sorted into the wrong
+  category. The default mode only rates; an hourly limit caps AI calls.
 - **Admin only:** the panel and its websocket commands require an administrator.
 
 ## Checks in the repository
@@ -74,6 +84,16 @@ Frieda Postfach erweitert ein Frieda-Konto und übernimmt dessen Sicherheitsmode
   kein Pfad-Ausbruch, Größenlimit).
 - **Tagesüberblick:** Betreffzeilen gehen an eine optionale KI-Aufgabe nur als Daten mit der Anweisung, darin
   enthaltene Aufforderungen zu ignorieren; ohne KI-Aufgabe wird der Text lokal zusammengesetzt.
+- **KI-Sortierung** ist aus, bis ein Admin sie einschaltet und eine `ai_task`-Entität wählt; ohne beides erreichen
+  keine Maildaten eine KI. Standardmäßig gehen nur Absender, Empfänger und Betreff hinaus; der Text (erste 1.000
+  Zeichen) nur mit eigener Option. Ein Killswitch (gesperrte Absender/Domains und Sperrbegriffe, lokal in Betreff,
+  Absender und Text geprüft) hält passende Mails von jeder KI fern, auch vom KI-Tagesüberblick; jede Übermittlung
+  und jede zurückgehaltene Mail wird lokal im Panel protokolliert („An KI übermittelt“). Bei einer Cloud-KI verlassen diese Daten
+  Home Assistant. Die Mail wird als nicht vertrauenswürdige Daten zwischen Markierungen übergeben, mit der Anweisung,
+  Aufforderungen darin zu ignorieren; die KI bekommt keine Werkzeuge, ihre Antwort wird gegen die Kategorienliste und
+  eine Wichtigkeit von 1–5 geprüft, und mögliche Aktionen sind nur Verschieben in den Kategorie-Ordner (unter Friedas
+  verborgenen/geschützten Postfächern), Gelesen und Markieren – nie Löschen oder Senden. Eine manipulierte Mail kann
+  schlimmstenfalls falsch einsortiert werden. Standard ist reines Bewerten; ein Stundenlimit begrenzt die KI-Aufrufe.
 - **Nur Admins:** Panel und WebSocket-Befehle erfordern Administratorrechte.
 
 ## Prüfungen im Repository

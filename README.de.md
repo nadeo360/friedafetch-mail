@@ -24,6 +24,8 @@ Frieda Postfach ist der Teil, der **selbstständig handelt**:
 - **Belege:** eine Regel-Aktion, die Anhänge (z. B. Rechnungen) in einem Ordner ablegt.
 - **Tagesüberblick:** morgens eine Zusammenfassung mit ungelesenen Mails, Regelaktivität, heutigen Terminen und
   Geburtstagen aufs Handy, auf Wunsch von einer KI-Aufgabe in Home Assistant formuliert.
+- **KI-Sortierung (optional, standardmäßig aus):** Eine KI deiner Wahl bewertet neue Mails – Kategorie, Wichtigkeit
+  1–5 und eine kurze Begründung – und sortiert sie, wenn du es erlaubst, in Ordner. Siehe [KI-Sortierung](#ki-sortierung).
 - **Geburtstags-Sensor** für den nächsten Geburtstag unter deinen Kontakten.
 - **KI-Tools** für die Regeln (`icloud_list_rules`, `icloud_create_rule`, …) und `icloud_daily_overview`; sie
   erscheinen bei den Frieda-Tools des Kontos, also in jedem MCP-Client und Sprachassistenten, der Frieda nutzt.
@@ -49,6 +51,9 @@ Aufgaben und ohne Dateizugriffe – solange Frieda Postfach nicht installiert is
 Regeln eine Reparaturmeldung, und es laufen keine Regeln.
 
 ## Optionen
+
+Die Optionen haben zwei Bereiche: **Automatik und Tagesüberblick** (unten) und **KI-Sortierung** (siehe
+[KI-Sortierung](#ki-sortierung)).
 
 | Option | Wirkung |
 |--------|---------|
@@ -103,6 +108,51 @@ sie auszuführen:
 
 Bei mehreren Konten erscheint oben eine Kontoauswahl. Freigaben und Änderungsprotokoll bleiben im Panel von Frieda,
 dessen Überblick auch zeigt, ob Frieda Postfach läuft.
+
+## KI-Sortierung
+
+Die KI-Sortierung ist **aus** und analysiert nichts, bis du sie bewusst einschaltest: *Einstellungen → Geräte &
+Dienste → Frieda Postfach → Konfigurieren → KI-Sortierung*, dort **KI-Sortierung verwenden** einschalten und eine
+**KI-Entität** wählen (eine `ai_task`-Entität, z. B. von Google Generative AI, OpenAI oder einem lokalen
+Ollama-Modell). Fehlt eines von beiden, geht keine Mail an eine KI.
+
+So funktioniert es:
+
+1. Neue Mails im Posteingang laufen zuerst durch deine Regeln. Bewertet wird nur, was danach noch im Posteingang
+   liegt, per Push oder im Takt (bei ausgeschalteter Automatik nur über **Neueste bewerten** im Panel). Der erste
+   Lauf setzt nur einen Startpunkt; ältere Mails werden nie automatisch bewertet.
+2. Die KI erhält Absender, Empfänger und Betreff – die ersten 1.000 Zeichen des Textes nur, wenn du es erlaubst.
+3. **Killswitch:** Mails von gesperrten Absendern oder Domains (z. B. Bank, Arzt) und Mails mit einem Sperrbegriff
+   (z. B. Diagnose, Gehalt, Passwort) in Betreff, Absender oder Text erreichen nie eine KI – auch nicht bei
+   eingeschalteter KI-Sortierung. Die Prüfung läuft lokal in Home Assistant, bevor etwas gesendet wird, und gilt auch
+   für den KI-Tagesüberblick.
+4. Sie antwortet mit einer deiner **Kategorien**, einer **Wichtigkeit** von 1 (unwichtig) bis 5 (braucht heute
+   Aufmerksamkeit) und einer kurzen Begründung. Kategorien sind Beschreibungen in Alltagssprache, die du im Panel
+   bearbeitest.
+5. Im Modus **Nur bewerten** (Standard) wird nichts verändert; die Bewertungen erscheinen im Panel. Im Modus
+   **Aktionen der Kategorie ausführen** kann jede Kategorie die Mail in einen Ordner verschieben, als gelesen und als
+   markiert setzen; ab einer gewählten Wichtigkeit wird sie markiert und gemeldet (über den `notify`-Dienst des
+   Tagesüberblicks, sonst als Benachrichtigung in Home Assistant). Löschen oder Senden kann die KI nie.
+
+Im Panel korrigierst du eine Bewertung, indem du die richtige Kategorie wählst; bis zu 30 Korrekturen gehen als
+Beispiele an die KI. Ein Stundenlimit (Standard 30) begrenzt die KI-Aufrufe; jede Mail wird höchstens einmal
+bewertet. Aktionen, die Mails verändert haben, stehen in Friedas Änderungsprotokoll.
+
+Die Panel-Karte **An KI übermittelt** zeigt, was an eine KI ging: Aufrufe und Zeichen heute, in 7 und 30 Tagen,
+wie viele davon mit Mailtext, je KI-Entität und Zweck (Sortierung, Tagesüberblick), und ein Protokoll jeder
+Übermittlung mit den gesendeten Feldern – dazu jede Mail, die der Killswitch zurückgehalten hat, mit Grund. Das
+Protokoll bleibt lokal.
+
+| Option | Wirkung |
+|--------|---------|
+| KI-Sortierung verwenden | Hauptschalter, standardmäßig aus |
+| KI-Entität | die bewertende `ai_task`-Entität; Pflicht |
+| Was die KI darf | *Nur bewerten* (Standard) oder *Aktionen der Kategorie ausführen* |
+| Auch den Text senden | die ersten 1.000 Zeichen (Standard: aus – nur Absender, Empfänger und Betreff) |
+| Höchstens so viele Bewertungen pro Stunde | 1–200, Standard 30 |
+| Bei wichtigen Mails benachrichtigen | aus, ab Wichtigkeit 3, 4 oder nur 5 (nur im Aktionsmodus) |
+| Killswitch: Absender/Domains | Mails von ihnen nie an eine KI senden, eine pro Zeile |
+| Killswitch: Begriffe | Mails mit einem dieser Begriffe nie an eine KI senden, einer pro Zeile |
 
 ## Tagesüberblick
 

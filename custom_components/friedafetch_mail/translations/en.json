@@ -18,6 +18,13 @@
     "step": {
       "init": {
         "title": "Frieda Postfach",
+        "menu_options": {
+          "automation": "Automation and daily overview",
+          "ai": "AI sorting (optional)"
+        }
+      },
+      "automation": {
+        "title": "Frieda Postfach",
         "description": "Daily overview: a short morning summary of unread e-mails, rule activity, today's events and birthdays.",
         "data": {
           "rules_auto": "Apply inbox rules automatically to new e-mails",
@@ -28,10 +35,31 @@
           "digest_ai_task": "Phrase the overview with this AI task (optional)",
           "birthday_sensor": "Sensor for the next birthday"
         }
+      },
+      "ai": {
+        "title": "AI sorting",
+        "description": "Off unless you switch it on here AND choose an AI entity. New inbox mail that no rule handled is then rated by that AI: one of your categories, importance 1–5 and a short reason. The AI receives sender, recipients and subject, plus the first 1,000 characters of the text only if you allow it below. With a cloud AI this data leaves Home Assistant. The AI cannot delete or send anything. Start with \"Only rate\" and check the ratings in the panel before letting it act.",
+        "data": {
+          "ai_enabled": "Use AI sorting",
+          "ai_entity": "AI entity (AI Task)",
+          "ai_mode": "What the AI may do",
+          "ai_include_body": "Also send the first 1,000 characters of the text",
+          "ai_hourly_limit": "Maximum ratings per hour",
+          "ai_notify_importance": "Notify about important mail (act mode)",
+          "ai_exclude": "Kill switch: never send these senders or domains to an AI (one per line)",
+          "ai_block_terms": "Kill switch: never send mail containing these terms to an AI (one per line)"
+        },
+        "data_description": {
+          "ai_entity": "An AI Task entity, e.g. from Google Generative AI, OpenAI or a local Ollama model.",
+          "ai_exclude": "For example your bank, doctor or employer: bank.example, doctor@example.com",
+          "ai_block_terms": "Checked locally in subject, sender and text before anything is sent, also for the AI daily overview. Example: diagnosis, salary, password"
+        }
       }
     },
     "error": {
-      "invalid_time": "Please enter a time as HH:MM, e.g. 07:30."
+      "invalid_time": "Please enter a time as HH:MM, e.g. 07:30.",
+      "ai_entity_required": "Choose an AI entity, or switch AI sorting off.",
+      "ai_entity_invalid": "This AI entity does not exist (any more)."
     }
   },
   "entity": {
@@ -50,6 +78,22 @@
           "name": "Account",
           "description": "Label or Apple ID of the account (default: all accounts)."
         }
+      }
+    }
+  },
+  "selector": {
+    "ai_mode": {
+      "options": {
+        "observe": "Only rate (nothing is changed)",
+        "act": "Run the category actions (move, mark read, flag)"
+      }
+    },
+    "ai_notify": {
+      "options": {
+        "0": "off",
+        "3": "from importance 3",
+        "4": "from importance 4",
+        "5": "only importance 5"
       }
     }
   }

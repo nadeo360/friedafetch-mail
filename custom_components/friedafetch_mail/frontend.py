@@ -16,6 +16,7 @@ from custom_components.friedafetch.const import CONF_ENABLE_MAIL, CONF_READ_ONLY
 from custom_components.friedafetch.mail import MailError
 from custom_components.friedafetch.schema import vol
 
+from .ai import AiSortError
 from .const import (
     CONF_DIGEST_TIME,
     CONF_RULES_AUTO,
@@ -53,6 +54,12 @@ async def async_setup_frontend(hass: HomeAssistant, version: str) -> None:
         ws_rules_run,
         ws_rules_history,
         ws_rules_history_clear,
+        ws_ai_get,
+        ws_ai_categories,
+        ws_ai_correct,
+        ws_ai_run,
+        ws_ai_clear,
+        ws_ai_usage_clear,
     ):
         websocket_api.async_register_command(hass, command)
     await panel_custom.async_register_panel(
@@ -93,7 +100,7 @@ def _ws_errors(func):
             await func(hass, connection, msg)
         except RuleNotFound as err:
             connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, str(err))
-        except (RuleError, MailError, ValueError) as err:
+        except (RuleError, AiSortError, MailError, ValueError) as err:
             connection.send_error(msg["id"], "rule_error", str(err))
 
     wrapper.__name__ = func.__name__
@@ -261,3 +268,103 @@ async def ws_rules_history_clear(
     rules = _entry(hass, msg.get("entry_id")).runtime_data.rules
     await rules.async_clear_history()
     connection.send_result(msg["id"], {"cleared": True})
+
+
+# ------------------------------------------------------------------ AI sorting
+def _sorter(hass: HomeAssistant, entry_id: str | None) -> Any:
+    sorter = getattr(_entry(hass, entry_id).runtime_data, "ai", None)
+    if sorter is None:
+        raise AiSortError("AI sorting is not available for this account")
+    return sorter
+
+
+def _ai_payload(sorter: Any, limit: int = 50) -> dict[str, Any]:
+    return {
+        "status": sorter.status(),
+        "categories": sorter.categories,
+        "ratings": list(reversed(sorter.ratings[-limit:])),
+        "examples": len(sorter.examples),
+        "usage": sorter.usage_summary(),
+    }
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{DOMAIN}/ai", vol.Optional("entry_id"): str, vol.Optional("limit"): int}
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+@_ws_errors
+async def ws_ai_get(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """Status, categories and latest ratings of the AI sorting."""
+    sorter = _sorter(hass, msg.get("entry_id"))
+    await sorter.async_load()
+    connection.send_result(msg["id"], _ai_payload(sorter, max(1, min(int(msg.get("limit") or 50), 200))))
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{DOMAIN}/ai/categories", vol.Optional("entry_id"): str, vol.Required("categories"): list}
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+@_ws_errors
+async def ws_ai_categories(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Replace the categories."""
+    sorter = _sorter(hass, msg.get("entry_id"))
+    await sorter.async_set_categories([c for c in msg["categories"] if isinstance(c, dict)])
+    connection.send_result(msg["id"], _ai_payload(sorter))
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/ai/correct",
+        vol.Optional("entry_id"): str,
+        vol.Required("rating_id"): str,
+        vol.Required("category"): str,
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+@_ws_errors
+async def ws_ai_correct(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """Correct a rating; the correction becomes an example for later ratings."""
+    sorter = _sorter(hass, msg.get("entry_id"))
+    connection.send_result(msg["id"], {"rating": await sorter.async_correct(msg["rating_id"], msg["category"])})
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{DOMAIN}/ai/run", vol.Optional("entry_id"): str, vol.Optional("count"): int}
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+@_ws_errors
+async def ws_ai_run(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """Rate the newest unrated inbox mails now (only when AI sorting is switched on)."""
+    sorter = _sorter(hass, msg.get("entry_id"))
+    report = await sorter.async_rate_latest(int(msg.get("count") or 10))
+    connection.send_result(msg["id"], {"report": report, **_ai_payload(sorter)})
+
+
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/ai/clear", vol.Optional("entry_id"): str})
+@websocket_api.require_admin
+@websocket_api.async_response
+@_ws_errors
+async def ws_ai_clear(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """Forget the stored ratings (categories and corrections stay)."""
+    sorter = _sorter(hass, msg.get("entry_id"))
+    await sorter.async_clear_ratings()
+    connection.send_result(msg["id"], _ai_payload(sorter))
+
+
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/ai/usage/clear", vol.Optional("entry_id"): str})
+@websocket_api.require_admin
+@websocket_api.async_response
+@_ws_errors
+async def ws_ai_usage_clear(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Clear the log of what was sent to an AI."""
+    sorter = _sorter(hass, msg.get("entry_id"))
+    await sorter.async_clear_usage()
+    connection.send_result(msg["id"], _ai_payload(sorter))

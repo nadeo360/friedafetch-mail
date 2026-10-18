@@ -15,10 +15,20 @@ from homeassistant.helpers.selector import (
     SelectSelectorConfig,
     SelectSelectorMode,
     TextSelector,
+    TextSelectorConfig,
 )
 
 from .const import (
+    AI_MODES,
     CONF_ACCOUNT,
+    CONF_AI_BLOCK_TERMS,
+    CONF_AI_BODY,
+    CONF_AI_ENABLED,
+    CONF_AI_ENTITY,
+    CONF_AI_EXCLUDE,
+    CONF_AI_LIMIT,
+    CONF_AI_MODE,
+    CONF_AI_NOTIFY,
     CONF_BIRTHDAY_SENSOR,
     CONF_DIGEST_AI_TASK,
     CONF_DIGEST_NOTIFY,
@@ -27,12 +37,18 @@ from .const import (
     CONF_RULES_INTERVAL,
     CONF_RULES_PUSH,
     CORE_DOMAIN,
+    DEFAULT_AI_BODY,
+    DEFAULT_AI_ENABLED,
+    DEFAULT_AI_LIMIT,
+    DEFAULT_AI_MODE,
+    DEFAULT_AI_NOTIFY,
     DEFAULT_BIRTHDAY_SENSOR,
     DEFAULT_RULES_AUTO,
     DEFAULT_RULES_INTERVAL,
     DEFAULT_RULES_PUSH,
     DOMAIN,
     LEGACY_OPTIONS,
+    MAX_AI_LIMIT,
     MAX_RULES_INTERVAL,
     MIN_RULES_INTERVAL,
 )
@@ -97,9 +113,67 @@ class FriedaPostfachConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class FriedaPostfachOptionsFlow(OptionsFlow):
-    """Rules, push, daily overview and the birthday sensor."""
+    """Menu: automation (rules, push, daily overview, birthday sensor) and AI sorting."""
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return self.async_show_menu(step_id="init", menu_options=["automation", "ai"])
+
+    async def async_step_ai(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """AI sorting: off by default; needs the switch AND a chosen ai_task entity."""
+        errors: dict[str, str] = {}
+        ai_tasks = sorted(self.hass.states.async_entity_ids("ai_task"))
+        if user_input is not None:
+            entity = str(user_input.get(CONF_AI_ENTITY) or "")
+            user_input[CONF_AI_ENTITY] = entity
+            user_input[CONF_AI_LIMIT] = int(user_input.get(CONF_AI_LIMIT, DEFAULT_AI_LIMIT))
+            user_input[CONF_AI_NOTIFY] = int(user_input.get(CONF_AI_NOTIFY, DEFAULT_AI_NOTIFY) or 0)
+            user_input[CONF_AI_EXCLUDE] = str(user_input.get(CONF_AI_EXCLUDE) or "").strip()
+            user_input[CONF_AI_BLOCK_TERMS] = str(user_input.get(CONF_AI_BLOCK_TERMS) or "").strip()
+            if user_input.get(CONF_AI_ENABLED) and not entity:
+                errors[CONF_AI_ENTITY] = "ai_entity_required"
+            elif entity and entity not in ai_tasks:
+                errors[CONF_AI_ENTITY] = "ai_entity_invalid"
+            else:
+                return self.async_create_entry(data={**self.config_entry.options, **user_input})
+        vol = _vol()
+        opts = {**self.config_entry.options, **(user_input or {})}
+        current = str(opts.get(CONF_AI_ENTITY) or "")
+        entity_options = [{"value": "", "label": "–"}] + [{"value": e, "label": e} for e in ai_tasks]
+        if current and current not in ai_tasks:
+            entity_options.append({"value": current, "label": current})
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_AI_ENABLED, default=opts.get(CONF_AI_ENABLED, DEFAULT_AI_ENABLED)): BooleanSelector(),
+                vol.Optional(CONF_AI_ENTITY, default=current): SelectSelector(
+                    SelectSelectorConfig(options=entity_options, mode=SelectSelectorMode.DROPDOWN)
+                ),
+                vol.Required(CONF_AI_MODE, default=opts.get(CONF_AI_MODE, DEFAULT_AI_MODE)): SelectSelector(
+                    SelectSelectorConfig(
+                        options=list(AI_MODES), translation_key="ai_mode", mode=SelectSelectorMode.LIST
+                    )
+                ),
+                vol.Required(CONF_AI_BODY, default=opts.get(CONF_AI_BODY, DEFAULT_AI_BODY)): BooleanSelector(),
+                vol.Required(CONF_AI_LIMIT, default=opts.get(CONF_AI_LIMIT, DEFAULT_AI_LIMIT)): NumberSelector(
+                    NumberSelectorConfig(min=1, max=MAX_AI_LIMIT, step=1, mode=NumberSelectorMode.BOX)
+                ),
+                vol.Required(
+                    CONF_AI_NOTIFY, default=str(opts.get(CONF_AI_NOTIFY, DEFAULT_AI_NOTIFY) or 0)
+                ): SelectSelector(
+                    SelectSelectorConfig(
+                        options=["0", "3", "4", "5"], translation_key="ai_notify", mode=SelectSelectorMode.DROPDOWN
+                    )
+                ),
+                vol.Optional(CONF_AI_EXCLUDE, default=opts.get(CONF_AI_EXCLUDE) or ""): TextSelector(
+                    TextSelectorConfig(multiline=True)
+                ),
+                vol.Optional(CONF_AI_BLOCK_TERMS, default=opts.get(CONF_AI_BLOCK_TERMS) or ""): TextSelector(
+                    TextSelectorConfig(multiline=True)
+                ),
+            }
+        )
+        return self.async_show_form(step_id="ai", data_schema=schema, errors=errors)
+
+    async def async_step_automation(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
             user_input[CONF_RULES_INTERVAL] = int(user_input.get(CONF_RULES_INTERVAL, DEFAULT_RULES_INTERVAL))
@@ -145,4 +219,4 @@ class FriedaPostfachOptionsFlow(OptionsFlow):
                 ): BooleanSelector(),
             }
         )
-        return self.async_show_form(step_id="init", data_schema=schema, errors=errors)
+        return self.async_show_form(step_id="automation", data_schema=schema, errors=errors)
