@@ -684,7 +684,9 @@ class FriedaPostfachPanel extends HTMLElement {
     const q = String(this._s[SEARCH_KEYS[key]] || "").toLowerCase().trim();
     let shown = 0;
     table.querySelectorAll("tbody tr[data-search]").forEach((tr) => {
-      const ok = !q || tr.dataset.search.includes(q);
+      // everything shown in the row is searchable, plus the extra terms in data-search (e.g. all conditions)
+      const hay = `${tr.dataset.search} ${tr.textContent.replace(/\s+/g, " ")}`.toLowerCase();
+      const ok = !q || hay.includes(q);
       tr.hidden = !ok;
       const next = tr.nextElementSibling;
       if (next && !next.dataset.search && next.matches(".rdetail, .adetail")) next.hidden = !ok;
