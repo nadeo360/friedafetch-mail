@@ -57,12 +57,12 @@ Die Optionen haben zwei Bereiche: **Automatik und Tagesüberblick** (unten) und 
 
 | Option | Wirkung |
 |--------|---------|
-| Posteingangsregeln automatisch anwenden | Regeln auf neue Mails anwenden (Standard: an) |
+| Regeln automatisch anwenden | Regeln auf neue Mails anwenden (Standard: an) |
 | Intervall | Minuten zwischen den Takt-Läufen (Standard 5, 1–240); der Takt ist Rückfallebene und deckt andere Postfächer als den Posteingang ab |
 | Push | IMAP IDLE: Regeln wenige Sekunden nach Eingang einer Mail im Posteingang anwenden (Standard: an) |
 | Tagesüberblick um | `HH:MM`, leer = aus |
 | Überblick senden mit | ein `notify`-Dienst wie die Companion-App; leer = Benachrichtigung in Home Assistant |
-| Überblick formulieren mit | optionale `ai_task`-Entität |
+| KI-Aufgabe für den Überblick | optionale `ai_task`-Entität |
 | Geburtstags-Sensor | `sensor.frieda_postfach_<konto>_nachster_geburtstag` anlegen |
 
 Auf Konten, die Frieda im Nur-Lesen-Modus betreibt, läuft nichts automatisch; Probeläufe gehen dort trotzdem.

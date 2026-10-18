@@ -95,7 +95,8 @@ export const STYLE = `
   .mode .tx strong { font-weight: 600; }
   .mode .muted { color: var(--frieda-text-on-fill); }
   .mode .tx .muted { font-size: 12.5px; }
-  .subbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: -4px 0 10px; }
+  .subbar { display: flex; gap: 0 10px; align-items: center; flex-wrap: wrap; margin: -4px 0 10px; }
+  .subbar button.link { margin-left: auto; }
   .subbar .grow { flex: 1; }
   #run-menu .menu-list { min-width: 280px; }
   details.menu.run > summary { display: inline-flex; align-items: center; gap: 6px; box-sizing: border-box; height: 36px; padding: 0 16px 0 12px; border-radius: 18px; background: var(--primary-color); color: var(--text-primary-color, #fff); font-size: 14px; font-weight: 500; }
@@ -154,7 +155,7 @@ export const STYLE = `
     .row { gap: 4px; }
     .row label { min-width: 100%; }
     .row label:has(input[type=checkbox]) { display: flex; align-items: center; gap: 10px; min-height: 44px; }
-    input[type=checkbox] { width: 22px; height: 22px; }
+    input[type=checkbox]:not(.switch) { width: 22px; height: 22px; }
   }
   @container (max-width: 720px) {
     table.dtable tr.rrow { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto 36px; grid-template-areas: "on name hits menu" ". cond cond cond" ". act act act"; align-items: center; column-gap: 6px; padding: 6px 0; border-bottom: 1px solid var(--divider-color, #e0e0e0); }

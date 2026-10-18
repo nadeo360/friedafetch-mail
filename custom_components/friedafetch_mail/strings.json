@@ -27,13 +27,21 @@
         "title": "Frieda Postfach",
         "description": "Daily overview: a short morning summary of unread e-mails, rule activity, today's events and birthdays.",
         "data": {
-          "rules_auto": "Apply inbox rules automatically to new e-mails",
-          "rules_interval": "Interval for automatic rules (minutes)",
-          "rules_push": "Push: apply the rules right after new mail arrives (IMAP IDLE)",
-          "digest_time": "Daily overview at (HH:MM, empty = off)",
-          "digest_notify": "Send the overview with (notify service; empty = notification in Home Assistant)",
-          "digest_ai_task": "Phrase the overview with this AI task (optional)",
-          "birthday_sensor": "Sensor for the next birthday"
+          "rules_auto": "Apply rules automatically",
+          "rules_interval": "Rule interval (minutes)",
+          "rules_push": "Push (IMAP IDLE)",
+          "digest_time": "Daily overview at",
+          "digest_notify": "Send the overview with",
+          "digest_ai_task": "AI task for the overview",
+          "birthday_sensor": "Birthday sensor"
+        },
+        "data_description": {
+          "rules_auto": "To new e-mails in the inbox.",
+          "rules_push": "Apply the rules right after new mail arrives.",
+          "digest_time": "HH:MM, empty = off.",
+          "digest_notify": "Notify service; empty = notification in Home Assistant.",
+          "digest_ai_task": "Optional: phrases the overview.",
+          "birthday_sensor": "For the next birthday."
         }
       },
       "ai": {
@@ -43,16 +51,18 @@
           "ai_enabled": "Use AI sorting",
           "ai_entity": "AI entity (AI Task)",
           "ai_mode": "What the AI may do",
-          "ai_include_body": "Also send the first 1,000 characters of the text",
-          "ai_hourly_limit": "Maximum ratings per hour",
-          "ai_notify_importance": "Notify about important mail (act mode)",
-          "ai_exclude": "Kill switch: never send these senders or domains to an AI (one per line)",
-          "ai_block_terms": "Kill switch: never send mail containing these terms to an AI (one per line)"
+          "ai_include_body": "Include start of text",
+          "ai_hourly_limit": "Ratings per hour (max.)",
+          "ai_notify_importance": "Notify about important mail",
+          "ai_exclude": "Kill switch: senders/domains",
+          "ai_block_terms": "Kill switch: terms"
         },
         "data_description": {
           "ai_entity": "An AI Task entity, e.g. from Google Generative AI, OpenAI or a local Ollama model.",
-          "ai_exclude": "For example your bank, doctor or employer: bank.example, doctor@example.com",
-          "ai_block_terms": "Checked locally in subject, sender and text before anything is sent, also for the AI daily overview. Example: diagnosis, salary, password"
+          "ai_exclude": "Never sent to an AI, one per line. For example your bank, doctor or employer: bank.example, doctor@example.com",
+          "ai_block_terms": "Mail containing these terms is never sent to an AI, one per line. Checked locally in subject, sender and text before anything is sent, also for the AI daily overview. Example: diagnosis, salary, password",
+          "ai_include_body": "The first 1,000 characters of the text.",
+          "ai_notify_importance": "Only in act mode."
         }
       }
     },

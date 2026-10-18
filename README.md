@@ -57,12 +57,12 @@ The options have two parts: **Automation and daily overview** (below) and **AI s
 
 | Option | Effect |
 |--------|--------|
-| Apply inbox rules automatically | run the rules on new mail (default: on) |
+| Apply rules automatically | run the rules on new mail (default: on) |
 | Interval | minutes between timer runs (default 5, 1–240); the timer is the fallback and covers mailboxes other than the inbox |
 | Push | IMAP IDLE: run the rules a few seconds after new mail arrives in the inbox (default: on) |
 | Daily overview at | `HH:MM`, empty = off |
 | Send the overview with | a `notify` service such as the companion app; empty = notification in Home Assistant |
-| Phrase the overview with | optional `ai_task` entity |
+| AI task for the overview | optional `ai_task` entity |
 | Birthday sensor | create `sensor.frieda_postfach_<account>_next_birthday` |
 
 Nothing runs automatically on accounts that Frieda keeps in read-only mode; dry runs still work there.

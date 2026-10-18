@@ -27,13 +27,21 @@
         "title": "Frieda Postfach",
         "description": "Tagesüberblick: morgens eine kurze Zusammenfassung mit ungelesenen Mails, Regelaktivität, heutigen Terminen und Geburtstagen.",
         "data": {
-          "rules_auto": "Posteingangsregeln automatisch auf neue E-Mails anwenden",
-          "rules_interval": "Intervall der automatischen Regeln (Minuten)",
-          "rules_push": "Push: Regeln direkt nach dem Eingang neuer Mails anwenden (IMAP IDLE)",
-          "digest_time": "Tagesüberblick um (HH:MM, leer = aus)",
-          "digest_notify": "Überblick senden mit (Notify-Dienst; leer = Benachrichtigung in Home Assistant)",
-          "digest_ai_task": "Überblick mit dieser KI-Aufgabe formulieren (optional)",
-          "birthday_sensor": "Sensor für den nächsten Geburtstag"
+          "rules_auto": "Regeln automatisch anwenden",
+          "rules_interval": "Regel-Intervall (Minuten)",
+          "rules_push": "Push (IMAP IDLE)",
+          "digest_time": "Tagesüberblick um",
+          "digest_notify": "Überblick senden mit",
+          "digest_ai_task": "KI-Aufgabe für den Überblick",
+          "birthday_sensor": "Geburtstags-Sensor"
+        },
+        "data_description": {
+          "rules_auto": "Auf neue E-Mails im Posteingang.",
+          "rules_push": "Regeln direkt nach dem Eingang neuer Mails anwenden.",
+          "digest_time": "HH:MM, leer = aus.",
+          "digest_notify": "Notify-Dienst; leer = Benachrichtigung in Home Assistant.",
+          "digest_ai_task": "Optional: formuliert den Überblick.",
+          "birthday_sensor": "Für den nächsten Geburtstag."
         }
       },
       "ai": {
@@ -43,16 +51,18 @@
           "ai_enabled": "KI-Sortierung verwenden",
           "ai_entity": "KI-Entität (AI Task)",
           "ai_mode": "Was die KI darf",
-          "ai_include_body": "Auch die ersten 1.000 Zeichen des Textes senden",
-          "ai_hourly_limit": "Höchstens so viele Bewertungen pro Stunde",
-          "ai_notify_importance": "Bei wichtigen Mails benachrichtigen (nur „Aktionen ausführen“)",
-          "ai_exclude": "Killswitch: diese Absender oder Domains nie an eine KI senden (eine pro Zeile)",
-          "ai_block_terms": "Killswitch: Mails mit diesen Begriffen nie an eine KI senden (einer pro Zeile)"
+          "ai_include_body": "Textanfang mitsenden",
+          "ai_hourly_limit": "Bewertungen pro Stunde (max.)",
+          "ai_notify_importance": "Wichtige Mails melden",
+          "ai_exclude": "Killswitch: Absender/Domains",
+          "ai_block_terms": "Killswitch: Begriffe"
         },
         "data_description": {
           "ai_entity": "Eine AI-Task-Entität, z. B. von Google Generative AI, OpenAI oder einem lokalen Ollama-Modell.",
-          "ai_exclude": "Zum Beispiel Bank, Arzt oder Arbeitgeber: bank.example, praxis@example.com",
-          "ai_block_terms": "Wird lokal in Betreff, Absender und Text geprüft, bevor etwas gesendet wird – auch für den KI-Tagesüberblick. Beispiel: Diagnose, Gehalt, Passwort"
+          "ai_exclude": "Nie an eine KI senden, eine Angabe pro Zeile. Zum Beispiel Bank, Arzt oder Arbeitgeber: bank.example, praxis@example.com",
+          "ai_block_terms": "Mails mit diesen Begriffen nie an eine KI senden, einer pro Zeile. Wird lokal in Betreff, Absender und Text geprüft, bevor etwas gesendet wird – auch für den KI-Tagesüberblick. Beispiel: Diagnose, Gehalt, Passwort",
+          "ai_include_body": "Die ersten 1.000 Zeichen des Textes.",
+          "ai_notify_importance": "Nur im Modus „Aktionen ausführen“."
         }
       }
     },
