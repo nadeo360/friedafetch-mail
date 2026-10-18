@@ -146,13 +146,17 @@ export const STYLE = `
     table.dtable tr.rrow { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto 36px; grid-template-areas: "on name hits menu" ". cond cond cond" ". act act act"; align-items: center; column-gap: 6px; padding: 6px 0; border-bottom: 1px solid var(--divider-color, #e0e0e0); }
     table.dtable tr.rrow > td { display: block; border: none; padding: 1px 0; max-width: none; min-width: 0; }
     table.dtable tr.rrow > td.c-pos { display: none; }
-    .htable tbody tr[data-search] { grid-template-columns: repeat(4, auto) minmax(0, 1fr); column-gap: 12px; }
-    .htable .c-time { grid-column: 1 / 5; grid-row: 1; }
-    .htable .c-res { grid-column: 5; grid-row: 1; justify-self: end; }
-    .htable .c-trig, .htable .c-scope, .htable .c-checked, .htable .c-matched { grid-row: 2; font-size: 12px; color: var(--secondary-text-color); }
-    .htable .c-rules { grid-row: 3; grid-column: 1 / -1; }
-    .htable .c-checked::before, .htable .c-matched::before { content: attr(data-label) " "; font-weight: 400; }
-    .htable .c-rules:has(> .muted) { display: none !important; }
+    /* runs on phones: [trigger] time … result, then the rules that acted */
+    .htable tbody tr[data-search] { grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 10px; row-gap: 4px; }
+    .htable .c-trig { grid-column: 1; grid-row: 1; }
+    .htable .c-trig .tchip .tl { display: none; }
+    .htable .c-trig .tchip { padding: 4px; border-radius: 50%; }
+    .htable .c-time { grid-column: 2; grid-row: 1; }
+    .htable .c-res { grid-column: 3; grid-row: 1; justify-self: end; }
+    .htable .c-res .muted { display: none; }
+    .htable .c-rules { grid-column: 2 / 4; grid-row: 2; }
+    .htable .c-rules .chip { margin: 0 4px 0 0; }
+    .htable .c-rules:has(> .muted), .htable .c-scope, .htable .c-checked, .htable .c-matched { display: none !important; }
     .rtable .c-on { grid-area: on; }
     .rtable .c-name { grid-area: name; }
     .rtable .c-hits { grid-area: hits; font-size: 12px; color: var(--secondary-text-color); }

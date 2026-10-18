@@ -358,7 +358,7 @@ class FriedaPostfachPanel extends HTMLElement {
             <div class="muted adet-meta">${esc([fmtDateTime(e.time), e.trigger ? trigLabel(t, e.trigger) : "", e.entity || "", e.items != null ? fmt(t.aiuItems, e.items) : ""].filter(Boolean).join(" · "))}</div>
           </div>`;
         const search = [e.subject, e.sender, e.entity, e.kind].join(" ").toLowerCase();
-        return `<tr class="arow ${state} ${open ? "open" : ""}" data-search="${esc(search)}">
+        return `<tr class="arow ${state} ${state === "err" ? "row-err" : ""} ${open ? "open" : ""}" data-search="${esc(search)}">
             <td class="c-st"><span class="aiu-st" title="${esc(stText)}" aria-label="${esc(stText)}">${ico(stIcon)}</span></td>
             <td class="c-time num dim"><time datetime="${esc(e.time || "")}" title="${esc(fmtDateTime(e.time))}">${esc(fmtShort(e.time))}</time></td>
             <td class="c-subj"><button class="rtext" data-action="aiu-open" data-i="${i}" aria-expanded="${open}" title="${esc(title)}">${esc(title)}</button></td>
@@ -719,9 +719,9 @@ class FriedaPostfachPanel extends HTMLElement {
         const resIcon = errors ? "alert-circle-outline" : h.matched ? "check-circle-outline" : "minus-circle-outline";
         const rules = Object.entries(h.rules || {});
         const search = [time(h), trig, scope, ...rules.map(([n]) => n), res, ...(h.errors || [])].join(" ").toLowerCase();
-        return `<tr data-search="${esc(search)}" class="${errors ? "err" : h.matched ? "hit" : "idle"}">
+        return `<tr data-search="${esc(search)}" class="${errors ? "err row-err" : h.matched ? "hit" : "idle"}">
             <td class="c-time"><span class="nm"><strong>${esc(time(h))}</strong>${(h.runs || 1) > 1 ? `<small>${esc(fmt(t.runsMerged, h.runs))}</small>` : ""}</span></td>
-            <td class="c-trig"><span class="tchip t-${esc(trigIcon[h.trigger] ? h.trigger : "manual")}">${ico(trigIcon[h.trigger] || trigIcon.manual)}${esc(trig)}</span></td>
+            <td class="c-trig"><span class="tchip t-${esc(trigIcon[h.trigger] ? h.trigger : "manual")}" title="${esc(trig)}">${ico(trigIcon[h.trigger] || trigIcon.manual)}<span class="tl">${esc(trig)}</span></span></td>
             <td class="c-scope dim"><span class="scope">${ico(h.scope === "all" ? "email-multiple-outline" : "email-arrow-left-outline", scope)}<span class="sc-txt">${esc(scope)}</span>${(h.mailboxes || []).map((b) => `<span class="chip ic mbox">${ico("inbox-outline")}${esc(b)}</span>`).join("")}</span></td>
             <td class="c-checked num" title="${esc(t.colChecked)}" data-label="${esc(t.colChecked)}">${esc(h.checked ?? 0)}</td>
             <td class="c-matched num" title="${esc(t.colMatched)}" data-label="${esc(t.colMatched)}">${h.matched ? `<strong>${esc(h.matched)}</strong>` : "0"}</td>
