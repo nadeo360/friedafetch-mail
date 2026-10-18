@@ -30,6 +30,9 @@ async def test_static_panel_served(hass: HomeAssistant, hass_client) -> None:
     body = await resp.text()
     assert "friedafetch-mail-panel" in body and "friedafetch_mail/rules/run" in body
     assert "friedafetch/approvals" not in body
+    for module in ("i18n.js", "styles.js"):  # loaded by panel.js with the same version query
+        resp = await client.get(f"/friedafetch_mail_static/{module}?v=1")
+        assert resp.status == 200 and "export const" in await resp.text()
 
 
 async def test_websocket_rule_lifecycle(hass: HomeAssistant, hass_ws_client) -> None:
