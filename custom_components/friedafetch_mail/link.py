@@ -53,3 +53,4 @@ class AccountLink:
     watcher: Any | None = None
     ai: Any | None = None  # ai.AiSorter (present also when switched off, then inactive)
     mail: Any | None = None  # background IMAP connection of rules and AI sorting
+    activity: Any | None = None  # activity.ActivityLog: one line per checked message

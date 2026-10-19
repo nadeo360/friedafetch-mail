@@ -62,6 +62,8 @@ MAX_EXAMPLES = 30
 PER_RUN = 10  # ratings per automatic run; the rest follows with the next run
 MAX_MANUAL = 20
 MAX_LOG = 300  # transmissions kept in the usage log
+ASSIST_TURNS = 10  # messages of the category assistant's conversation that go along (the panel stops at five rounds)
+TRY_COUNT = 20  # recently rated mails in the assistant's test run
 USAGE_DAYS = 31
 AUDIT_TOOL = "friedafetch_mail_ai_sort"
 
@@ -332,7 +334,7 @@ class AiSorter:
         entry = {
             "time": started or _now_iso(),
             "duration": duration,
-            "kind": kind,  # sort | digest
+            "kind": kind,  # sort | digest | assist
             "entity": entity,
             "trigger": trigger,
             "sent": held_back is None,
@@ -378,6 +380,7 @@ class AiSorter:
                 "errors": 0,
                 "sort": 0,
                 "digest": 0,
+                "assist": 0,
             }
             entities: dict[str, int] = {}
             for key, day in self.usage_days.items():
@@ -617,7 +620,7 @@ class AiSorter:
         boxes += [str(a)[6:] for a in item.get("applied") or [] if str(a).startswith("moved:")]
         boxes += [c["move_to"] for c in self.categories if c.get("move_to")]
         try:
-            boxes += [m["name"] for m in await self._mail.async_mailboxes() if m.get("special_use") != "\\Trash"]
+            boxes += [m["name"] for m in await self._mail.async_mailboxes() if m.get("special_use") != "trash"]
         except MailError:
             pass
         guard = getattr(self._clients, "guard", None)
@@ -738,6 +741,7 @@ class AiSorter:
                         "uid": uid,
                         "subject": summary.get("subject"),
                         "from": sender.get("email"),
+                        "name": sender.get("name"),
                         "message_id": summary.get("message_id"),
                         "held": sorted({str(r.get("type")) for r in held}),
                     }
@@ -783,12 +787,231 @@ class AiSorter:
                     "uid": uid,
                     "subject": summary.get("subject"),
                     "from": sender.get("email"),
+                    "name": sender.get("name"),
                     "message_id": summary.get("message_id"),
                     "category": rating.get("category"),
                     "importance": rating.get("importance"),
                     "applied": list(rating.get("applied") or []),
                 }
             )
+
+    # ------------------------------------------------- category assistant
+    async def async_assist(
+        self, conversation: list[dict[str, Any]], proposal: dict[str, Any] | None, folders: list[str]
+    ) -> dict[str, Any]:
+        """One round of the category assistant: the user's own words become a proposal for one new category.
+
+        Only the conversation, the names and descriptions of the categories and the folder names go to the AI –
+        no e-mail. The answer is checked like a normal save (length, known folders); nothing is saved here.
+        """
+        if not self.settings["active"]:
+            raise AiSortError("AI sorting is off or no AI entity is selected (options of Frieda Postfach)")
+        await self.async_load()
+        if not self._entity_ready():
+            raise AiSortError(f"AI entity {self.settings['entity']} is not available")
+        if self._budget() <= 0:
+            raise AiSortError("The hourly limit of AI calls is used up – try again later")
+        turns = [
+            {
+                "role": "assistant" if t.get("role") == "assistant" else "user",
+                "text": sanitize_text(str(t.get("text") or ""), 600),
+            }
+            for t in conversation[-ASSIST_TURNS:]
+            if isinstance(t, dict) and str(t.get("text") or "").strip()
+        ]
+        if not any(t["role"] == "user" for t in turns):
+            raise AiSortError("Describe which mails belong to the category first")
+        instructions = self._assist_instructions(turns, proposal, folders)
+        log = {
+            "entity": self.settings["entity"],
+            "trigger": "panel",
+            "fields": ["conversation", "categories", "folders"],
+            "chars": len(instructions),
+            "started": _now_iso(),
+        }
+        t0 = time.monotonic()
+        try:
+            result = await _generate(
+                self._hass,
+                task_name="Frieda Postfach: describe a category",
+                entity_id=self.settings["entity"],
+                instructions=instructions,
+                structure=self._assist_structure(folders),
+            )
+        except Exception as err:
+            log["duration"] = round(time.monotonic() - t0, 1)
+            self.record_usage("assist", ok=False, error=str(err) or err.__class__.__name__, **log)
+            await self._save()
+            raise AiSortError(f"The AI did not answer: {err}") from err
+        log["duration"] = round(time.monotonic() - t0, 1)
+        self._hour_count += 1
+        self.record_usage("assist", **log)
+        await self._save()
+        data = result.data if isinstance(result.data, dict) else {}
+        move_to = str(data.get("move_to") or "").strip()
+        overlap = str(data.get("overlap") or "").strip()
+        return {
+            "reply": sanitize_text(str(data.get("reply") or ""), 600).strip(),
+            "proposal": {
+                "name": sanitize_text(str(data.get("name") or "")).strip()[:40],
+                "description": sanitize_text(str(data.get("description") or "")).strip()[:300],
+                "move_to": move_to if move_to in folders else None,
+                "mark_seen": bool(data.get("mark_seen")),
+                "flag": bool(data.get("flag")),
+            },
+            "overlap": overlap if overlap in {c["name"] for c in self.categories} else None,
+        }
+
+    def _assist_instructions(
+        self, turns: list[dict[str, Any]], proposal: dict[str, Any] | None, folders: list[str]
+    ) -> str:
+        language = "German" if self._language == "de" else "English"
+        cats = "\n".join(f"- {c['name']}: {c['description'] or c['name']}" for c in self.categories)
+        current = ""
+        if proposal:
+            current = (
+                "\nThe current proposal (the user may have edited it by hand – keep their edits unless asked):\n"
+                f"name: {str(proposal.get('name') or '')[:40]}\n"
+                f"description: {str(proposal.get('description') or '')[:300]}\n"
+                f"move_to: {proposal.get('move_to') or ''}\n"
+                f"mark_seen: {bool(proposal.get('mark_seen'))}\n"
+                f"flag: {bool(proposal.get('flag'))}\n"
+            )
+        talk = "\n".join(f"{'User' if t['role'] == 'user' else 'Assistant'}: {t['text']}" for t in turns)
+        return (
+            "You help the user of a mail app create ONE new category for the AI that sorts their incoming e-mail. "
+            "Turn their words into a proposal and refine it with every message.\n"
+            f"Existing categories:\n{cats}\n"
+            f"Folders the mails may be moved to: {', '.join(folders) or '(none)'}\n{current}\n"
+            f"Conversation so far:\n{talk}\n\n"
+            f"name: short, at most 40 characters, in {language}.\n"
+            f"description: at most 300 characters in {language}, written for the sorting AI: which e-mails belong "
+            "here (senders, topics, typical subjects) and, where it borders on an existing category, which do not.\n"
+            "move_to: one of the folders exactly as written, or an empty string to leave the mails where they are.\n"
+            "mark_seen, flag: true only if the user asks for it.\n"
+            "overlap: the name of an existing category that covers similar e-mails, or an empty string.\n"
+            f"reply: one to three short, friendly sentences in {language} to the user: what you proposed or "
+            "changed. If something essential is unclear, ask one question. Deleting e-mails is not possible; "
+            "do not offer it."
+        )
+
+    def _assist_structure(self, folders: list[str]) -> Any:
+        from homeassistant.helpers import selector  # noqa: PLC0415
+
+        from custom_components.friedafetch.schema import vol  # noqa: PLC0415
+
+        text = selector.selector({"text": {}})
+        flag = selector.selector({"boolean": {}})
+        names = [c["name"] for c in self.categories]
+        return vol.Schema(
+            {
+                vol.Required("reply", description="Short answer to the user"): text,
+                vol.Required("name", description="Name of the category"): text,
+                vol.Required("description", description="Which e-mails belong to it"): text,
+                vol.Required("move_to", description="Folder, or empty"): selector.selector(
+                    {"select": {"options": ["", *folders]}}
+                ),
+                vol.Required("mark_seen", description="Mark as read"): flag,
+                vol.Required("flag", description="Flag"): flag,
+                vol.Required("overlap", description="Existing category that is similar, or empty"): selector.selector(
+                    {"select": {"options": ["", *names]}}
+                ),
+            }
+        )
+
+    async def async_try_category(self, proposal: dict[str, Any], count: int = TRY_COUNT) -> dict[str, Any]:
+        """Test run of a proposed category: the last rated mails go to the AI again with it added.
+
+        Nothing is stored or changed (no rating, no action); the hourly limit and the kill switch apply as always.
+        """
+        if not self.settings["active"]:
+            raise AiSortError("AI sorting is off or no AI entity is selected (options of Frieda Postfach)")
+        await self.async_load()
+        name = sanitize_text(str(proposal.get("name") or "")).strip()[:40]
+        if not name:
+            raise AiSortError("The new category needs a name")
+        if name.lower() == OTHER or name.lower() in {c["name"].lower() for c in self.categories}:
+            raise AiSortError(f"Category name '{name}' is used already")
+        description = sanitize_text(str(proposal.get("description") or "")).strip()[:300]
+        categories = [*self.categories, {"id": "try", "name": name, "description": description}]
+        out: dict[str, Any] = {
+            "name": name,
+            "tested": 0,
+            "held": 0,
+            "missing": 0,
+            "limit": False,
+            "errors": [],
+            "results": [],
+        }
+        wanted = max(1, min(count, TRY_COUNT))
+        recent = [r for r in reversed(self.ratings) if r.get("message_id") or r.get("uid") is not None][:wanted]
+        for rating in recent:
+            if self._budget() <= 0:
+                out["limit"] = True
+                break
+            async with self._lock:
+                result = await self._try_one(rating, categories, out)
+            if result is False:
+                break
+        await self._save()
+        out["hits"] = sum(1 for r in out["results"] if r["after"] == name)
+        return out
+
+    async def _try_one(self, rating: dict[str, Any], categories: list[dict[str, Any]], out: dict[str, Any]) -> bool:
+        """Rate one mail of the test run; False stops the run (an error)."""
+        found = await self._locate({k: rating.get(k) for k in ("message_id", "mailbox", "uid", "applied")})
+        summaries = await self._mail.async_summaries(found[0], [found[1]]) if found else []
+        if not found or not summaries:
+            out["missing"] += 1
+            return True
+        summary = summaries[0]
+        sender = (summary.get("from") or [{}])[0]
+        fields = {
+            "sender_name": str(sender.get("name") or ""),
+            "sender_email": str(sender.get("email") or ""),
+            "subject": str(summary.get("subject") or ""),
+        }
+        held = blocked_reasons(self.settings, **fields)
+        body: str | None = None
+        if not held and (self.settings["block_terms"] or self.settings["include_body"]):
+            try:
+                message = await self._mail.async_get_message(found[0], found[1], max_chars=20000)
+            except (MailError, MailboxNotFound) as err:
+                out["errors"].append(str(err))
+                return False
+            full = sanitize_text(message.get("body") or "")
+            held = blocked_reasons(self.settings, **fields, body=full)
+            body = full[:AI_BODY_CHARS] if self.settings["include_body"] else None
+        if held:
+            out["held"] += 1
+            self.record_usage(
+                "sort",
+                entity=self.settings["entity"],
+                trigger="test",
+                fields=[],
+                chars=0,
+                sender=fields["sender_email"],
+                subject=fields["subject"],
+                held_back=held,
+                message_id=summary.get("message_id"),
+            )
+            return True
+        try:
+            result = await self._classify(summary, body, "test", categories)
+        except Exception as err:  # noqa: BLE001 - AI providers raise all kinds of errors; shown in the dialog
+            out["errors"].append(str(err) or err.__class__.__name__)
+            return False
+        self._hour_count += 1
+        out["tested"] += 1
+        out["results"].append(
+            {
+                "subject": fields["subject"][:160],
+                "from": rating.get("from") or fields["sender_email"],
+                "before": rating.get("corrected") or rating.get("category"),
+                "after": result["category"],
+            }
+        )
+        return True
 
     # ------------------------------------------------------- AI interface
     def _mail_text(self, summary: dict[str, Any], body: str | None) -> str:
@@ -808,8 +1031,8 @@ class AiSorter:
             lines.append(f"Text (first {AI_BODY_CHARS} characters):\n{body}")
         return "\n".join(lines)
 
-    def _instructions(self, mail_text: str) -> str:
-        cats = "\n".join(f"- {c['name']}: {c['description'] or c['name']}" for c in self.categories)
+    def _instructions(self, mail_text: str, categories: list[dict[str, Any]] | None = None) -> str:
+        cats = "\n".join(f"- {c['name']}: {c['description'] or c['name']}" for c in categories or self.categories)
         examples = ""
         if self.examples:
             examples = "\nCorrections the user made earlier (follow this taste):\n" + "\n".join(
@@ -828,12 +1051,12 @@ class AiSorter:
             "<<<EMAIL\n" + mail_text + "\nEMAIL>>>"
         )
 
-    def _structure(self) -> Any:
+    def _structure(self, categories: list[dict[str, Any]] | None = None) -> Any:
         from homeassistant.helpers import selector  # noqa: PLC0415
 
         from custom_components.friedafetch.schema import vol  # noqa: PLC0415
 
-        names = [c["name"] for c in self.categories] + [OTHER]
+        names = [c["name"] for c in categories or self.categories] + [OTHER]
         return vol.Schema(
             {
                 vol.Required("category", description="One of the categories"): selector.selector(
@@ -846,10 +1069,19 @@ class AiSorter:
             }
         )
 
-    async def _classify(self, summary: dict[str, Any], body: str | None, trigger: str = "auto") -> dict[str, Any]:
-        if "ai_task" not in self._hass.config.components or self._hass.states.get(self.settings["entity"]) is None:
+    def _entity_ready(self) -> bool:
+        return "ai_task" in self._hass.config.components and self._hass.states.get(self.settings["entity"]) is not None
+
+    async def _classify(
+        self,
+        summary: dict[str, Any],
+        body: str | None,
+        trigger: str = "auto",
+        categories: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        if not self._entity_ready():
             raise HomeAssistantError(f"AI entity {self.settings['entity']} is not available")
-        instructions = self._instructions(self._mail_text(summary, body))
+        instructions = self._instructions(self._mail_text(summary, body), categories)
         sender = (summary.get("from") or [{}])[0]
         log = {
             "entity": self.settings["entity"],
@@ -868,7 +1100,7 @@ class AiSorter:
                 task_name="Frieda Postfach: sort e-mail",
                 entity_id=self.settings["entity"],
                 instructions=instructions,
-                structure=self._structure(),
+                structure=self._structure(categories),
             )
         except Exception as err:
             log["duration"] = round(time.monotonic() - t0, 1)
@@ -877,7 +1109,7 @@ class AiSorter:
         log["duration"] = round(time.monotonic() - t0, 1)
         self.record_usage("sort", **log)
         data = result.data if isinstance(result.data, dict) else {}
-        names = {c["name"] for c in self.categories}
+        names = {c["name"] for c in categories or self.categories}
         category = str(data.get("category") or OTHER)
         if category not in names:
             category = OTHER

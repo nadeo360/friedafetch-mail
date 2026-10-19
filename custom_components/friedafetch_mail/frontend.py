@@ -17,6 +17,7 @@ from custom_components.friedafetch.const import CONF_ENABLE_MAIL, CONF_READ_ONLY
 from custom_components.friedafetch.mail import MailError
 from custom_components.friedafetch.schema import vol
 
+from .activity import summarize
 from .ai import AiSortError
 from .const import (
     CONF_DIGEST_TIME,
@@ -29,6 +30,7 @@ from .const import (
     DOMAIN,
 )
 from .live import SIGNAL_PANEL
+from .locate import async_locate
 from .rules import RuleError, RuleNotFound
 from .timeline import build_timeline
 
@@ -69,6 +71,12 @@ async def async_setup_frontend(hass: HomeAssistant, version: str) -> None:
         ws_ai_usage_clear,
         ws_ai_rerate,
         ws_ai_rerate_cancel,
+        ws_ai_assist,
+        ws_ai_assist_test,
+        ws_activity_list,
+        ws_activity_select,
+        ws_activity_clear,
+        ws_mail_locate,
     ):
         websocket_api.async_register_command(hass, command)
     await panel_custom.async_register_panel(
@@ -481,3 +489,170 @@ async def ws_ai_usage_clear(
     sorter = _sorter(hass, msg.get("entry_id"))
     await sorter.async_clear_usage()
     connection.send_result(msg["id"], _ai_payload(sorter))
+
+
+# ------------------------------------------------------------------ activity (one line per checked message)
+async def _activity_rows(link: Any) -> list[dict[str, Any]]:
+    await link.activity.async_load()
+    sorter = link.ai
+    ratings: list[dict[str, Any]] = []
+    if sorter is not None:
+        await sorter.async_load()
+        ratings = list(sorter.ratings)
+    return link.activity.view(ratings, ai_active=bool(sorter is not None and sorter.settings["active"]))
+
+
+VIEW = vol.All(str, vol.Match(r"^(all|k:(ai|rule|held|none)|f:.{1,200})$"))
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/activity/list",
+        vol.Optional("entry_id"): str,
+        vol.Optional("view", default="all"): VIEW,
+        vol.Optional("query", default=""): vol.All(str, vol.Length(max=200)),
+        vol.Optional("offset", default=0): vol.All(int, vol.Range(min=0)),
+        vol.Optional("limit", default=50): vol.All(int, vol.Range(min=1, max=500)),
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+@_ws_errors
+async def ws_activity_list(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """One page of the checked messages (newest first), the days in the view, and the counts of all views."""
+    link = _entry(hass, msg.get("entry_id")).runtime_data
+    rows = await _activity_rows(link)
+    connection.send_result(msg["id"], summarize(rows, msg["view"], msg["query"].strip(), msg["offset"], msg["limit"]))
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/activity/select",
+        vol.Optional("entry_id"): str,
+        vol.Optional("view", default="all"): VIEW,
+        vol.Optional("query", default=""): vol.All(str, vol.Length(max=200)),
+        vol.Optional("day"): vol.All(str, vol.Match(r"^\d{4}-\d{2}-\d{2}$")),
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+@_ws_errors
+async def ws_activity_select(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """The messages that "select all" or "select the day" picks: those of the view the AI can rate again."""
+    link = _entry(hass, msg.get("entry_id")).runtime_data
+    hits = summarize(await _activity_rows(link), msg["view"], msg["query"].strip(), 0, 10_000)["items"]
+    picked = [
+        {"key": r["key"], "message_id": r["message_id"], "mailbox": r["mailbox"]}
+        for r in hits
+        if r["selectable"] and (not msg.get("day") or r["day"] == msg["day"])
+    ]
+    connection.send_result(msg["id"], {"messages": picked})
+
+
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/activity/clear", vol.Optional("entry_id"): str})
+@websocket_api.require_admin
+@websocket_api.async_response
+@_ws_errors
+async def ws_activity_clear(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Forget the activity list (rules, runs and AI ratings stay)."""
+    await _entry(hass, msg.get("entry_id")).runtime_data.activity.async_clear()
+    connection.send_result(msg["id"], {"cleared": True})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/mail/locate",
+        vol.Optional("entry_id"): str,
+        vol.Required("message_id"): vol.All(str, vol.Length(min=3, max=300)),
+        vol.Optional("hints", default=list): [vol.All(str, vol.Length(max=200))],
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+@_ws_errors
+async def ws_mail_locate(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """Where a message is now (searched by Message-ID), for the activity's detail view."""
+    link = _entry(hass, msg.get("entry_id")).runtime_data
+    mail = link.mail or link.clients.mail
+    connection.send_result(msg["id"], await async_locate(mail, link.clients.guard, msg["message_id"], msg["hints"][:5]))
+
+
+async def _target_folders(link: Any) -> list[str]:
+    """Folders a category may move mails to: every folder the AI may see, except the inbox."""
+    boxes = await (link.mail or link.clients.mail).async_mailboxes()
+    guard = link.clients.guard
+    out = []
+    for box in boxes:
+        name = box["name"]
+        if name == "INBOX":
+            continue
+        if guard is not None:
+            try:
+                guard.check_mailbox_visible(name)
+            except Exception:  # noqa: BLE001, S112 - hidden from AI clients: not offered
+                continue
+        out.append(name)
+    return out
+
+
+PROPOSAL = vol.Schema(
+    {
+        vol.Optional("name"): vol.Any(str, None),
+        vol.Optional("description"): vol.Any(str, None),
+        vol.Optional("move_to"): vol.Any(str, None),
+        vol.Optional("mark_seen"): bool,
+        vol.Optional("flag"): bool,
+    },
+    extra=vol.REMOVE_EXTRA,
+)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/ai/assist",
+        vol.Optional("entry_id"): str,
+        vol.Required("conversation"): vol.All(
+            [
+                {
+                    vol.Required("role"): vol.In(["user", "assistant"]),
+                    vol.Required("text"): vol.All(str, vol.Length(max=2000)),
+                }
+            ],
+            vol.Length(min=1, max=40),
+        ),
+        vol.Optional("proposal"): vol.Any(PROPOSAL, None),
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+@_ws_errors
+async def ws_ai_assist(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """One round of the category assistant (the chosen AI entity turns the user's words into a proposal)."""
+    link = _entry(hass, msg.get("entry_id")).runtime_data
+    sorter = _sorter(hass, msg.get("entry_id"))
+    folders = await _target_folders(link)
+    connection.send_result(msg["id"], await sorter.async_assist(msg["conversation"], msg.get("proposal"), folders))
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/ai/assist/test",
+        vol.Optional("entry_id"): str,
+        vol.Required("proposal"): PROPOSAL,
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+@_ws_errors
+async def ws_ai_assist_test(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Test run of a proposed category with the last rated mails (nothing is stored or changed)."""
+    sorter = _sorter(hass, msg.get("entry_id"))
+    connection.send_result(msg["id"], await sorter.async_try_category(msg["proposal"]))

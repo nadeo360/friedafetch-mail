@@ -124,6 +124,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
     )
     from custom_components.friedafetch.util import clamp  # noqa: PLC0415
 
+    from .activity import ActivityLog  # noqa: PLC0415
     from .ai import AiSorter  # noqa: PLC0415
     from .digest import async_send_digest  # noqa: PLC0415
     from .frontend import async_setup_frontend  # noqa: PLC0415
@@ -160,6 +161,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
         attachment_saver=clients.attachments.async_save if clients.attachments is not None else None,
     )
     await rules.async_load()
+    activity = ActivityLog(hass, core.entry_id)
+    await activity.async_load()
+    rules.activity = activity
     extension = MailExtension(rules)
     link = AccountLink(
         core_entry_id=core.entry_id,
@@ -169,6 +173,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
         rules=rules,
         extension=extension,
         mail=auto_mail,
+        activity=activity,
     )
     entry.runtime_data = link
     rules.account = link.label

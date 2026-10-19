@@ -348,6 +348,7 @@ class RuleEngine:
         self._history: list[dict[str, Any]] = []
         self._history_seq = 0
         self.account: str = ""  # label of the account, part of the events
+        self.activity: Any | None = None  # ActivityLog: one line per checked message (the panel's "Aktivität")
 
     # ------------------------------------------------------------ storage
     async def async_load(self) -> None:
@@ -640,6 +641,8 @@ class RuleEngine:
             uids_per_rule.setdefault(act["rule"], set()).add((act.get("mailbox"), act["uid"]))
         per_rule = {name: len(uids) for name, uids in uids_per_rule.items()}
         mails = _handled_mails(report["actions"], report.get("checked_mails"), ai)
+        if self.activity is not None:
+            self.activity.add_pass(report["trigger"], report["started"], mails)
         ai_part = (
             {
                 "rated": int(ai.get("rated") or 0),
@@ -765,6 +768,7 @@ class RuleEngine:
                     "uid": summary["uid"],
                     "subject": summary.get("subject"),
                     "from": sender[0].get("email"),
+                    "name": sender[0].get("name"),
                     "message_id": summary.get("message_id"),
                     "date": summary.get("date"),
                 }
@@ -971,7 +975,7 @@ def _handled_mails(
             },
         )
         # the Message-ID links the entry to the mail's timeline (it survives moves, the UID does not)
-        for key in ("message_id", "date"):
+        for key in ("message_id", "date", "name"):
             if item.get(key) and not mail.get(key):
                 mail[key] = str(item[key])[:300]
         return mail
