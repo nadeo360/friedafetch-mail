@@ -213,6 +213,8 @@ every other Frieda tool. See [SECURITY.md](https://github.com/nadeo360/friedafet
 
 ## Development
 
+How to report bugs, suggest ideas and send pull requests: [CONTRIBUTING.md](https://github.com/nadeo360/friedafetch-mail/blob/main/CONTRIBUTING.md).
+
 The architecture of Frieda and Frieda Postfach is described in the arc42 document in Frieda's repository: [docs/architecture.md](https://github.com/nadeo360/friedafetch/blob/main/docs/architecture.md).
 
 ```bash
