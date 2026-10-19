@@ -1527,14 +1527,15 @@ class FriedaPostfachPanel extends HTMLElement {
   }
 
   // Asks first (the panel's dialog); while the batch runs, every chosen mail shows where it stands.
-  async _actRerate(keys) {
+  async _actRerate(keys, known = {}) {
     const a = this._s.act;
     const order = [...keys].sort((x, y) => {
       const ix = a.items.findIndex((i) => i.key === x);
       const iy = a.items.findIndex((i) => i.key === y);
       return (ix < 0 ? 1e9 : ix) - (iy < 0 ? 1e9 : iy);
     });
-    const messages = order.map((k) => a.sel.get(k) || (({ message_id, mailbox }) => ({ message_id, mailbox }))(this._actItem(k) || {})).filter((m) => m.message_id);
+    const fromItem = (i) => i && { message_id: i.message_id, mailbox: i.mailbox };
+    const messages = order.map((k) => a.sel.get(k) || fromItem(this._actItem(k)) || known[k] || {}).filter((m) => m.message_id);
     const before = this._s.ai?.batch?.started;
     await this._rerate({ messages });
     const b = this._s.ai?.batch;
@@ -1801,7 +1802,7 @@ class FriedaPostfachPanel extends HTMLElement {
           <span class="av" aria-hidden="true">${esc(initials(name || address))}</span>
           <span class="who">${who}</span>
           <span class="date">${esc(d.date ? fmtDateTime(d.date) : item ? fmtDateTime(item.time) : "")}</span>
-          <div class="chips">${meta}${item ? this._actRowBatch(item.key) : ""}</div>
+          <div class="chips">${meta}${this._actRowBatch(item ? item.key : mid)}</div>
           ${mid ? this._locHtml(mid, item?.folder || d.location || d.mailbox) : ""}
         </div>
         <h3 class="sect">${esc(t.actHistory)}</h3>
@@ -2169,7 +2170,8 @@ class FriedaPostfachPanel extends HTMLElement {
       ai: () => single("ai", this._renderAi()),
       aiu: () => single("aiu", this._renderAiUsage()),
     };
-    const main = !ready ? "" : tabbed ? content[tab]() : tabs.map((x) => content[x.id]()).join("");
+    const elsewhere = ready && s.ai?.batch && (tab !== "activity" || s.act.runs || !tabbed) ? this._renderBatch(s.ai) : "";
+    const main = !ready ? "" : `${elsewhere ? `<section class="widget w-full" data-widget="batch">${elsewhere}</section>` : ""}${tabbed ? content[tab]() : tabs.map((x) => content[x.id]()).join("")}`;
     const body = !s.loaded
       ? `<p class="muted">${esc(t.loading)}</p>`
       : !s.entryId
@@ -2430,11 +2432,13 @@ class FriedaPostfachPanel extends HTMLElement {
         "assist-test": () => this._assistTest(),
         "assist-apply": () => this._assistApply(),
         "tl-rerate": () => {
+          // one way for every opened mail (activity, AI log, runs, a link): the mail and the list show the progress
           const sheet = this._s.sheet;
           const mid = sheet?.data?.message_id || sheet?.key?.message_id;
-          const item = this._actItem(this._s.act.open);
-          if (item && item.message_id === mid) return this._actRerate([item.key]); // the list shows the progress
-          if (mid) this._rerate({ messages: [{ message_id: mid, ...(sheet.data?.mailbox ? { mailbox: sheet.data.mailbox } : {}) }] });
+          if (!mid) return;
+          const open = this._actItem(this._s.act.open);
+          const key = open?.message_id === mid ? open.key : mid; // the activity keys a mail by its Message-ID
+          this._actRerate([key], { [key]: { message_id: mid, mailbox: sheet.data?.mailbox || "INBOX" } });
         },
         "rerate-cancel": () =>
           this._call(async () => {
