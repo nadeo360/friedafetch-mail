@@ -103,29 +103,45 @@ wie `(a+)+` oder Ketten wie `a+a+a+` –, werden beim Speichern abgelehnt; Regex
 ## Panel
 
 **Frieda Postfach** in der Seitenleiste (nur Admins, Deutsch/Englisch). Es nutzt die Design-Bibliothek von Frieda und
-sieht daher aus wie Friedas eigenes Panel; die Karten (Regeln, KI-Sortierung, An KI übermittelt, Ausführungen) sind
-Widgets, die du anordnen, in der Breite ändern und ausblenden kannst, und jede Tabelle hat Suche, Filter und ein
-Menü **Spalten** (gespeichert pro Home-Assistant-Benutzer). Die Regelkarte enthält die Regeln und alles, um sie
-auszuführen:
+sieht daher aus wie Friedas eigenes Panel. Vier Tabs halten es übersichtlich: **Aktivität**, **Regeln**,
+**KI-Sortierung** und **KI-Protokoll**; jede Tabelle hat Suche, Filter und ein Menü **Spalten** (gespeichert pro
+Home-Assistant-Benutzer).
+
+**Aktivität** sieht aus wie ein Mailprogramm: links Ansichten und Ordner, in der Mitte die geprüften Mails, rechts
+die gewählte Mail (auf dem Handy öffnet sich die Mail in einem Blatt über der Liste, das du nach unten wegwischst).
+
+- **Eine Zeile pro Mail**, die Frieda Postfach geprüft hat: Absender, Uhrzeit, Betreff und in leisem Grau, was
+  passiert ist – die Regel, Kategorie und Wichtigkeit der KI, ein Killswitch-Stopp oder „keine Aktion“; ein Ordner
+  nur, wenn die Mail verschoben wurde. Die Tage sind gruppiert (und lassen sich einklappen), die Liste lädt beim
+  Scrollen je 50 Mails nach, die Suche umfasst alle. Sie reicht 30 Tage zurück (höchstens 3.000 Mails).
+- **Ansichten:** alle Mails, nach Ergebnis (KI, Regel, Killswitch, keine Aktion) und nach dem Ordner, in den Frieda
+  sie abgelegt hat. Das ist, was Frieda getan hat – beim Öffnen einer Mail sieht Frieda nach, wo sie wirklich liegt
+  (eine Suche über ihre Message-ID): noch dort, inzwischen verschoben oder nicht mehr gefunden.
+- **Die Mail** zeigt ihren ganzen Weg als Zeitleiste – eingegangen, Regeln geprüft, an die KI übermittelt oder vom
+  Killswitch zurückgehalten, Bewertung, Aktion, deine Korrektur. Die Kategorie lässt sich direkt dort korrigieren.
+  Verknüpft wird über die Message-ID der Mail (sie bleibt beim Verschieben erhalten); ältere Einträge werden über
+  Betreff und Absender zugeordnet. Auch das Änderungsprotokoll von Frieda verlinkt dorthin.
+- **Auswählen** (oder ⌘/Strg-Klick, ⇧-Klick für einen Bereich) wählt Mails für **Neu bewerten**: alle einer Ansicht,
+  einen ganzen Tag (Heute, Gestern, …) oder einzelne; Mails, die eine Regel erledigt hat, sind nicht für die KI.
+  Während des Laufs zeigt jede Mail, ob sie wartet, gerade bewertet wird oder fertig ist.
+- **Durchgänge** (unter *Technik*) ist die technische Sicht: ein Eintrag pro Durchgang von Regeln und KI-Sortierung
+  (automatische Durchgänge ohne neue Mails werden zusammengefasst); ein Push-Durchgang erscheint sofort als
+  „Neue Mail – wird bewertet …“.
+- Kleine Statushinweise sagen, wie neue Mails verarbeitet werden (Push, Takt, KI-Modus), und führen dorthin, wo man
+  es einstellt.
+
+**Regeln** enthält die Regeln und alles, um sie auszuführen:
 
 - **Eine Statuszeile** sagt, wie neue Mails verarbeitet werden: *sofort per Push* (der Takt läuft als Sicherheitsnetz
   mit), *Prüfung alle N Min.* (Push aus), *Push gestört* (der Takt läuft weiter) oder *Automatik aus*.
 - Eine Regeltabelle (Position, Schalter, Name, Bedingungen, Aktionen, Treffer) zum Aufklappen, **+** für eine neue
   Regel und ein ⋮-Menü pro Regel für Bearbeiten, Probelauf nur mit dieser Regel, Reihenfolge, Kopieren und Löschen.
 - **Ausführen** öffnet ein Menü: Probelauf oder echter Lauf über das ganze Postfach oder nur neue Mails; der Bericht
-  pro Mail erscheint unter den Regeln.
-- Der Verlauf **Ausführungen**: ein Eintrag pro Durchgang von Regeln und KI-Sortierung (automatische Durchgänge ohne
-  neue Mails werden zusammengefasst), mit Suche, Filtern und Sortierung; ein Push-Durchgang erscheint sofort als
-  „Neue Mail – wird bewertet …“; ein Klick zeigt jede Mail des Durchgangs mit
-  dem, was die Regeln getan haben, der Kategorie und Wichtigkeit der KI, einem Killswitch-Stopp oder „keine Aktion“.
-- Der **Verlauf einer Mail**: Ein Klick auf eine Mail (in einer Ausführung, unter *Zuletzt bewertet* oder *An KI
-  übermittelt*) öffnet ihren ganzen Weg als Zeitleiste – eingegangen, Regeln geprüft, an die KI übermittelt oder vom
-  Killswitch zurückgehalten, Bewertung, Aktion, deine Korrektur. Verknüpft wird über die Message-ID der Mail (sie
-  bleibt beim Verschieben erhalten); ältere Einträge werden über Betreff und Absender zugeordnet. Dafür wird nichts
-  zusätzlich gespeichert, alles bleibt in Home Assistant. Auch das Änderungsprotokoll von Frieda verlinkt dorthin.
+  pro Mail erscheint über den Regeln.
 
-Bei mehreren Konten erscheint oben eine Kontoauswahl. Freigaben und Änderungsprotokoll bleiben im Panel von Frieda,
-dessen Überblick auch zeigt, ob Frieda Postfach läuft.
+**KI-Sortierung** enthält Modus und Kategorien, **KI-Protokoll** alles, was an eine KI ging. Bei mehreren Konten
+erscheint oben eine Kontoauswahl. Freigaben und Änderungsprotokoll bleiben im Panel von Frieda, dessen Überblick
+auch zeigt, ob Frieda Postfach läuft.
 
 ## KI-Sortierung
 
@@ -156,12 +172,22 @@ Im Panel korrigierst du eine Bewertung, indem du die richtige Kategorie wählst;
 Beispiele an die KI. Ein Stundenlimit (Standard 30) begrenzt die KI-Aufrufe; jede Mail wird automatisch höchstens
 einmal bewertet.
 
-**Neu bewerten:** Nach geänderten Kategorien wählst du unter *Zuletzt bewertet* beliebig viele bewertete Mails aus
-(auch „alle passenden“ über alle Seiten) oder öffnest den Verlauf einer einzelnen Mail und wählst **Neu bewerten**.
-Die Mails gehen mit den aktuellen Kategorien erneut an die KI – Killswitch und Stundenlimit gelten wie immer –, und
-inzwischen verschobene Mails werden über ihre Message-ID im neuen Ordner gefunden. Auf Wunsch laufen danach die
-Aktionen der neuen Kategorie. Die Neubewertung läuft im Hintergrund mit Fortschritt und lässt sich abbrechen; die
-frühere Bewertung bleibt im Verlauf der Mail sichtbar. Aktionen, die Mails verändert haben, stehen in Friedas Änderungsprotokoll.
+**Neu bewerten:** Nach geänderten Kategorien wählst du unter *Aktivität* Mails aus (einzelne, einen ganzen Tag
+oder alles, was eine Ansicht zeigt) oder öffnest eine einzelne Mail und wählst **Neu bewerten**. Die Mails gehen mit
+den aktuellen Kategorien erneut an die KI – Killswitch und Stundenlimit gelten wie immer –, und inzwischen verschobene
+Mails werden über ihre Message-ID im neuen Ordner gefunden. Auf Wunsch laufen danach die Aktionen der neuen
+Kategorie. Die Neubewertung läuft im Hintergrund mit Fortschritt und lässt sich abbrechen; die frühere Bewertung
+bleibt im Verlauf der Mail sichtbar. Aktionen, die Mails verändert haben, stehen in Friedas Änderungsprotokoll.
+
+**Mit Frieda beschreiben:** Neben **+** für eine neue Kategorie öffnet *Mit Frieda beschreiben* ein kurzes Gespräch:
+Du sagst in eigenen Worten, welche Mails dazugehören und was mit ihnen passieren soll, und die gewählte KI-Entität
+macht daraus einen Vorschlag – Name, Beschreibung für die sortierende KI, Ordner, Markieren, Als gelesen markieren –,
+den du von Hand ändern und in bis zu fünf Runden verfeinern kannst. Sie weist auf eine ähnliche bestehende Kategorie
+hin und fasst die Beschreibung so, dass beide getrennt bleiben. An die KI gehen nur deine Nachrichten sowie Namen und
+Beschreibungen deiner Kategorien und die Ordnernamen, keine Mails; jede Runde steht als *Kategorie-Assistent* im
+KI-Protokoll und zählt aufs Stundenlimit. Ein optionaler **Probelauf** bewertet deine letzten 20 bewerteten Mails mit
+der vorgeschlagenen Kategorie erneut (Limit und Killswitch gelten, nichts wird gespeichert oder verschoben). Gespeichert
+wird erst mit **Übernehmen**.
 
 Die Panel-Karte **An KI übermittelt** zeigt, was an eine KI ging: Aufrufe und Zeichen heute, in 7 und 30 Tagen,
 wie viele davon mit Mailtext, je KI-Entität und Zweck (Sortierung, Tagesüberblick), und ein Protokoll jeder

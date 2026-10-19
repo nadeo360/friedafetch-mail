@@ -101,26 +101,42 @@ rule is saved; regex conditions look at the first 300 characters of a header.
 ## Panel
 
 **Frieda Postfach** in the sidebar (admins only, German/English). It uses Frieda's design library, so it looks like
-Frieda's own panel; the cards (rules, AI sorting, sent to AI, runs) are widgets you can arrange, resize and hide,
-and every table has search, filters and a **Columns** menu (stored per Home Assistant user). The rules card holds
-the rules and everything to run them:
+Frieda's own panel. Four tabs keep it tidy: **Activity**, **Rules**, **AI sorting** and **AI log**; every table has
+search, filters and a **Columns** menu (stored per Home Assistant user).
+
+**Activity** looks like a mail program: views and folders on the left, the checked mails in the middle, the chosen
+mail on the right (on phones the mail opens in a sheet over the list that you swipe down to close).
+
+- **One line per mail** that Frieda Postfach checked: sender, time, subject and in quiet grey what happened – the
+  rule, the AI's category and importance, a kill-switch hold or "no action"; a folder only when the mail was moved.
+  Days are grouped (and can be folded), the list loads 50 mails at a time while you scroll, the search covers all of
+  them. It keeps the last 30 days (at most 3,000 mails).
+- **Views:** all mails, by result (AI, rule, kill switch, no action) and by the folder Frieda put them in. That is
+  what Frieda did – opening a mail looks up where it really is now (one search by its Message-ID): still there, moved
+  elsewhere since, or no longer found.
+- **The mail** shows its whole path as a timeline – received, rules checked, sent to the AI or held back by the kill
+  switch, rating, action, your correction. The category is the place to correct it. Steps are linked by the
+  message's Message-ID (it survives moves); older entries are matched by subject and sender. Frieda's change log links
+  here too.
+- **Select** (or Cmd/Ctrl-click, Shift-click for a range) picks mails for **Rate again**: all of a view, a whole day
+  (Today, Yesterday, …) or single ones; mails handled by a rule are not for the AI. While the batch runs, every mail
+  shows whether it waits, is being rated or is done.
+- **Runs** (under *Technical*) is the technical view: one entry per pass of the rules and the AI sorting
+  (automatic passes without new mail are merged); a push pass shows up at once as "New mail – being rated …".
+- Small status notes say how new mail is picked up (push, timer, AI mode) and lead to where it is set.
+
+**Rules** holds the rules and everything to run them:
 
 - **One status line** says how new mail is picked up: *instant via push* (with the timer as a safety net),
   *checking every N min* (push off), *push interrupted* (the timer keeps going) or *automation off*.
 - A rule table (position, switch, name, conditions, actions, hits) that expands per rule, **+** for a new rule, and a
   ⋮ menu per rule for edit, dry run with only this rule, order, copy and delete.
 - **Run** opens a menu: dry run or real run over the whole mailbox, or new mail only; the per-message report appears
-  below the rules.
-- The **Runs** history: one entry per pass of the rules and the AI sorting (automatic passes without new mail are
-  merged), with search, filters and sorting; a push pass shows up at once as "New mail – being rated …"; a click shows every message of the pass with what the rules did, the
-  AI's category and importance, a kill-switch hold or "no action".
-- The **message timeline**: a click on a message (in a run, under *Recently rated* or *Sent to AI*) opens its whole
-  path as a timeline – received, rules checked, sent to the AI or held back by the kill switch, rating, action, your
-  correction. Steps are linked by the message's Message-ID (it survives moves); older entries are matched by subject
-  and sender. Nothing new is stored for it, everything stays in Home Assistant. Frieda's change log links to it too.
+  above the rules.
 
-With several accounts an account picker appears on top. Approvals and the change log stay in Frieda's own panel,
-whose overview also shows whether Frieda Postfach is running.
+**AI sorting** holds its mode and the categories, **AI log** everything that went to an AI. With several accounts an
+account picker appears on top. Approvals and the change log stay in Frieda's own panel, whose overview also shows
+whether Frieda Postfach is running.
 
 ## AI sorting
 
@@ -150,13 +166,21 @@ In the panel you correct a rating by choosing the right category; up to 30 corre
 examples. An hourly limit (default 30) caps the number of AI calls; every mail is rated at most once
 automatically.
 
-**Rate again:** after changing the categories you can select any number of rated messages under *Recently rated*
-(also "all matching" across pages) or open one message's timeline, and choose **Rate again**. The messages go to the
-AI once more with the current categories – the kill switch and the hourly limit apply as always – and messages that
-were moved since are found in their new folder by their Message-ID. On request the actions of the new category run
-afterwards. The re-rating runs in the background with progress and can be cancelled; the earlier rating stays
-visible in the message timeline. Actions that
-changed mail are written to Frieda's change log.
+**Rate again:** after changing the categories you select mails under *Activity* (single ones, a whole day or
+everything a view shows) or open one mail, and choose **Rate again**. The messages go to the AI once more with the
+current categories – the kill switch and the hourly limit apply as always – and messages that were moved since are
+found in their new folder by their Message-ID. On request the actions of the new category run afterwards. The
+re-rating runs in the background with progress and can be cancelled; the earlier rating stays visible in the message
+timeline. Actions that changed mail are written to Frieda's change log.
+
+**Describe with Frieda:** next to **+** for a new category, *Describe with Frieda* opens a short conversation: you say
+in your own words which mails belong to it and what should happen to them, and the AI entity you chose turns it into a
+proposal – name, description for the sorting AI, folder, flag, mark read – that you can change by hand and refine in
+up to five rounds. It points out a similar existing category and words the description so the two stay apart. Only
+your messages and the names and descriptions of your categories and folders go to the AI, no mail; every round is
+logged as *Category assistant* in the AI log and counts towards the hourly limit. An optional **test run** rates your
+last 20 rated mails again with the proposed category (limit and kill switch apply, nothing is stored or moved).
+Nothing is saved until you choose **Apply**.
 
 The panel card **Sent to AI** shows what went to an AI: calls and characters today, in 7 and 30 days, how many of
 them included text, per AI entity and per purpose (sorting, daily overview), and a log of every transmission with

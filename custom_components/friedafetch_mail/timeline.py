@@ -56,6 +56,8 @@ def build_timeline(
         "mailbox": None,
         "location": None,
         "category": None,
+        "importance": None,
+        "rating_id": None,  # lets the panel correct the category right there
         "corrected": False,
         "held": False,
     }
@@ -161,6 +163,8 @@ def build_timeline(
             if moved:
                 head["location"] = moved
         head["category"] = rating.get("corrected") or rating.get("category")
+        head["importance"] = rating.get("importance")
+        head["rating_id"] = rating.get("id")
         if rating.get("corrected"):
             head["corrected"] = True
             events.append(

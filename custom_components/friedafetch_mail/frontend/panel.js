@@ -32,15 +32,8 @@ const fmtSeconds = (iso) => {
 };
 
 const trigLabel = (t, trig) =>
-  trig === "auto"
-    ? t.triggerAuto
-    : trig === "push"
-      ? t.triggerPush
-      : trig === "assistant"
-        ? t.triggerAssistant
-        : trig === "rerate"
-          ? t.triggerRerate
-          : t.triggerManual;
+  ({ auto: t.triggerAuto, push: t.triggerPush, assistant: t.triggerAssistant, rerate: t.triggerRerate, test: t.triggerTest, panel: t.triggerPanel })[trig] ||
+  t.triggerManual;
 
 // Sortable column header; sort = { key, dir }.
 const sortTh = (action, sort, key, label, cls = "") => {
@@ -50,9 +43,39 @@ const sortTh = (action, sort, key, label, cls = "") => {
 };
 const nextSort = (cur, key, firstDir) => (cur.key === key ? { key, dir: -cur.dir } : { key, dir: firstDir });
 
-const SEARCH_KEYS = { rules: "searchRules", aiu: "searchAiu", runs: "searchRuns", rates: "searchRates" };
-const PAGE_DEFAULT = { rules: 25, aiu: 10, runs: 10, rates: 10 }; // rows per page until the user picks another size
-const FILTER_TABLE = { "rule-filter": "rules", "aiu-filter": "aiu", "rate-filter": "rates", "run-filter": "runs" };
+const ACT_PAGE = 50; // mails per page of the activity list; more load while scrolling
+const ASSIST_ROUNDS = 5; // rounds of the category assistant, then the proposal is edited by hand
+const initials = (name) =>
+  String(name || "")
+    .replace(/@.*/, "")
+    .split(/[\s._-]+/)
+    .filter((w) => /^\p{L}/u.test(w))
+    .slice(0, 2)
+    .map((w) => w[0].toUpperCase())
+    .join("") || "?";
+// the activity tab: view (all, k:<kind>, f:<folder>), search, the loaded mails, the open one, the selection
+const newActivity = () => ({
+  view: "all",
+  query: "",
+  items: [],
+  total: 0,
+  days: [],
+  counts: {},
+  loaded: false,
+  open: null,
+  picking: false,
+  sel: new Map(),
+  anchor: null,
+  folded: new Set(),
+  runs: false,
+  batch: null,
+  loadingMore: false,
+  jump: false,
+});
+
+const SEARCH_KEYS = { rules: "searchRules", aiu: "searchAiu", runs: "searchRuns" };
+const PAGE_DEFAULT = { rules: 25, aiu: 10, runs: 10 }; // rows per page until the user picks another size
+const FILTER_TABLE = { "rule-filter": "rules", "aiu-filter": "aiu", "run-filter": "runs" };
 
 // Widgets and the optional columns of their tables (true = shown by default).
 const WIDGETS = [{ id: "rules" }, { id: "ai" }, { id: "aiu" }, { id: "history" }];
@@ -60,7 +83,6 @@ const TABLE_COLUMNS = {
   rules: { pos: true, cond: true, act: true, hits: true },
   aiu: { time: true, kind: true, fields: true, chars: true, ent: true },
   runs: { trig: true, scope: true, checked: true, matched: true, rules: true, ai: true, res: true },
-  rates: { time: true, from: true, cat: true, applied: true },
 };
 
 // Adds data-label attributes to the cells of each row so the CSS can stack tables on phones.
@@ -95,6 +117,9 @@ class FriedaPostfachPanel extends HTMLElement {
       ai: null,
       aiEdit: null,
       aiuFilter: "",
+      act: newActivity(),
+      loc: new Map(), // Message-ID -> where the mail really is (looked up when it is opened)
+      assist: null, // the category assistant, while it is open
       expanded: new Set(),
       focusEditor: false,
       scrollTo: null,
@@ -140,7 +165,7 @@ class FriedaPostfachPanel extends HTMLElement {
   // A redraw now would get in the way: the user is editing, choosing, typing, deciding or has a menu open.
   _canRefresh() {
     const s = this._s;
-    if (!this._hass || !s.loaded || !s.entryId || s.busy || s.confirm || s.editing || s.aiEdit || document.visibilityState !== "visible") return false;
+    if (!this._hass || !s.loaded || !s.entryId || s.busy || s.confirm || s.editing || s.aiEdit || s.assist || document.visibilityState !== "visible") return false;
     const active = this.shadowRoot.activeElement;
     if (active && ["SELECT", "INPUT", "TEXTAREA"].includes(active.tagName)) return false;
     return !this.shadowRoot.querySelector("details.menu[open]");
@@ -187,7 +212,8 @@ class FriedaPostfachPanel extends HTMLElement {
     if (topics.has("rules")) jobs.push(this._loadRules(), this._loadHistory(true));
     if (topics.has("rules") || topics.has("accounts")) jobs.push(this._loadAccounts());
     if (topics.has("ai")) jobs.push(this._ws({ type: "friedafetch_mail/ai", entry_id: this._s.entryId }).then((ai) => (this._s.ai = ai)));
-    if (this._s.sheet && (topics.has("rules") || topics.has("ai"))) jobs.push(this._loadTimeline());
+    if (topics.has("activity") || topics.has("ai")) jobs.push(this._loadActivity());
+    if (this._s.sheet && (topics.has("rules") || topics.has("ai") || topics.has("activity"))) jobs.push(this._loadTimeline());
     await Promise.all(jobs.map((j) => j.catch(() => null)));
     this._render();
     this._fresh = null; // the highlight plays once
@@ -251,6 +277,7 @@ class FriedaPostfachPanel extends HTMLElement {
     }
     this._s.loaded = true;
     this._render();
+    if (this._tab(this._tabs()) === "activity") this._actAutoOpen();
     this._openLinked();
   }
 
@@ -291,6 +318,7 @@ class FriedaPostfachPanel extends HTMLElement {
       this._ws({ type: "friedafetch_mail/ai", entry_id: entryId })
         .then((ai) => (this._s.ai = ai))
         .catch(() => (this._s.ai = null)), // older backend or AI sorting unavailable
+      this._loadActivity().catch(() => {}),
     ]);
     this._s.rules = list.rules;
     this._s.lastRun = list.last_run;
@@ -333,6 +361,7 @@ class FriedaPostfachPanel extends HTMLElement {
     await this._call(async () => {
       await this._ws({ type: "friedafetch_mail/ai/correct", entry_id: this._s.entryId, rating_id: ratingId, category });
       this._s.ai = await this._ws({ type: "friedafetch_mail/ai", entry_id: this._s.entryId });
+      await Promise.all([this._loadActivity().catch(() => {}), this._s.sheet ? this._loadTimeline() : null]);
     });
   }
 
@@ -412,6 +441,7 @@ class FriedaPostfachPanel extends HTMLElement {
       ...Object.entries(m.entities || {}).map(([e, n]) => `<span class="chip ic">${ico("robot-outline")}${esc(e.replace(/^ai_task\./, ""))} · ${esc(n)}</span>`),
       m.sort ? `<span class="chip ic">${ico("sort-variant")}${esc(t.aiuKindSort)} · ${esc(m.sort)}</span>` : "",
       m.digest ? `<span class="chip ic">${ico("newspaper-variant-outline")}${esc(t.aiuKindDigest)} · ${esc(m.digest)}</span>` : "",
+      m.assist ? `<span class="chip ic">${ico("creation")}${esc(t.aiuKindAssist)} · ${esc(m.assist)}</span>` : "",
     ].filter(Boolean);
     const FIELD_ICONS = {
       from: "account-outline",
@@ -423,6 +453,9 @@ class FriedaPostfachPanel extends HTMLElement {
       events: "calendar-month-outline",
       birthdays: "cake-variant-outline",
       rules: "filter-outline",
+      conversation: "chat-outline",
+      categories: "tag-multiple-outline",
+      folders: "folder-outline",
     };
     const reasons = (held) =>
       (Array.isArray(held) ? held : held === "sender" ? [{ type: "sender", value: "" }] : [{ type: "term", value: String(held || "").replace(/^term:/, "") }])
@@ -459,8 +492,9 @@ class FriedaPostfachPanel extends HTMLElement {
         const state = !e.sent ? "held" : e.ok ? "sent" : "err";
         const stIcon = { sent: "send-outline", held: "shield-check-outline", err: "alert-circle-outline" }[state];
         const stText = { sent: t.aiuSent, held: t.aiuHeldBack, err: t.resError }[state];
-        const digest = e.kind === "digest";
-        const title = e.subject || (digest ? t.aiuKindDigest : "–");
+        const assist = e.kind === "assist";
+        const digest = e.kind === "digest" || assist; // no mail: opens its details instead of a timeline
+        const title = e.subject || (assist ? t.aiuKindAssist : digest ? t.aiuKindDigest : "–");
         const open = digest && s.aiuOpen === i; // a sorted mail opens its timeline, the daily overview its details
         const fields = (e.fields || [])
           .map((x) => `<span class="fi ${x === "body" ? "hot" : ""}" role="img" aria-label="${esc(t.aiuFields[x] || x)}" title="${esc(t.aiuFields[x] || x)}">${ico(FIELD_ICONS[x] || "circle-small")}</span>`)
@@ -485,7 +519,7 @@ class FriedaPostfachPanel extends HTMLElement {
                 : `<button class="rtext go" data-action="aiu-mail" data-i="${i}" aria-haspopup="dialog" title="${esc(title)}"><span class="rt">${esc(title)}</span>${ico("chevron-right")}</button>`
             }</td>
             <td class="c-sender dim" title="${esc(e.sender || "")}">${esc(e.sender || "–")}</td>
-            <td class="c-kind dim">${fact(digest ? "newspaper-variant-outline" : "sort-variant", digest ? t.aiuKindDigest : t.aiuKindSort, t.aiuTipKind)}</td>
+            <td class="c-kind dim">${assist ? fact("creation", t.aiuKindAssist, t.aiuTipKind) : fact(digest ? "newspaper-variant-outline" : "sort-variant", digest ? t.aiuKindDigest : t.aiuKindSort, t.aiuTipKind)}</td>
             <td class="c-fields">${fieldsCell}</td>
             <td class="c-chars num">${e.sent ? esc(num(e.chars)) : "–"}</td>
             ${showEntity ? `<td class="c-ent dim">${fact("robot-outline", (e.entity || "–").replace(/^ai_task\./, ""), e.entity || "")}</td>` : ""}
@@ -527,7 +561,6 @@ class FriedaPostfachPanel extends HTMLElement {
     </div>`;
   }
 
-  // The AI's recent ratings, as a data table like the other lists.
   // Progress of a re-rating, or its result (until hidden; for half an hour).
   _renderBatch(ai) {
     const t = this.t;
@@ -568,89 +601,13 @@ class FriedaPostfachPanel extends HTMLElement {
       irreversible: false,
       option: act ? { label: t.rerateApply, checked: false } : null,
     });
-    if (!ok) return;
+    if (!ok) return false;
     const apply = act && this._confirmOption;
     await this._call(async () => {
       this._s.ai = await this._ws({ type: "friedafetch_mail/ai/rerate", entry_id: this._s.entryId, rating_ids: ratingIds, messages, apply });
-      this._s.rateSel = new Set();
       this._s.batchHidden = null;
     });
-  }
-
-  _renderRatings(ai, cats, catLabel) {
-    const t = this.t;
-    const s = this._s;
-    const list = (ai.ratings || []).map((r, i) => ({ r, i }));
-    if (!list.length) return `${this._renderBatch(ai)}<p class="muted">${esc(t.aiNoRatings)}</p>`;
-    const sel = (s.rateSel ||= new Set());
-    const kinds = {
-      "": () => true,
-      important: ({ r }) => Number(r.importance) >= 4,
-      corrected: ({ r }) => !!r.corrected,
-      suspicious: ({ r }) => !!r.suspicious,
-    };
-    const f = kinds[s.ratesFilter] ? s.ratesFilter : "";
-    const sort = s.ratesSort || { key: "time", dir: -1 };
-    const value = ({ r }) => (sort.key === "imp" ? Number(r.importance) : parseTime(r.time)?.getTime() || 0);
-    const rows = list
-      .filter(kinds[f])
-      .sort((x, y) => (value(x) - value(y)) * sort.dir || y.i - x.i)
-      .map(({ r, i }) => {
-        const cur = r.corrected || r.category;
-        const appliedIcons = { seen: "email-open-outline", flagged: "flag-outline", notified: "bell-outline", quota: "timer-sand" };
-        const applied = (r.applied || [])
-          .map((a) => {
-            const moved = a.startsWith("moved:");
-            const label = moved ? `→ ${a.slice(6)}` : t[`aiApplied_${a}`] || a;
-            return `<span class="fi ${a === "quota" ? "hot" : ""}" role="img" aria-label="${esc(label)}" title="${esc(label)}">${ico(moved ? "folder-move-outline" : appliedIcons[a] || "check")}</span>`;
-          })
-          .join("");
-        const opt = (val, label) => `<option value="${esc(val)}" ${val === cur ? "selected" : ""}>${esc(label)}</option>`;
-        const search = [r.subject, r.from, r.from_domain, cur, r.reason].join(" ").toLowerCase();
-        const picked = sel.has(r.id);
-        return `<tr class="arow rrate ${picked ? "picked" : ""}" data-rid="${esc(r.id)}" data-search="${esc(search)}">
-            <td class="c-sel"><input type="checkbox" class="selbox" data-action="rate-sel" data-id="${esc(r.id)}" ${picked ? "checked" : ""} aria-label="${esc(fmt(t.selectMail, r.subject || "–"))}"></td>
-            <td class="c-imp"><span class="imp i${esc(r.importance)}" role="img" aria-label="${esc(fmt(t.aiImportance, r.importance))}" title="${esc(fmt(t.aiImportance, r.importance))}">${esc(r.importance)}</span></td>
-            <td class="c-time num dim" title="${esc(fmtDateTime(r.time))}">${esc(fmtShort(r.time))}</td>
-            <td class="c-subj"><button class="rtext go" data-action="rate-open" data-id="${esc(r.id)}" aria-haspopup="dialog" title="${esc(r.subject || "")}"><span class="rt">${esc(r.subject || "–")}</span>${ico("chevron-right")}</button></td>
-            <td class="c-from dim" title="${esc(r.from || "")}">${esc(r.from || "–")}</td>
-            <td class="c-cat"><label class="chipsel ${r.corrected ? "on" : ""}" title="${esc(r.corrected ? `${t.aiCorrected}: ${catLabel(r.category)} → ${catLabel(cur)}` : t.aiCorrect)}">${r.corrected ? `<span class="lead">${ico("pencil-outline")}</span>` : ""}<select data-action="ai-correct" data-id="${esc(r.id)}" aria-label="${esc(t.aiCorrect)}: ${esc(r.subject || "")}">${[...new Set([...cats.map((c) => c.name), "other", cur])].map((n) => opt(n, catLabel(n))).join("")}</select>${ico("chevron-down")}</label>${r.suspicious ? `<span class="fi hot" role="img" aria-label="${esc(t.aiSuspicious)}" title="${esc(t.aiSuspicious)}">${ico("alert-outline")}</span>` : ""}</td>
-            <td class="c-applied"><span class="fields">${applied || `<span class="muted">–</span>`}</span></td>
-          </tr>`;
-      })
-      .join("");
-    const cols = [
-      { key: "time", label: t.colTime },
-      { key: "from", label: t.colSender },
-      { key: "cat", label: t.colCategory },
-      { key: "applied", label: t.colApplied },
-    ];
-    const count = (k) => list.filter(kinds[k]).length;
-    const seg = (val, icon, label) => {
-      const n = count(val);
-      if (val && !n && f !== val) return "";
-      const text = label.charAt(0).toUpperCase() + label.slice(1);
-      return `<button class="seg ${f === val ? "on" : ""}" data-action="rate-filter" data-v="${val}" aria-pressed="${f === val}">${ico(icon)}${esc(text)}<span class="n">${n}</span></button>`;
-    };
-    const th = (key, label, cls = "") => {
-      const active = sort.key === key;
-      return `<th class="${cls}" aria-sort="${active ? (sort.dir < 0 ? "descending" : "ascending") : "none"}"><button class="sort ${active ? "on" : ""}" data-action="rate-sort" data-k="${key}">${esc(label)}${ico(active ? (sort.dir < 0 ? "arrow-down" : "arrow-up") : "swap-vertical")}</button></th>`;
-    };
-    const shown = list.filter(kinds[f]);
-    const all = shown.length > 0 && shown.every(({ r }) => sel.has(r.id));
-    const running = ai.batch?.state === "running";
-    const selbar = sel.size
-      ? `<div class="selbar"><strong>${esc(fmt(t.selected, sel.size))}</strong><span class="grow"></span><button class="link small" data-action="rate-sel-clear">${esc(t.selectionClear)}</button><button class="pill" data-action="rerate" ${s.busy || running ? "disabled" : ""}>${ico("refresh")}${esc(t.rerate)}</button></div>`
-      : "";
-    return `${this._renderBatch(ai)}<div class="tbar">
-        <label class="search">${ico("magnify")}<input type="search" data-search-table="rates" value="${esc(s.searchRates || "")}" placeholder="${esc(t.searchAi)}" aria-label="${esc(t.searchAi)}"></label>
-        <div class="segs" role="group">${seg("", "format-list-bulleted", t.aiuAll)}${seg("important", "alert-circle-outline", t.aiImportant)}${seg("corrected", "pencil-outline", t.aiCorrected)}${seg("suspicious", "alert-outline", t.aiSuspicious)}</div>
-        <span class="grow"></span>${W.columnMenu(this._layout, "rates", cols, t)}
-      </div>${W.columnStyle(this._layout, "rates", cols)}${selbar}
-      <div class="scroll aiu-scroll"><table class="dtable atable ratetable" data-table="rates"><thead><tr>
-        <th class="c-sel"><input type="checkbox" class="selbox" data-action="rate-sel-all" ${all ? "checked" : ""} aria-label="${esc(t.selectAllMatching)}" title="${esc(t.selectAllMatching)}"></th>${th("imp", "!", "c-imp")}${th("time", t.colTime, "c-time num")}<th class="c-subj">${esc(t.colSubjectOnly)}</th><th class="c-from">${esc(t.colSender)}</th><th class="c-cat">${esc(t.colCategory)}</th><th class="c-applied">${esc(t.colApplied)}</th>
-      </tr></thead><tbody>${rows || `<tr><td colspan="8" class="muted">${esc(t.noMatches)}</td></tr>`}</tbody></table></div>${W.pagerSlot ? W.pagerSlot("rates") : ""}
-      <p class="muted nomatch" hidden>${esc(t.noMatches)}</p>`;
+    return true;
   }
 
   _renderAi() {
@@ -675,7 +632,6 @@ class FriedaPostfachPanel extends HTMLElement {
       ai.examples ? fmt(t.aiExamples, ai.examples) : "",
     ].filter(Boolean);
     const warn = !st.entity_ok ? fmt(t.aiEntityMissing, st.entity) : st.last_error ? fmt(t.aiError, st.last_error) : "";
-    const catLabel = (name) => (name === "other" ? t.aiOther : name);
     const cats = ai.categories || [];
     const opt = (val, label, cur) => `<option value="${esc(val)}" ${String(cur ?? "") === String(val) ? "selected" : ""}>${esc(label)}</option>`;
     const edit = s.aiEdit;
@@ -698,18 +654,16 @@ class FriedaPostfachPanel extends HTMLElement {
           <button class="icon" data-action="ai-cat-edit" data-index="${i}" ${edit ? "disabled" : ""} title="${esc(t.edit)}" aria-label="${esc(t.edit)}: ${esc(c.name)}">${ico("pencil-outline")}</button></div>`;
       })
       .join("");
-    const ratings = this._renderRatings(ai, cats, catLabel);
     return `<div class="card" id="ai">
       <div class="chead"><h2>${esc(t.ai)} <span class="badge ${act ? "warn" : ""}">${esc(act ? t.aiModeActShort : t.aiModeObserveShort)}</span></h2>
         <button class="pill" data-action="ai-run" ${s.busy ? "disabled" : ""} title="${esc(t.aiRunHint)}">${ico("play")}${esc(t.aiRun)}</button>
         ${W.cardMenu([(ai.ratings || []).length && { action: "ai-clear", icon: "delete-sweep-outline", label: t.aiClear, danger: true, disabled: s.busy }], t)}</div>
       <div class="mode ${warn ? "warn" : ""}"><span class="ic" aria-hidden="true">${act ? "✦" : "👁"}</span><span class="tx"><strong>${esc(act ? t.aiAct : t.aiObserve)}</strong><span class="muted">${esc(sub.join(" · "))}</span>${warn ? `<span class="muted">${esc(warn)}</span>` : ""}</span></div>
       ${acc && !acc.rules_auto ? `<p class="muted" style="margin:-4px 0 10px">${esc(t.aiManualOnly)}</p>` : ""}
-      <div class="with-add"><h3 class="muted">${esc(t.aiCategories)}</h3><button class="round small" data-action="ai-cat-new" ${edit ? "disabled" : ""} title="${esc(t.aiNewCategory)}" aria-label="${esc(t.aiNewCategory)}">+</button></div>
+      <div class="with-add"><h3 class="muted">${esc(t.aiCategories)}</h3><button class="round small" data-action="ai-cat-new" ${edit ? "disabled" : ""} title="${esc(t.aiNewCategory)}" aria-label="${esc(t.aiNewCategory)}">+</button>
+        <button class="secondary small ib" data-action="assist-open" ${edit || s.busy ? "disabled" : ""}>${ico("creation")}${esc(t.assistOpen)}</button></div>
       <p class="muted" style="margin:-4px 0 8px">${esc(t.aiCategoriesHint)}</p>
       <div class="ai-cats">${catRows}${edit && edit.index < 0 ? editor(edit) : ""}</div>
-      <h3 class="muted with-add">${esc(t.aiRatings)}</h3>
-      ${ratings}
     </div>`;
   }
 
@@ -925,10 +879,13 @@ class FriedaPostfachPanel extends HTMLElement {
 
   // ------------------------------------------------------------ timeline of one message
   // key: { message_id, subject, sender } – the Message-ID links everything; subject and sender find older entries
-  async _openTimeline(key) {
-    this._s.sheet = { key, data: null, loading: true, error: null };
+  async _openTimeline(key, { inline = false, hint = null } = {}) {
+    this._s.sheet = { key, data: null, loading: true, error: null, inline };
     this._render();
     await this._loadTimeline();
+    const d = this._s.sheet?.data || {};
+    const mid = d.message_id || key.message_id;
+    if (mid && !this._s.loc.has(mid)) this._locate(mid, hint || d.location || d.mailbox || "INBOX");
   }
 
   async _loadTimeline() {
@@ -949,7 +906,7 @@ class FriedaPostfachPanel extends HTMLElement {
 
   // Swipe down on the sheet: on its head at any time, in the list once it is scrolled to the top.
   _bindSwipe(sheet) {
-    const body = sheet.querySelector(".sheet-body");
+    const body = sheet.querySelector(".rbody");
     let y0 = null;
     let t0 = 0;
     let dy = 0;
@@ -1001,40 +958,16 @@ class FriedaPostfachPanel extends HTMLElement {
 
   _renderSheet() {
     const sheet = this._s.sheet;
-    if (!sheet) return "";
+    if (!sheet || sheet.inline) return "";
     const t = this.t;
-    const d = sheet.data || {};
-    const cat = (c) => (c === "other" ? t.aiOther : c);
-    const subject = d.subject || sheet.key.subject || "–";
-    const sender = d.sender || sheet.key.sender || "";
-    const chips = [];
-    if (d.category) chips.push(`<span class="state ai">${ico(d.corrected ? "pencil-outline" : "creation")}${esc(d.corrected ? fmt(t.tlCategoryCorrected, cat(d.category)) : cat(d.category))}</span>`);
-    if (d.held) chips.push(`<span class="state held">${ico("shield-check-outline")}${esc(t.tlNotAi)}</span>`);
-    const where = d.location === "trash" ? t.tlTrash : d.location ? `${d.mailbox || "INBOX"} → ${d.location}` : d.mailbox;
-    if (where) chips.push(`<span class="state box">${ico(d.location === "trash" ? "delete-outline" : "folder-outline")}${esc(where)}</span>`);
-    const events = d.events || [];
-    const body = sheet.loading
-      ? `<p class="working"><span class="spinner" aria-hidden="true"></span>${esc(t.tlLoading)}</p>`
-      : sheet.error
-        ? `<div class="error">${esc(sheet.error)}</div>`
-        : !d.found
-          ? `<p class="muted">${esc(t.tlEmpty)}</p>`
-          : `<ol class="tl">${events.map((e, i) => this._tlStep(e, i === events.length - 1)).join("")}</ol>`;
+    const item = this._s.act.open ? this._actItem(this._s.act.open) : null;
+    const mid = sheet.data?.message_id || sheet.key.message_id;
+    const mine = item && item.message_id && item.message_id === mid ? item : null;
     return `<div class="sheet-backdrop" data-action="sheet-close"></div>
-      <aside class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+      <aside class="sheet mailsheet" role="dialog" aria-modal="true" aria-labelledby="r-title">
         <span class="handle" aria-hidden="true"></span>
         <div class="sheet-top"><span class="ttl">${esc(t.tlTitle)}</span><button class="icon" data-action="sheet-close" aria-label="${esc(t.close)}" title="${esc(t.close)}">${ico("close")}</button></div>
-        <div class="sheet-head">
-          <h2 id="sheet-title">${esc(subject)}</h2>
-          ${sender || d.date ? `<span class="from">${esc([sender.replace(/^@/, ""), d.date ? fmtDateTime(d.date) : ""].filter(Boolean).join(" · "))}</span>` : ""}
-          ${chips.length ? `<div class="chips">${chips.join("")}</div>` : ""}
-        </div>
-        <div class="sheet-body">${body}</div>
-        <div class="sheet-foot"><span class="muted">${esc(d.message_id || sheet.key.message_id ? t.tlFoot : t.tlFootOld)}</span>${
-          (d.message_id || sheet.key.message_id) && this._s.ai?.status?.active
-            ? `<button class="secondary small ib" data-action="tl-rerate" ${this._s.busy || this._s.ai?.batch?.state === "running" ? "disabled" : ""}>${ico("refresh")}${esc(t.rerate)}</button>`
-            : ""
-        }</div>
+        <div class="mailview">${this._renderMailView(sheet, mine)}</div>
       </aside>`;
   }
 
@@ -1244,6 +1177,8 @@ class FriedaPostfachPanel extends HTMLElement {
 
   async _switchAccount(entryId) {
     this._s.entryId = entryId;
+    this._s.act = newActivity();
+    this._s.sheet = null;
     this._s.editing = null;
     this._s.report = null;
     this._s.notice = null;
@@ -1490,10 +1425,705 @@ class FriedaPostfachPanel extends HTMLElement {
     </div>`;
   }
 
+  // ------------------------------------------------------------ activity (a mail program: views, mails, the mail)
+  // The list comes from the server page by page (50 at a time, more while scrolling); views, search and the days are
+  // counted there. On wide screens the chosen mail opens in the reading pane, on phones in the sheet.
+  async _loadActivity({ more = false } = {}) {
+    const a = this._s.act;
+    const offset = more ? a.items.length : 0;
+    const limit = more ? ACT_PAGE : Math.max(ACT_PAGE, Math.min(a.items.length, 500));
+    const res = await this._ws({ type: "friedafetch_mail/activity/list", entry_id: this._s.entryId, view: a.view, query: a.query.trim(), offset, limit });
+    a.items = more ? [...a.items, ...res.items] : res.items;
+    a.total = res.total;
+    a.days = res.days || [];
+    a.counts = res.counts || {};
+    a.loaded = true;
+  }
+
+  async _actMore() {
+    const a = this._s.act;
+    if (a.loadingMore || a.items.length >= a.total) return;
+    a.loadingMore = true;
+    try {
+      await this._loadActivity({ more: true });
+    } catch (err) {
+      this._s.error = err.message || String(err);
+    }
+    a.loadingMore = false;
+    this._render();
+  }
+
+  // Phones and narrow windows have no reading pane: a mail opens in the sheet over the list.
+  _actNarrow() {
+    const w = this.shadowRoot.querySelector(".mcwrap")?.clientWidth || this.clientWidth || window.innerWidth;
+    return w <= 720;
+  }
+
+  async _actView(view) {
+    const a = this._s.act;
+    a.view = view;
+    a.runs = false;
+    a.folded = new Set();
+    try {
+      await this._loadActivity();
+    } catch (err) {
+      this._s.error = err.message || String(err);
+    }
+    // a wide screen shows the newest mail of the view, never one that is not in the list
+    if (!a.picking && !this._actNarrow()) {
+      const first = a.items[0];
+      if (first) this._actOpen(first.key);
+      else this._s.sheet = null;
+    }
+    this._render();
+  }
+
+  _actItem(key) {
+    return this._s.act.items.find((i) => i.key === key) || null;
+  }
+
+  _actOpen(key) {
+    const item = this._actItem(key);
+    if (!item) return;
+    this._s.act.open = key;
+    this._s.act.jump = true;
+    this._openTimeline({ message_id: item.message_id || null, subject: item.subject || "", sender: item.from || "" }, { inline: !this._actNarrow(), hint: item.folder });
+  }
+
+  // Select one mail; with Shift every loaded mail between the last chosen one and this one.
+  _actToggle(key, ev) {
+    const a = this._s.act;
+    const item = this._actItem(key);
+    if (!item?.selectable) return;
+    const pick = (i) => a.sel.set(i.key, { message_id: i.message_id, mailbox: i.mailbox });
+    if (ev?.shiftKey && a.anchor && this._actItem(a.anchor)) {
+      const keys = a.items.map((i) => i.key);
+      const [from, to] = [keys.indexOf(a.anchor), keys.indexOf(key)].sort((x, y) => x - y);
+      a.items.slice(from, to + 1).filter((i) => i.selectable).forEach(pick);
+    } else if (a.sel.has(key)) a.sel.delete(key);
+    else pick(item);
+    a.anchor = key;
+    a.picking = true;
+    this._render();
+  }
+
+  // "Select all" and the day boxes pick on the server: also the mails that are not loaded yet.
+  async _actPickMany(day = null, on = true) {
+    const a = this._s.act;
+    const res = await this._ws({ type: "friedafetch_mail/activity/select", entry_id: this._s.entryId, view: a.view, query: a.query.trim(), ...(day ? { day } : {}) });
+    for (const m of res.messages || []) {
+      if (on) a.sel.set(m.key, { message_id: m.message_id, mailbox: m.mailbox });
+      else a.sel.delete(m.key);
+    }
+    this._render();
+  }
+
+  _actStopPicking() {
+    const a = this._s.act;
+    a.picking = false;
+    a.sel = new Map();
+    a.anchor = null;
+    this._render();
+  }
+
+  // Asks first (the panel's dialog); while the batch runs, every chosen mail shows where it stands.
+  async _actRerate(keys) {
+    const a = this._s.act;
+    const order = [...keys].sort((x, y) => {
+      const ix = a.items.findIndex((i) => i.key === x);
+      const iy = a.items.findIndex((i) => i.key === y);
+      return (ix < 0 ? 1e9 : ix) - (iy < 0 ? 1e9 : iy);
+    });
+    const messages = order.map((k) => a.sel.get(k) || (({ message_id, mailbox }) => ({ message_id, mailbox }))(this._actItem(k) || {})).filter((m) => m.message_id);
+    const before = this._s.ai?.batch?.started;
+    await this._rerate({ messages });
+    const b = this._s.ai?.batch;
+    if (!b || b.started === before) return;
+    a.batch = { started: b.started, keys: order };
+    a.picking = false;
+    a.sel = new Map();
+    this._render();
+  }
+
+  _actRowBatch(key) {
+    const a = this._s.act;
+    const b = this._s.ai?.batch;
+    const t = this.t;
+    if (!a.batch || !b || b.started !== a.batch.started) return "";
+    const k = a.batch.keys.indexOf(key);
+    if (k < 0) return "";
+    if (k < b.done) return `<span class="rr done">${ico("check")}${esc(t.rowDone)}</span>`;
+    if (b.state !== "running") return "";
+    return k === b.done
+      ? `<span class="rr work"><span class="spinner" aria-hidden="true"></span>${esc(t.rowWorking)}</span>`
+      : `<span class="rr wait">${ico("clock-outline")}${esc(t.rowWaiting)}</span>`;
+  }
+
+  _folderName(f) {
+    const t = this.t;
+    return { trash: t.folderTrash, INBOX: t.folderInbox, "Deleted Messages": t.folderTrash, Archive: t.folderArchive, Junk: t.folderJunk }[f] || f;
+  }
+
+  _folderIcon(f) {
+    return f === "trash" || f === "Deleted Messages" ? "delete-outline" : f === "INBOX" ? "inbox" : "folder-outline";
+  }
+
+  _dayLabel(day) {
+    const t = this.t;
+    if (!day) return "–";
+    const d = new Date(`${day}T12:00:00`);
+    const today = new Date();
+    const diff = Math.round((new Date(today.toDateString()) - new Date(d.toDateString())) / 86400000);
+    if (diff === 0) return t.dayToday;
+    if (diff === 1) return t.dayYesterday;
+    return d.toLocaleDateString(this._lang(), { weekday: "long", day: "numeric", month: "long" });
+  }
+
+  _lang() {
+    return (this._hass?.locale?.language || this._hass?.language || "en").toLowerCase();
+  }
+
+  // The quiet one-line result: grey text, only the small symbol carries the colour; the folder only when moved.
+  _actMeta(item, full = false) {
+    const t = this.t;
+    const ai = item.ai || {};
+    const cat = (c) => (c === "other" ? t.aiOther : c);
+    const [label, icon, cls] = {
+      rule: [(item.rules || []).join(", "), "filter-check-outline", "rule"],
+      held: [t.actHeld, "shield-check-outline", "held"],
+      ai: [`${cat(ai.category)}${ai.importance ? ` · ${ai.importance}/5` : ""}`, item.corrected ? "pencil-outline" : "creation", "ai"],
+      none: [t.actNone, "minus-circle-outline", ""],
+    }[item.kind] || ["–", "circle-small", ""];
+    const moved = item.folder !== "INBOX";
+    const where = full || moved ? `<span class="mv">${ico(full ? this._folderIcon(item.folder) : "arrow-right")}${esc(this._folderName(item.folder))}</span>` : "";
+    return `<span class="meta ${cls}">${ico(icon)}<span class="rl">${esc(label)}</span></span>${where}`;
+  }
+
+  _actViews() {
+    const t = this.t;
+    const c = this._s.act.counts || {};
+    const kinds = c.kinds || {};
+    const kindViews = [
+      ["all", t.actAll, "email-multiple-outline", c.all || 0],
+      ["k:ai", t.actKindAi, "creation", kinds.ai || 0],
+      ["k:rule", t.actKindRule, "filter-outline", kinds.rule || 0],
+      ["k:held", t.actKindHeld, "shield-check-outline", kinds.held || 0],
+      ["k:none", t.actKindNone, "minus-circle-outline", kinds.none || 0],
+    ].filter(([id, , , n]) => id === "all" || n);
+    const folders = Object.entries(c.folders || {})
+      .sort(([a], [b]) => (a === "INBOX" ? -1 : b === "INBOX" ? 1 : this._folderName(a).localeCompare(this._folderName(b))))
+      .map(([f, n]) => [`f:${f}`, this._folderName(f), this._folderIcon(f), n]);
+    return { kindViews, folders };
+  }
+
+  _actStatus() {
+    const t = this.t;
+    const s = this._s;
+    const au = s.automation || {};
+    const st = s.ai?.status || {};
+    const push = au.push?.state === "listening";
+    return [
+      push ? `<button class="st ok" data-action="tab" data-v="rules">${ico("lightning-bolt")}${esc(t.actStatusPush)}</button>` : "",
+      au.enabled && au.interval ? `<button class="st" data-action="tab" data-v="rules">${ico("timer-outline")}${esc(fmt(push ? t.actStatusEvery : t.actStatusEveryOnly, au.interval))}</button>` : "",
+      st.active ? `<button class="st ai" data-action="tab" data-v="ai">${ico("creation")}${esc(st.mode === "act" ? t.actStatusAiAct : t.actStatusAiObserve)}</button>` : "",
+    ].join("");
+  }
+
+  _renderActivityTab() {
+    const t = this.t;
+    const s = this._s;
+    const a = s.act;
+    if (a.runs) {
+      return `<section class="widget w-full" data-widget="runsbar"><div class="card"><div class="runsbar">
+          <button class="secondary small ib" data-action="act-runs-back">${ico("chevron-left")}${esc(t.actRunsBack)}</button><span class="muted">${esc(t.actRunsHint)}</span></div></div></section>
+        <section class="widget w-full" data-widget="history">${this._renderHistory()}</section>`;
+    }
+    const { kindViews, folders } = this._actViews();
+    const box = ([id, label, icon, n]) =>
+      `<button class="box" data-action="act-view" data-v="${esc(id)}" aria-current="${a.view === id}">${ico(icon)}<span class="lbl">${esc(label)}</span><span class="n">${esc(n)}</span></button>`;
+    const rail = `<nav class="rail" aria-label="${esc(t.actViews)}">
+        <h3>${esc(t.actGroupResult)}</h3>${kindViews.map(box).join("")}
+        ${folders.length ? `<h3>${esc(t.actGroupFolder)}</h3>${folders.map(box).join("")}` : ""}
+        <h3>${esc(t.actGroupTech)}</h3><button class="box" data-action="act-runs">${ico("format-list-numbered")}<span class="lbl">${esc(t.actRuns)}</span></button>
+        <span class="grow"></span><div class="status">${this._actStatus()}</div>
+      </nav>`;
+    return `<section class="widget w-full" data-widget="activity"><div class="mcwrap"><div class="mc">${rail}${this._actList(kindViews, folders)}${this._actReader()}</div></div></section>`;
+  }
+
+  _actList(kindViews, folders) {
+    const t = this.t;
+    const s = this._s;
+    const a = s.act;
+    const views = [...kindViews, ...folders];
+    const label = (views.find(([id]) => id === a.view) || [null, t.actAll])[1];
+    const days = new Map((a.days || []).map((d) => [d.day, d]));
+    const selectable = (a.days || []).reduce((n, d) => n + d.selectable, 0);
+    const allOn = selectable > 0 && a.sel.size >= selectable && a.items.filter((i) => i.selectable).every((i) => a.sel.has(i.key));
+    const dayHead = (day) => {
+      const d = days.get(day) || { total: 0, selectable: 0 };
+      const dayItems = a.items.filter((i) => i.day === day && i.selectable);
+      const on = d.selectable > 0 && dayItems.length === d.selectable && dayItems.every((i) => a.sel.has(i.key));
+      const folded = a.folded.has(day) && !a.picking;
+      const boxEl = a.picking
+        ? `<input type="checkbox" class="selbox" data-action="act-day" data-v="${esc(day)}" ${on ? "checked" : ""} ${d.selectable ? "" : "disabled"} aria-label="${esc(fmt(t.actPickDay, this._dayLabel(day), d.selectable))}">`
+        : "";
+      return `<li class="day">${boxEl}<button class="dayfold" data-action="act-fold" data-v="${esc(day)}" aria-expanded="${!folded}" ${a.picking ? "disabled" : ""}>${a.picking ? "" : ico(folded ? "chevron-right" : "chevron-down")}<span>${esc(this._dayLabel(day))}</span><span class="dn">${esc(d.total)}</span></button></li>`;
+    };
+    let day = null;
+    const parts = [];
+    for (const item of a.items) {
+      if (item.day !== day) {
+        day = item.day;
+        parts.push(dayHead(day));
+      }
+      if (a.folded.has(day) && !a.picking) continue;
+      const picked = a.sel.has(item.key);
+      const name = item.name || item.from || "–";
+      const when = fmtClock(item.time);
+      const aria = `${name}, ${item.subject || "–"}, ${this._dayLabel(item.day)} ${when}`;
+      const role = a.picking
+        ? item.selectable
+          ? `role="checkbox" aria-checked="${picked}" aria-label="${esc(aria)}"`
+          : `aria-disabled="true" aria-label="${esc(`${aria} – ${item.kind === "rule" ? t.actRuleNotAi : t.actNotSelectable}`)}"`
+        : `aria-current="${a.open === item.key}" aria-label="${esc(aria)}"`;
+      const av = a.picking ? `<span class="av ${item.selectable ? "pick" : "off"}" aria-hidden="true">${picked ? ico("check") : ""}</span>` : "";
+      parts.push(`<li class="m ${!a.picking && a.open === item.key ? "open" : ""} ${picked ? "picked" : ""} ${a.picking && !item.selectable ? "dim" : ""} ${this._fresh?.has?.(item.key) ? "fresh" : ""}">
+          ${av}<button class="mitem" data-action="act-open" data-id="${esc(item.key)}" ${role}>
+            <span class="r1"><span class="from">${esc(name)}</span><span class="time">${esc(when)}</span></span>
+            <span class="subj">${esc(item.subject || "–")}</span>
+            <span class="r3">${this._actMeta(item)}${this._actRowBatch(item.key)}</span>
+          </button></li>`);
+    }
+    const left = a.total - a.items.length;
+    const more = left > 0
+      ? `<div class="lmore" data-more-sentinel>${a.loadingMore ? `<span class="spinner" aria-hidden="true"></span>` : ""}<button class="link small" data-action="act-more" ${a.loadingMore ? "disabled" : ""}>${esc(fmt(t.actMore, Math.min(ACT_PAGE, left)))}</button><span class="muted">${esc(fmt(t.actLeft, left))}</span></div>`
+      : "";
+    // the rare "clear" sits next to the title on wide screens, next to the search on narrow ones
+    const menu = W.cardMenu([a.counts?.all && { action: "act-clear", icon: "delete-sweep-outline", label: t.actClear, danger: true, disabled: s.busy }], t);
+    const opts = (group, list) => `<optgroup label="${esc(group)}">${list.map(([id, l, , n]) => `<option value="${esc(id)}" ${a.view === id ? "selected" : ""}>${esc(l)} (${esc(n)})</option>`).join("")}</optgroup>`;
+    const tools = a.picking
+      ? `<div class="pickbar">
+          <label class="pickall"><input type="checkbox" class="selbox" data-action="act-all" ${allOn ? "checked" : ""} ${selectable ? "" : "disabled"}><span>${esc(t.actPickAll)} <span class="muted">(${esc(selectable)})</span></span></label>
+          <span class="grow"></span><button class="link" data-action="act-pick-done">${esc(t.actPickDone)}</button>
+        </div>
+        ${(a.days || []).length > 1 ? `<div class="daypicks" role="group" aria-label="${esc(t.actPickByDay)}">${(a.days || []).slice(0, 3).map((d) => {
+          const dayItems = a.items.filter((i) => i.day === d.day && i.selectable);
+          const on = d.selectable > 0 && dayItems.length === d.selectable && dayItems.every((i) => a.sel.has(i.key));
+          return `<button class="seg ${on ? "on" : ""}" data-action="act-day" data-v="${esc(d.day)}" aria-pressed="${on}" ${d.selectable ? "" : "disabled"}>${esc(this._dayLabel(d.day))}<span class="n">${esc(d.selectable)}</span></button>`;
+        }).join("")}</div>` : ""}`
+      : `<div class="lrow">
+          <select class="fsel boxsel" data-action="act-viewsel" aria-label="${esc(t.actViews)}">${opts(t.actGroupResult, kindViews)}${folders.length ? opts(t.actGroupFolder, folders) : ""}<optgroup label="${esc(t.actGroupTech)}"><option value="runs">${esc(t.actRuns)}</option></optgroup></select>
+          <label class="search">${ico("magnify")}<input type="search" id="act-q" value="${esc(a.query)}" placeholder="${esc(t.actSearch)}" aria-label="${esc(t.actSearchLabel)}"></label>
+          ${s.ai?.status?.active ? `<button class="secondary small ib pickbtn" data-action="act-pick" ${selectable ? "" : "disabled"}>${ico("checkbox-multiple-marked-outline")}<span>${esc(t.actPick)}</span></button>` : ""}
+          <span class="narrow-menu">${menu}</span>
+        </div>`;
+    const lastRun = (s.history || [])[0];
+    const err = lastRun?.errors?.length && !a.picking
+      ? `<div class="errline">${ico("alert-circle-outline")}<span>${esc(fmt(t.actError, fmtClock(lastRun.started), lastRun.errors[0]))}</span><button data-action="act-runs">${esc(t.actErrorDetails)}</button></div>`
+      : "";
+    const batch = s.ai?.batch ? this._renderBatch(s.ai) : "";
+    const actbar = a.picking
+      ? `<div class="actbar"><span>${esc(fmt(t.selected, a.sel.size))}</span><span class="grow"></span><button class="pill" data-action="act-rerate" ${a.sel.size && s.ai?.batch?.state !== "running" && !s.busy ? "" : "disabled"}>${ico("refresh")}${esc(t.rerate)}</button></div>`
+      : "";
+    const empty = !a.loaded ? `<p class="lempty">${esc(t.loading)}</p>` : `<p class="lempty">${esc(a.counts?.all ? t.actEmptyView : t.actEmpty)}</p>`;
+    return `<div class="listpane ${a.picking ? "picking" : ""}">
+        <div class="lhead">
+          <div class="ttl"><h2>${esc(label)}</h2><span class="cnt">${esc(a.total || 0)}</span>${menu}</div>
+          ${tools}
+          ${a.picking ? "" : `<div class="lstatus">${this._actStatus()}</div>`}
+          ${err}${batch}
+        </div>
+        <div class="lscroll">${parts.length ? `<ul class="mlist" aria-label="${esc(t.actMails)}">${parts.join("")}</ul>${more}` : empty}</div>
+        ${actbar}
+      </div>`;
+  }
+
+  _actReader() {
+    const t = this.t;
+    const s = this._s;
+    const a = s.act;
+    if (a.picking) {
+      const picked = [...a.sel.keys()].map((k) => this._actItem(k)).filter(Boolean);
+      const n = a.sel.size;
+      return `<section class="reader" aria-label="${esc(t.actSelection)}"><div class="rempty pickinfo">
+          ${ico("checkbox-multiple-marked-outline")}
+          <strong>${esc(n === 0 ? t.actPickInfo0 : n === 1 ? t.actPickInfo1 : fmt(t.actPickInfoN, n))}</strong>
+          <span>${esc(t.actPickHint)}</span>
+          ${picked.length ? `<ul class="picklist">${picked.slice(0, 6).map((i) => `<li><span>${esc(i.subject || "–")}</span><small>${esc(i.name || i.from || "")}</small></li>`).join("")}${n > 6 ? `<li class="muted">${esc(fmt(t.actPickMore, n - Math.min(6, picked.length)))}</li>` : ""}</ul>` : ""}
+          ${n ? `<button class="pill" data-action="act-rerate" ${s.ai?.batch?.state === "running" || s.busy ? "disabled" : ""}>${ico("refresh")}${esc(n === 1 ? t.rerate : fmt(t.actRerateN, n))}</button>` : ""}
+        </div></section>`;
+    }
+    const sheet = s.sheet?.inline ? s.sheet : null;
+    const item = a.open ? this._actItem(a.open) : null;
+    if (!sheet || !item) {
+      return `<section class="reader" aria-label="${esc(t.actMail)}"><div class="rempty">${ico("email-open-outline")}<span>${esc(t.actReaderEmpty)}</span></div></section>`;
+    }
+    return `<section class="reader" aria-label="${esc(t.actMail)}">${this._renderMailView(sheet, item)}</section>`;
+  }
+
+  // The mail with its timeline: the reading pane (wide screens) and the sheet (phones) share it.
+  _renderMailView(sheet, item = null) {
+    const t = this.t;
+    const s = this._s;
+    const d = sheet.data || {};
+    const subject = d.subject || sheet.key.subject || item?.subject || "–";
+    const name = item?.name || d.sender || sheet.key.sender || "";
+    const address = item?.from || d.sender || "";
+    const mid = d.message_id || sheet.key.message_id;
+    const events = d.events || [];
+    const body = sheet.loading
+      ? `<p class="working"><span class="spinner" aria-hidden="true"></span>${esc(t.tlLoading)}</p>`
+      : sheet.error
+        ? `<div class="error">${esc(sheet.error)}</div>`
+        : !d.found
+          ? `<p class="muted">${esc(t.tlEmpty)}</p>`
+          : `<ol class="tl">${events.map((e, i) => this._tlStep(e, i === events.length - 1)).join("")}</ol>`;
+    // the category itself is the place to correct it (as in the former "recently rated" list)
+    const cats = s.ai?.categories || [];
+    const cat = (c) => (c === "other" ? t.aiOther : c);
+    const imp = d.importance ?? item?.ai?.importance;
+    let meta;
+    if (d.rating_id && cats.length && !d.held) {
+      const options = [...cats.map((c) => c.name), "other"].map((c) => `<option value="${esc(c)}" ${c === d.category ? "selected" : ""}>${esc(cat(c))}</option>`).join("");
+      meta = `<span class="meta ai">${ico(d.corrected ? "pencil-outline" : "creation")}<select class="catsel" data-action="ai-correct" data-id="${esc(d.rating_id)}" aria-label="${esc(t.actCorrect)}">${options}</select>${imp ? `<span class="rl">· ${esc(imp)}/5</span>` : ""}</span>`;
+    } else if (item) meta = this._actMeta(item);
+    else if (d.held) meta = `<span class="meta held">${ico("shield-check-outline")}<span class="rl">${esc(t.actHeld)}</span></span>`;
+    else meta = d.category ? `<span class="meta ai">${ico(d.corrected ? "pencil-outline" : "creation")}<span class="rl">${esc(cat(d.category))}</span></span>` : "";
+    const canRerate = mid && s.ai?.status?.active && (!item || item.selectable);
+    const rerate = canRerate
+      ? `<button class="secondary small ib" data-action="tl-rerate" ${s.busy || s.ai?.batch?.state === "running" ? "disabled" : ""}>${ico("refresh")}${esc(t.rerate)}</button>`
+      : "";
+    const who = name && address && name !== address ? `<strong>${esc(name)}</strong><small>${esc(address)}</small>` : `<strong>${esc(name || address || "–")}</strong>`;
+    return `<div class="rtop"><span class="grow"></span>${rerate}</div>
+      <div class="rbody">
+        <div class="rhead">
+          <h2 tabindex="-1" id="r-title">${esc(subject)}</h2>
+          <span class="av" aria-hidden="true">${esc(initials(name || address))}</span>
+          <span class="who">${who}</span>
+          <span class="date">${esc(d.date ? fmtDateTime(d.date) : item ? fmtDateTime(item.time) : "")}</span>
+          <div class="chips">${meta}${item ? this._actRowBatch(item.key) : ""}</div>
+          ${mid ? this._locHtml(mid, item?.folder || d.location || d.mailbox) : ""}
+        </div>
+        <h3 class="sect">${esc(t.actHistory)}</h3>
+        ${body}
+      </div>
+      <div class="rfoot">${esc(mid ? t.tlFoot : t.tlFootOld)}</div>`;
+  }
+
+  // ------------------------------------------------------------ where a mail really is (on opening, once)
+  async _locate(mid, hint) {
+    const loc = this._s.loc;
+    if (!mid || loc.get(mid)?.busy) return;
+    loc.set(mid, { ...(loc.get(mid) || {}), busy: true, hint });
+    this._render();
+    try {
+      const hints = [hint === "INBOX" ? null : hint].filter(Boolean);
+      const res = await this._ws({ type: "friedafetch_mail/mail/locate", entry_id: this._s.entryId, message_id: mid, hints });
+      loc.set(mid, { ...res, busy: false, hint, error: null });
+    } catch (err) {
+      loc.set(mid, { busy: false, hint, error: err.message || String(err), checked: new Date().toISOString() });
+    }
+    this._render();
+  }
+
+  _locHtml(mid, frieda) {
+    const t = this.t;
+    const l = this._s.loc.get(mid);
+    if (!l) return "";
+    if (l.busy && !l.checked) return `<div class="loc"><span class="li"><span class="spinner" aria-hidden="true"></span></span><span class="lt">${esc(t.locSearching)}</span></div>`;
+    const again = `<button class="link" data-action="loc-again" data-id="${esc(mid)}" ${l.busy ? "disabled" : ""}>${esc(l.busy ? t.locBusy : t.locAgain)}</button>`;
+    const at = fmt(t.locChecked, fmtClock(l.checked));
+    if (l.error) return `<div class="loc gone" role="status"><span class="li">${ico("alert-circle-outline")}</span><span class="lt">${esc(fmt(t.locError, l.error))}<small>${esc(at)}</small></span>${again}</div>`;
+    const place = frieda || "INBOX";
+    const friedaText = place === "INBOX" ? fmt(t.locFriedaLeft, this._folderName("INBOX")) : fmt(t.locFriedaMoved, this._folderName(place));
+    if (!l.found) {
+      return `<div class="loc gone" role="status"><span class="li">${ico("help-circle-outline")}</span><span class="lt">${esc(t.locGone)}<small>${esc(at)}</small></span>${again}<span class="note">${esc(fmt(t.locGoneNote, friedaText))}</span></div>`;
+    }
+    const now = l.trash ? "trash" : l.mailbox;
+    const same = now === place || (place === "trash" && l.trash);
+    return `<div class="loc ${same ? "same" : "moved"}" role="status"><span class="li">${ico(same ? "check-circle-outline" : "folder-swap-outline")}</span><span class="lt">${esc(fmt(t.locHere, this._folderName(now)))}<small>${esc(at)}</small></span>${again}${same ? "" : `<span class="note">${esc(fmt(t.locMovedNote, friedaText))}</span>`}</div>`;
+  }
+
+  // ------------------------------------------------------------ category assistant
+  _assistOpen() {
+    this._s.assist = { turns: [], proposal: null, overlap: null, busy: false, view: "chat", test: null, testBusy: false, err: "", draft: "", changed: [], scroll: true };
+    this._render();
+    this.shadowRoot.querySelector("#as-input")?.focus();
+  }
+
+  _assistClose() {
+    this._s.assist = null;
+    this._render();
+    this.shadowRoot.querySelector('[data-action="assist-open"]')?.focus();
+  }
+
+  async _assistSend(text) {
+    const t = this.t;
+    const as = this._s.assist;
+    text = String(text || "").trim();
+    if (!as || !text || as.busy) return;
+    as.turns.push({ role: "user", text });
+    as.draft = "";
+    as.err = "";
+    as.scroll = true;
+    if (as.proposal && text === t.assistOk) {
+      as.turns.push({ role: "assistant", text: t.assistOkReply });
+      if (window.matchMedia?.("(max-width: 760px)").matches) as.view = "card";
+      this._render();
+      return;
+    }
+    as.busy = true;
+    this._render();
+    try {
+      const res = await this._ws({ type: "friedafetch_mail/ai/assist", entry_id: this._s.entryId, conversation: as.turns.map(({ role, text: x }) => ({ role, text: x })), proposal: as.proposal });
+      const before = as.proposal || {};
+      as.changed = Object.keys(res.proposal || {}).filter((k) => JSON.stringify(res.proposal[k]) !== JSON.stringify(before[k]));
+      as.proposal = res.proposal;
+      as.overlap = res.overlap || null;
+      as.test = null;
+      as.turns.push({ role: "assistant", text: res.reply || t.assistUpdated, changed: as.proposal && before.name ? as.changed : [] });
+      if (window.matchMedia?.("(max-width: 760px)").matches && as.view === "chat") as.dot = true;
+    } catch (err) {
+      as.turns.pop();
+      as.draft = text;
+      as.err = err.message || String(err);
+    }
+    as.busy = false;
+    as.scroll = true;
+    if (this._s.assist === as) this._render();
+    this.shadowRoot.querySelector("#as-input")?.focus({ preventScroll: true });
+    // the proposal fields that changed light up briefly
+    setTimeout(() => (as.changed = []), 1700);
+  }
+
+  async _assistTest() {
+    const as = this._s.assist;
+    if (!as?.proposal || as.testBusy) return;
+    as.testBusy = true;
+    as.err = "";
+    this._render();
+    try {
+      as.test = await this._ws({ type: "friedafetch_mail/ai/assist/test", entry_id: this._s.entryId, proposal: as.proposal });
+      this._s.ai = await this._ws({ type: "friedafetch_mail/ai", entry_id: this._s.entryId }).catch(() => this._s.ai);
+    } catch (err) {
+      as.err = err.message || String(err);
+    }
+    as.testBusy = false;
+    if (this._s.assist === as) this._render();
+  }
+
+  // The same checks as the form; then the normal save with its server checks.
+  async _assistApply() {
+    const t = this.t;
+    const as = this._s.assist;
+    const p = as?.proposal;
+    if (!p) return;
+    const name = String(p.name || "").trim();
+    const cats = this._s.ai?.categories || [];
+    as.err = !name ? t.assistNameMissing : cats.some((c) => c.name.toLowerCase() === name.toLowerCase()) ? fmt(t.assistNameUsed, name) : "";
+    if (as.err) return this._render();
+    const cat = { name, description: String(p.description || "").trim().slice(0, 300), move_to: p.move_to || null, mark_seen: !!p.mark_seen, flag: !!p.flag };
+    await this._aiSaveCategories([...cats, cat]);
+    if (this._s.error) {
+      as.err = this._s.error;
+      this._s.error = null;
+      return this._render();
+    }
+    this._s.assist = null;
+    this._render();
+    W.toast(this, fmt(t.assistDone, name));
+  }
+
+  _renderAssist() {
+    const t = this.t;
+    const s = this._s;
+    const as = s.assist;
+    if (!as) return "";
+    const p = as.proposal;
+    const users = as.turns.filter((x) => x.role === "user").length;
+    const done = users >= ASSIST_ROUNDS;
+    const label = { name: t.assistName, description: t.assistDescShort, move_to: p?.move_to ? `→ ${this._folderName(p.move_to)}` : t.assistNoMove, flag: p?.flag ? t.assistFlag : t.assistNoFlag, mark_seen: p?.mark_seen ? t.assistSeen : t.assistNoSeen };
+    const msg = (m) =>
+      m.role === "user"
+        ? `<div class="msg me">${esc(m.text)}</div>`
+        : `<div class="msg ai"><span class="who">${ico("creation")}Frieda</span>${esc(m.text)}${(m.changed || []).length ? `<div class="changes">${m.changed.map((k) => `<span>${esc(label[k] || k)}</span>`).join("")}</div>` : ""}</div>`;
+    const chips = !p
+      ? t.assistExamples
+      : done
+        ? []
+        : [t.assistOk, p.move_to ? t.assistChipNoMove : null, !p.flag ? t.assistChipFlag : null, !p.mark_seen ? t.assistChipSeen : null].filter(Boolean);
+    const fl = (k) => (as.changed.includes(k) ? "flash" : "");
+    const opt = (v, l) => `<option value="${esc(v)}" ${String(p?.move_to || "") === v ? "selected" : ""}>${esc(l)}</option>`;
+    const boxes = (s.mailboxes || []).filter((b) => b !== "INBOX");
+    const test = as.testBusy
+      ? `<div class="working"><span class="spinner" aria-hidden="true"></span>${esc(t.assistTesting)}</div>`
+      : as.test
+        ? `<p>${esc(as.test.tested ? fmt(t.assistTestResult, as.test.hits, as.test.tested, as.test.name) : t.assistTestNothing)}</p>
+           ${as.test.limit ? `<p class="muted">${esc(t.assistTestLimit)}</p>` : ""}
+           ${as.test.tested && !as.test.hits ? `<p class="muted">${esc(t.assistTestNone)}</p>` : ""}
+           <ul>${as.test.results.filter((r) => r.after === as.test.name).map((r) => `<li>${esc(r.subject || "–")}<small>${esc([r.from, r.before ? fmt(t.assistTestBefore, r.before === "other" ? t.aiOther : r.before) : ""].filter(Boolean).join(" · "))}</small></li>`).join("")}</ul>
+           <button class="link small" data-action="assist-test">${esc(t.assistTestAgain)}</button>`
+        : `<p>${esc(t.assistTestIntro)}</p><button class="secondary small ib" data-action="assist-test">${ico("play-outline")}${esc(t.assistTestBtn)}</button>`;
+    const card = p
+      ? `<h3>${esc(t.assistProposal)}</h3>
+        <label class="f ${fl("name")}"><span>${esc(t.assistName)}</span><input type="text" id="as-name" data-f="name" maxlength="40" value="${esc(p.name)}"></label>
+        <label class="f ${fl("description")}"><span>${esc(t.assistDesc)}</span><textarea id="as-desc" data-f="description" maxlength="300">${esc(p.description)}</textarea><span class="count">${esc((p.description || "").length)} / 300</span></label>
+        <label class="f ${fl("move_to")}"><span>${esc(t.assistMove)}</span><select id="as-move" data-f="move_to">${opt("", t.assistNoMove)}${boxes.map((b) => opt(b, this._folderName(b))).join("")}</select></label>
+        <label class="opt ${fl("flag")}"><input type="checkbox" class="switch" id="as-flag" data-f="flag" ${p.flag ? "checked" : ""}><span>${esc(t.assistFlag)}</span></label>
+        <label class="opt ${fl("mark_seen")}"><input type="checkbox" class="switch" id="as-seen" data-f="mark_seen" ${p.mark_seen ? "checked" : ""}><span>${esc(t.assistSeen)}</span></label>
+        ${as.overlap ? `<p class="overlap">${ico("information-outline")}<span>${esc(fmt(t.assistOverlap, as.overlap))}</span></p>` : ""}
+        ${s.ai?.status?.mode !== "act" ? `<p class="muted">${esc(t.aiCatActionsObserve)}</p>` : ""}
+        <div class="test">${test}</div>`
+      : `<h3>${esc(t.assistProposal)}</h3><p class="empty">${esc(t.assistEmpty)}</p>`;
+    return `<div class="sheet-backdrop assist-bd" data-action="assist-close"></div>
+      <section class="sheet assist" role="dialog" aria-modal="true" aria-labelledby="as-title">
+        <div class="as-top">${ico("creation")}<h2 id="as-title">${esc(t.assistTitle)}</h2>
+          <button class="icon" data-action="assist-close" aria-label="${esc(t.close)}" title="${esc(t.close)}">${ico("close")}</button>
+          <div class="as-views"><div class="segs" role="group" aria-label="${esc(t.assistViews)}">
+            <button class="seg ${as.view === "chat" ? "on" : ""}" data-action="assist-view" data-v="chat" aria-pressed="${as.view === "chat"}">${ico("chat-outline")}${esc(t.assistChat)}</button>
+            <button class="seg ${as.view === "card" ? "on" : ""} ${as.dot ? "pulse" : ""}" data-action="assist-view" data-v="card" aria-pressed="${as.view === "card"}" ${p ? "" : "disabled"}>${ico("tag-outline")}${esc(t.assistProposal)}</button></div></div>
+        </div>
+        <div class="as-body" data-view="${esc(as.view)}">
+          <div class="as-chat">
+            <div class="as-log" role="log" aria-live="polite" aria-label="${esc(t.assistChat)}">
+              <div class="msg ai"><span class="who">${ico("creation")}Frieda</span>${esc(t.assistHello)}</div>
+              ${as.turns.map(msg).join("")}
+              ${as.busy ? `<div class="typing"><span class="spinner" aria-hidden="true"></span>${esc(t.assistThinking)}</div>` : ""}
+              ${done && !as.busy ? `<div class="msg ai"><span class="who">${ico("creation")}Frieda</span>${esc(t.assistTurnsDone)}</div>` : ""}
+            </div>
+            <div class="compose">
+              ${as.err ? `<div class="error" role="alert">${esc(as.err)}</div>` : ""}
+              ${chips.length && !as.busy ? `<div class="chips" role="group" aria-label="${esc(t.assistChips)}">${chips.map((c) => `<button data-action="assist-chip" data-v="${esc(c)}">${esc(c)}</button>`).join("")}</div>` : ""}
+              <div class="row"><textarea id="as-input" rows="1" placeholder="${esc(t.assistPlaceholder)}" aria-label="${esc(t.assistInput)}" ${as.busy || done ? "disabled" : ""}>${esc(as.draft)}</textarea>
+                <button class="send" data-action="assist-send" aria-label="${esc(t.assistSend)}" title="${esc(t.assistSend)}" ${as.busy || done ? "disabled" : ""}>${ico("send")}</button></div>
+              <div class="privacy">${ico("shield-lock-outline")}<span>${esc(t.assistPrivacy)}</span></div>
+            </div>
+          </div>
+          <div class="as-pane"><div class="prop">${card}</div>
+            <div class="acts"><button class="secondary" data-action="assist-close">${esc(t.cancel)}</button><button data-action="assist-apply" ${p && !s.busy ? "" : "disabled"}>${esc(t.assistApply)}</button></div></div>
+        </div>
+      </section>`;
+  }
+
+  _bindAssist() {
+    const root = this.shadowRoot;
+    const as = this._s.assist;
+    const dlg = root.querySelector(".sheet.assist");
+    if (!as || !dlg) return;
+    const input = root.querySelector("#as-input");
+    const grow = () => {
+      input.style.height = "auto";
+      input.style.height = `${Math.min(120, input.scrollHeight)}px`;
+    };
+    if (input) {
+      grow();
+      input.addEventListener("input", () => {
+        as.draft = input.value;
+        grow();
+      });
+      input.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) {
+          ev.preventDefault();
+          this._assistSend(input.value);
+        }
+      });
+    }
+    // edits of the proposal stay in the state without a redraw (the fields keep focus and caret)
+    root.querySelectorAll(".sheet.assist [data-f]").forEach((n) =>
+      n.addEventListener(n.type === "checkbox" || n.tagName === "SELECT" ? "change" : "input", () => {
+        const key = n.dataset.f;
+        as.proposal[key] = n.type === "checkbox" ? n.checked : key === "move_to" ? n.value || null : n.value;
+        if (key === "description") n.parentElement.querySelector(".count").textContent = `${n.value.length} / 300`;
+        as.test = null;
+      })
+    );
+    dlg.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") this._assistClose();
+    });
+    const log = root.querySelector(".as-log");
+    if (log && as.scroll) {
+      log.scrollTop = log.scrollHeight;
+      as.scroll = false;
+    }
+  }
+
+  // Keeps the scroll position of the list and the reading pane across a redraw (the page itself is kept by keepScroll).
+  _keepInner(draw) {
+    const root = this.shadowRoot;
+    const saved = [".lscroll", ".rbody", ".as-log", ".prop"].map((sel) => [sel, root.querySelector(sel)?.scrollTop]);
+    draw();
+    const jump = this._s.act?.jump;
+    this._s.act && (this._s.act.jump = false);
+    for (const [sel, y] of saved) {
+      const el = root.querySelector(sel);
+      if (!el || y == null) continue;
+      if (jump && sel === ".rbody") continue; // a newly opened mail starts at its top
+      el.scrollTop = y;
+    }
+  }
+
+  // Loads the next mails shortly before the end of the list (the button stays for keyboards).
+  _observeMore() {
+    this._moreObserver?.disconnect();
+    const sentinel = this.shadowRoot.querySelector("[data-more-sentinel]");
+    if (!sentinel || !("IntersectionObserver" in window)) return;
+    const root = this._actNarrow() ? null : this.shadowRoot.querySelector(".lscroll");
+    this._moreObserver = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((e) => e.isIntersecting)) return;
+        this._moreObserver.disconnect();
+        this._actMore();
+      },
+      { root, rootMargin: "300px" }
+    );
+    this._moreObserver.observe(sentinel);
+  }
+
+  // Tabs: the activity (a mail program), the rules, the AI sorting and its log.
+  _tabs() {
+    const t = this.t;
+    return [
+      { id: "activity", label: t.tabActivity, icon: "email-outline" },
+      { id: "rules", label: t.tabRules, icon: "filter-outline" },
+      this._s.ai && { id: "ai", label: t.tabAi, icon: "creation" },
+      this._renderAiUsage() && { id: "aiu", label: t.tabAiu, icon: "shield-lock-outline" },
+    ].filter(Boolean);
+  }
+
+  _tab(tabs) {
+    const id = this._s.tab || this._layout.opt("tabs", "current", "activity");
+    return tabs.some((x) => x.id === id) ? id : "activity";
+  }
+
+  _setTab(id) {
+    this._s.tab = id;
+    this._layout.setOpt("tabs", "current", id);
+    this._render();
+    if (id === "activity") this._actAutoOpen();
+  }
+
+  // wide screens open the newest mail, like a mail program
+  _actAutoOpen() {
+    const a = this._s.act;
+    if (a.picking || a.runs || this._actNarrow() || (a.open && this._actItem(a.open) && this._s.sheet?.inline)) return;
+    if (a.items[0]) this._actOpen(a.items[0].key);
+  }
+
+  async _actClear() {
+    const t = this.t;
+    if (!(await this._confirm({ title: t.actConfirmClearTitle, text: t.actConfirmClear, ok: t.clearOk }))) return;
+    await this._call(async () => {
+      await this._ws({ type: "friedafetch_mail/activity/clear", entry_id: this._s.entryId });
+      this._s.act = newActivity();
+      this._s.sheet = null;
+      await this._loadActivity();
+    });
+  }
+
   _render() {
     const s = this._s;
     // a deliberate jump (to the report or the editor) wins over keeping the position
-    const draw = () => W.keepFocus(this.shadowRoot, () => this._draw());
+    const draw = () => this._keepInner(() => W.keepFocus(this.shadowRoot, () => this._draw()));
     if (s.scrollToReport || s.focusEditor || s.scrollTo) draw();
     else W.keepScroll(this, draw);
   }
@@ -1518,10 +2148,7 @@ class FriedaPostfachPanel extends HTMLElement {
         ${runItem("all", false, "playlist-play", t.runAll, t.runAllHint, readOnly)}
         ${runItem("new", false, "email-arrow-right-outline", t.runNew, t.runNewHint, readOnly)}
       </div></details>`;
-    const widgets = !s.loaded || !s.entryId
-      ? {}
-      : {
-          rules: { title: t.rules, html: `
+    const rulesHtml = `
       <div class="card">
         <div class="chead"><h2>${esc(t.rules)}${s.accounts.length > 1 && acc ? ` <span class="chip">${esc(acc.label)}</span>` : ""}</h2>
           ${s.rules.length ? runMenu : ""}
@@ -1530,11 +2157,19 @@ class FriedaPostfachPanel extends HTMLElement {
         <div class="subbar"><span class="muted">${esc([last, ...extra].join(" · "))}</span><span class="grow"></span>
           ${s.rules.length > 1 ? `<button class="link" data-action="expand-all" data-open="${allOpen ? "0" : "1"}">${esc(allOpen ? t.collapseAll : t.expandAll)}</button>` : ""}</div>
         ${this._renderRules()}
-      </div>` },
-          ai: { title: t.ai, html: this._renderAi() },
-          aiu: { title: t.aiu, html: this._renderAiUsage() },
-          history: { title: t.history, html: this._renderHistory() },
-        };
+      </div>`;
+    const ready = s.loaded && s.entryId;
+    const tabbed = !!W.renderTabs; // Frieda older than 2.0.15: no tabs, everything one below the other
+    const tabs = ready ? this._tabs() : [];
+    const tab = this._tab(tabs);
+    const single = (id, html) => (html ? `<section class="widget w-full" data-widget="${id}">${html}</section>` : "");
+    const content = {
+      activity: () => this._renderActivityTab(),
+      rules: () => `${this._renderReport()}${single("rules", rulesHtml)}`,
+      ai: () => single("ai", this._renderAi()),
+      aiu: () => single("aiu", this._renderAiUsage()),
+    };
+    const main = !ready ? "" : tabbed ? content[tab]() : tabs.map((x) => content[x.id]()).join("");
     const body = !s.loaded
       ? `<p class="muted">${esc(t.loading)}</p>`
       : !s.entryId
@@ -1544,13 +2179,13 @@ class FriedaPostfachPanel extends HTMLElement {
       ${s.error ? `<div class="error" data-announce>${esc(s.error)}</div>` : ""}
       ${s.notice ? `<div class="ok" data-announce>${esc(s.notice)}</div>` : ""}
       ${this._renderAccounts()}
-      ${this._renderReport()}
-      ${W.renderWidgets(this._layout, widgets, t)}`;
+      ${main}`;
     W.mount(
       this.shadowRoot,
       `<style>${W.UI_STYLE}${STYLE}</style>
-      <div class="toolbar"><ha-menu-button></ha-menu-button><img src="${esc(ICON_URL)}" alt=""><span>${esc(t.title)}</span><span class="grow"></span>${s.loaded && s.entryId ? W.layoutButton(this._layout, t) : ""}</div>
-      <div class="content widgets">${body}</div>${this._renderSheet()}${this._renderConfirm()}`
+      <div class="toolbar"><ha-menu-button></ha-menu-button><img src="${esc(ICON_URL)}" alt=""><span>${esc(t.title)}</span><span class="grow"></span></div>
+      ${ready && tabbed ? W.renderTabs(tabs, tab, t.tabsLabel) : ""}
+      <div class="content widgets" ${ready && tabbed ? `role="tabpanel" id="tabpanel" aria-labelledby="tab-${tab}"` : ""}>${body}</div>${this._renderSheet()}${this._renderConfirm()}${this._renderAssist()}`
     );
     const menu = this.shadowRoot.querySelector("ha-menu-button");
     if (menu && this._hass) {
@@ -1559,7 +2194,10 @@ class FriedaPostfachPanel extends HTMLElement {
     }
     this._bind();
     W.bindWidgets(this.shadowRoot, this._layout, () => this._render());
+    if (tabbed) W.bindTabs(this.shadowRoot, (id) => this._setTab(id));
+    this._bindAssist();
     for (const key of Object.keys(SEARCH_KEYS)) this._applySearch(key);
+    this._observeMore();
     this._afterRender();
   }
 
@@ -1734,20 +2372,6 @@ class FriedaPostfachPanel extends HTMLElement {
           this._s.aiuSort = cur.key === key ? { key, dir: -cur.dir } : { key, dir: key === "subject" ? 1 : -1 };
           this._render();
         },
-        "rate-filter": () => {
-          this._s.ratesFilter = el.dataset.v;
-          this._render();
-        },
-        "rate-sort": () => {
-          const key = el.dataset.k;
-          const cur = this._s.ratesSort || { key: "time", dir: -1 };
-          this._s.ratesSort = cur.key === key ? { key, dir: -cur.dir } : { key, dir: -1 };
-          this._render();
-        },
-        "rate-open": () => {
-          const r = (this._s.ai?.ratings || []).find((x) => x.id === el.dataset.id);
-          if (r) this._openTimeline({ message_id: r.message_id || null, subject: r.subject || "", sender: r.from_domain ? `@${r.from_domain}` : r.from || "" });
-        },
         "aiu-mail": () => {
           const e = (this._s.ai?.usage?.log || [])[Number(el.dataset.i)];
           if (e) this._openTimeline({ message_id: e.message_id || null, subject: e.subject || "", sender: e.sender || "" });
@@ -1758,30 +2382,58 @@ class FriedaPostfachPanel extends HTMLElement {
           if (m) this._openTimeline({ message_id: m.message_id || null, subject: m.subject || "", sender: m.from || "" });
         },
         "sheet-close": () => this._closeTimeline(),
-        "rate-sel": () => {
-          const sel = (this._s.rateSel ||= new Set());
-          if (el.checked) sel.add(el.dataset.id);
-          else sel.delete(el.dataset.id);
+        tab: () => this._setTab(el.dataset.v),
+        "act-view": () => this._actView(el.dataset.v),
+        "act-runs": () => {
+          this._s.act.runs = true;
           this._render();
         },
-        "rate-sel-all": () => {
-          // every row that matches the filter and the search, on all pages
-          const sel = (this._s.rateSel ||= new Set());
-          for (const tr of root.querySelectorAll('table[data-table="rates"] tbody tr[data-rid]')) {
-            if (tr.dataset.nomatch === "1") continue;
-            if (el.checked) sel.add(tr.dataset.rid);
-            else sel.delete(tr.dataset.rid);
-          }
+        "act-runs-back": () => {
+          this._s.act.runs = false;
           this._render();
         },
-        "rate-sel-clear": () => {
-          this._s.rateSel = new Set();
+        "act-open": (ev) => {
+          const a = this._s.act;
+          // like a mail program: Cmd/Ctrl adds one mail, Shift a range; while picking every click selects
+          if (a.picking || ev.metaKey || ev.ctrlKey || ev.shiftKey) this._actToggle(el.dataset.id, ev);
+          else this._actOpen(el.dataset.id);
+        },
+        "act-fold": () => {
+          const f = this._s.act.folded;
+          if (f.has(el.dataset.v)) f.delete(el.dataset.v);
+          else f.add(el.dataset.v);
           this._render();
         },
-        rerate: () => this._rerate({ ratingIds: [...(this._s.rateSel || [])] }),
+        "act-more": () => this._actMore(),
+        "act-pick": () => {
+          this._s.act.picking = true;
+          this._render();
+          this.shadowRoot.querySelector('[data-action="act-all"]')?.focus();
+        },
+        "act-pick-done": () => {
+          this._actStopPicking();
+          this.shadowRoot.querySelector('[data-action="act-pick"]')?.focus();
+        },
+        "act-rerate": () => this._actRerate([...this._s.act.sel.keys()]),
+        "act-clear": () => this._actClear(),
+        "loc-again": () => this._locate(el.dataset.id, this._s.loc.get(el.dataset.id)?.hint),
+        "assist-open": () => this._assistOpen(),
+        "assist-close": () => this._assistClose(),
+        "assist-send": () => this._assistSend(this.shadowRoot.querySelector("#as-input")?.value),
+        "assist-chip": () => this._assistSend(el.dataset.v),
+        "assist-view": () => {
+          const as = this._s.assist;
+          as.view = el.dataset.v;
+          if (as.view === "card") as.dot = false;
+          this._render();
+        },
+        "assist-test": () => this._assistTest(),
+        "assist-apply": () => this._assistApply(),
         "tl-rerate": () => {
           const sheet = this._s.sheet;
           const mid = sheet?.data?.message_id || sheet?.key?.message_id;
+          const item = this._actItem(this._s.act.open);
+          if (item && item.message_id === mid) return this._actRerate([item.key]); // the list shows the progress
           if (mid) this._rerate({ messages: [{ message_id: mid, ...(sheet.data?.mailbox ? { mailbox: sheet.data.mailbox } : {}) }] });
         },
         "rerate-cancel": () =>
@@ -1808,6 +2460,17 @@ class FriedaPostfachPanel extends HTMLElement {
           this._s.aiuFilter = el.dataset.v;
           this._render();
         });
+      } else if (action === "act-all") {
+        el.addEventListener("change", () => this._actPickMany(null, el.checked));
+      } else if (action === "act-day") {
+        const box = el.tagName === "INPUT";
+        el.addEventListener(box ? "change" : "click", () => this._actPickMany(el.dataset.v, box ? el.checked : el.getAttribute("aria-pressed") !== "true"));
+      } else if (action === "act-viewsel") {
+        el.addEventListener("change", () => {
+          if (el.value !== "runs") return this._actView(el.value);
+          this._s.act.runs = true;
+          this._render();
+        });
       } else if (action === "ai-correct") {
         el.addEventListener("change", () => this._aiCorrect(el.dataset.id, el.value));
       } else if (action === "toggle") {
@@ -1824,7 +2487,7 @@ class FriedaPostfachPanel extends HTMLElement {
     root.querySelectorAll("tr.arow, tr.expandable").forEach((tr) =>
       tr.addEventListener("click", (ev) => {
         if (ev.target.closest("button, a, input, select, details")) return;
-        tr.querySelector('[data-action="aiu-open"], [data-action="aiu-mail"], [data-action="rate-open"], [data-action="run-open"]')?.click();
+        tr.querySelector('[data-action="aiu-open"], [data-action="aiu-mail"], [data-action="run-open"]')?.click();
       })
     );
     // list entries that act as buttons (the mails of a run) also answer to Enter and Space
@@ -1837,14 +2500,41 @@ class FriedaPostfachPanel extends HTMLElement {
       })
     );
     // the timeline closes with Escape
-    root.querySelector(".sheet")?.addEventListener("keydown", (ev) => {
+    root.querySelector(".sheet.mailsheet")?.addEventListener("keydown", (ev) => {
       if (ev.key === "Escape") this._closeTimeline();
     });
     // phones: the timeline comes from the bottom and closes with a swipe down
-    const sheet = root.querySelector(".sheet");
+    const sheet = root.querySelector(".sheet.mailsheet");
     if (sheet && window.matchMedia?.("(max-width: 600px)").matches) this._bindSwipe(sheet);
     // an item of a row menu closes the menu
     root.querySelectorAll("details.rowmenu .menu-list button").forEach((b) => b.addEventListener("click", () => b.closest("details")?.removeAttribute("open")));
+    // the activity search asks the server (all mails, not only the loaded ones)
+    root.querySelector("#act-q")?.addEventListener("input", (ev) => {
+      this._s.act.query = ev.target.value;
+      clearTimeout(this._actSearchTimer);
+      this._actSearchTimer = setTimeout(async () => {
+        try {
+          await this._loadActivity();
+        } catch (err) {
+          /* keep the list */
+        }
+        this._render();
+        W.announce(this.shadowRoot, fmt(this.t.searchHits, this._s.act.total), 300);
+      }, 300);
+    });
+    // arrow keys move through the mails like in a mail program (and open them on wide screens)
+    root.querySelector(".mlist")?.addEventListener("keydown", (ev) => {
+      if (!["ArrowDown", "ArrowUp"].includes(ev.key) || !ev.target.matches?.('[data-action="act-open"]')) return;
+      const all = [...root.querySelectorAll('.mlist [data-action="act-open"]')];
+      const next = all[all.indexOf(ev.target) + (ev.key === "ArrowDown" ? 1 : -1)];
+      if (!next) return;
+      ev.preventDefault();
+      next.focus();
+      next.scrollIntoView({ block: "nearest" });
+      const a = this._s.act;
+      if (ev.shiftKey && a.picking) this._actToggle(next.dataset.id, ev);
+      else if (!a.picking && !this._actNarrow()) this._actOpen(next.dataset.id);
+    });
     root.querySelectorAll("[data-search-table]").forEach((el) => {
       el.addEventListener("input", () => {
         this._s[SEARCH_KEYS[el.dataset.searchTable]] = el.value;
