@@ -83,16 +83,18 @@ class ActivityLog:
         self._store: Store[dict[str, Any]] = Store(hass, STORAGE_VERSION, f"{CORE_DOMAIN}.activity.{entry_id}")
         self._items: list[dict[str, Any]] = []
         self._loaded = False
+        self._backfilled = False  # the list was filled once from what was kept before it existed
 
     async def async_load(self) -> None:
         if self._loaded:
             return
         data = await self._store.async_load() or {}
         self._items = list(data.get("items") or [])[-MAX_ENTRIES:]
+        self._backfilled = bool(data.get("backfilled"))
         self._loaded = True
 
     def _data(self) -> dict[str, Any]:
-        return {"items": self._items}
+        return {"items": self._items, "backfilled": self._backfilled}
 
     def _changed(self) -> None:
         self._store.async_delay_save(self._data, 2)
@@ -108,11 +110,19 @@ class ActivityLog:
         if not self._loaded or not mails:
             return
         index = {self._key(i): i for i in self._items}
+        by_uid = {(i.get("mailbox"), i.get("uid")): i for i in self._items if i.get("uid") is not None}
         for mail in mails:
             key = self._key(mail)
             if key is None:
                 continue
             item = index.get(key)
+            if item is None and mail.get("uid") is not None:
+                # the same message seen before without its Message-ID (older entries): one line, not two
+                item = by_uid.get((mail.get("mailbox") or "INBOX", mail.get("uid")))
+                if item is not None and not item.get("message_id") and mail.get("message_id"):
+                    index.pop(item["key"], None)
+                    item["key"] = key
+                    index[key] = item
             if item is None:
                 item = {
                     "key": key,
@@ -134,6 +144,8 @@ class ActivityLog:
                 }
                 self._items.append(item)
                 index[key] = item
+                if item["uid"] is not None:
+                    by_uid[(item["mailbox"], item["uid"])] = item
             item["updated"] = time
             for k in ("message_id", "date", "name"):
                 if mail.get(k) and not item.get(k):
@@ -151,6 +163,58 @@ class ActivityLog:
         self._prune()
         self._changed()
 
+    def backfill(
+        self, history: list[dict[str, Any]], ratings: list[dict[str, Any]], usage_log: list[dict[str, Any]]
+    ) -> bool:
+        """Once, after the update that brought the list: start it with what was kept already.
+
+        The run history (its mails), the AI ratings and the mails the kill switch held back go in, oldest first and
+        merged by Message-ID. Returns whether anything was done.
+        """
+        if not self._loaded or self._backfilled:
+            return False
+        newest = list(self._items)  # passes since the update: they stay the newest entries
+        self._items = []
+        for run in sorted(history, key=lambda r: _ts(r.get("started"))):
+            self.add_pass(
+                str(run.get("trigger") or "auto"), str(run.get("started") or ""), list(run.get("mails") or [])
+            )
+        for rating in sorted(ratings, key=lambda r: _ts(r.get("time"))):
+            mail = {
+                "message_id": rating.get("message_id"),
+                "mailbox": rating.get("mailbox") or "INBOX",
+                "uid": rating.get("uid"),
+                "subject": rating.get("subject"),
+                "from": "",
+                "name": rating.get("from"),
+                "date": rating.get("date"),
+                "ai": {
+                    "category": rating.get("category"),
+                    "importance": rating.get("importance"),
+                    "applied": list(rating.get("applied") or []),
+                    "held": None,
+                },
+            }
+            self.add_pass("auto", str(rating.get("time") or ""), [mail])
+        for entry in sorted(usage_log, key=lambda e: _ts(e.get("time"))):
+            if entry.get("kind", "sort") != "sort" or entry.get("sent") is not False or not entry.get("message_id"):
+                continue
+            held = sorted({str(r.get("type")) for r in entry.get("held_back") or [] if isinstance(r, dict)}) or ["term"]
+            mail = {
+                "message_id": entry["message_id"],
+                "mailbox": "INBOX",
+                "subject": entry.get("subject"),
+                "from": entry.get("sender"),
+                "ai": {"held": held},
+            }
+            self.add_pass(str(entry.get("trigger") or "auto"), str(entry.get("time") or ""), [mail])
+        for item in newest:
+            self.add_pass(item.get("trigger") or "auto", item.get("time") or "", [item])
+        self._backfilled = True
+        self._prune()
+        self._changed()
+        return True
+
     def _prune(self) -> None:
         cutoff = (dt_util.now() - timedelta(days=MAX_DAYS)).timestamp()
         self._items = [i for i in self._items if _ts(i.get("time")) >= cutoff][-MAX_ENTRIES:]
@@ -158,6 +222,7 @@ class ActivityLog:
     async def async_clear(self) -> None:
         await self.async_load()
         self._items = []
+        self._backfilled = True  # cleared on purpose: never filled again from the old entries
         await self._store.async_save(self._data())
         async_notify(self._hass, self._entry_id, "activity")
 

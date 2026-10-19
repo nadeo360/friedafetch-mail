@@ -15,6 +15,13 @@ from custom_components.friedafetch_mail.locate import async_locate
 
 from .conftest import setup_core, setup_postfach
 
+
+def dt_now_iso() -> str:
+    from homeassistant.util import dt as dt_util
+
+    return dt_util.now().isoformat(timespec="seconds")
+
+
 AI_ENTITY = "ai_task.test_ai"
 MAIL = "custom_components.friedafetch.mail.ICloudMail"
 GENERATE = "custom_components.friedafetch_mail.ai._generate"
@@ -62,14 +69,19 @@ async def test_passes_fill_the_activity(hass: HomeAssistant, hass_ws_client) -> 
     entry = await _setup(hass, ai_enabled=True, ai_entity=AI_ENTITY)
     link = entry.runtime_data
     log = link.activity
-    log.add_pass("push", "2026-10-19T09:00:00+02:00", [_mail(1), _mail(2, rules=["News"], delete=True)])
-    log.add_pass(
-        "push", "2026-10-19T09:00:05+02:00", [_mail(1, ai={"category": "Bills", "importance": 3, "applied": []})]
-    )
-    log.add_pass("auto", "2026-10-19T10:00:00+02:00", [_mail(3, message_id=None, ai={"held": ["term"]})])
+    from datetime import timedelta
+
+    from homeassistant.util import dt as dt_util
+
+    start = dt_util.start_of_local_day()  # times of today, so the 30 days of the list never cut them off
+    t9, t9b, t10 = ((start + timedelta(hours=h)).isoformat(timespec="seconds") for h in (9, 9 + 5 / 3600, 10))
+    today = start.date().isoformat()
+    log.add_pass("push", t9, [_mail(1), _mail(2, rules=["News"], delete=True)])
+    log.add_pass("push", t9b, [_mail(1, ai={"category": "Bills", "importance": 3, "applied": []})])
+    log.add_pass("auto", t10, [_mail(3, message_id=None, ai={"held": ["term"]})])
     assert len(log.items) == 3
     first = next(i for i in log.items if i["uid"] == 1)
-    assert first["time"] == "2026-10-19T09:00:00+02:00" and first["ai"]["category"] == "Bills"
+    assert first["time"] == t9 and first["ai"]["category"] == "Bills"
 
     # the current rating wins: a correction since the pass
     link.ai.ratings = [
@@ -104,13 +116,9 @@ async def test_passes_fill_the_activity(hass: HomeAssistant, hass_ws_client) -> 
         }
     )
     res = (await ws.receive_json())["result"]
-    assert [i["uid"] for i in res["items"]] == [1] and res["days"] == [
-        {"day": "2026-10-19", "total": 1, "selectable": 1}
-    ]
+    assert [i["uid"] for i in res["items"]] == [1] and res["days"] == [{"day": today, "total": 1, "selectable": 1}]
 
-    await ws.send_json(
-        {"id": 3, "type": "friedafetch_mail/activity/select", "entry_id": entry.entry_id, "day": "2026-10-19"}
-    )
+    await ws.send_json({"id": 3, "type": "friedafetch_mail/activity/select", "entry_id": entry.entry_id, "day": today})
     picked = (await ws.receive_json())["result"]["messages"]
     assert picked == [{"key": "<1@example.com>", "message_id": "<1@example.com>", "mailbox": "INBOX"}]
 
@@ -357,3 +365,92 @@ async def test_try_category_rates_recent_mails_without_saving(hass: HomeAssistan
     assert all(e["trigger"] == "test" for e in sorter.usage_log[-3:])
     with pytest.raises(AiSortError):
         await sorter.async_try_category({"name": sorter.categories[0]["name"].upper()})  # exists already
+
+
+async def test_backfill_once_from_what_was_kept(hass: HomeAssistant) -> None:
+    """After the update the list starts with the runs, ratings and holds kept before – once, merged by message."""
+    from custom_components.friedafetch_mail.activity import ActivityLog
+
+    def ago(hours: float) -> str:
+        from datetime import timedelta
+
+        from homeassistant.util import dt as dt_util
+
+        return (dt_util.now() - timedelta(hours=hours)).isoformat(timespec="seconds")
+
+    log = ActivityLog(hass, "core-x")
+    await log.async_load()
+    log.add_pass("push", ago(1), [_mail(9)])  # a pass right after the update
+    history = [
+        {"started": ago(5), "trigger": "push", "mails": [_mail(1, rules=["News"], delete=True)]},
+        {"started": ago(4), "trigger": "auto", "mails": [_mail(2, message_id=None)]},
+    ]
+    ratings = [
+        {
+            "id": "r2",
+            "message_id": "<2@example.com>",
+            "mailbox": "INBOX",
+            "uid": 2,
+            "subject": "Mail 2",
+            "from": "Sender 2",
+            "category": "Bills",
+            "importance": 3,
+            "applied": [],
+            "time": ago(3.99),
+        },
+        {
+            "id": "r3",
+            "message_id": "<3@example.com>",
+            "mailbox": "INBOX",
+            "uid": 3,
+            "subject": "Mail 3",
+            "from": "Shop",
+            "category": "Ads",
+            "importance": 1,
+            "applied": ["moved:Deleted Messages"],
+            "time": ago(3),
+        },
+    ]
+    usage = [
+        {
+            "kind": "sort",
+            "sent": False,
+            "message_id": "<4@example.com>",
+            "subject": "Befund",
+            "sender": "praxis@example.com",
+            "held_back": [{"type": "term", "value": "x"}],
+            "time": ago(2),
+            "trigger": "push",
+        },
+        {"kind": "sort", "sent": True, "message_id": "<3@example.com>", "time": ago(3)},
+        {"kind": "assist", "sent": True, "time": ago(1.5)},
+    ]
+    assert log.backfill(history, ratings, usage) is True
+    rows = {r["uid"] or r["message_id"]: r for r in log.view([], ai_active=True)}
+    assert len(rows) == 5  # 1, 2 (run without Message-ID + its rating = one line), 3, the hold, 9
+    assert rows[1]["kind"] == "rule" and rows[1]["folder"] == "trash"
+    assert (
+        rows[2]["message_id"] == "<2@example.com>"
+        and rows[2]["kind"] == "ai"
+        and rows[2]["time"] == history[1]["started"]
+    )
+    assert rows[3]["name"] == "Shop" and rows[3]["folder"] == "trash"
+    assert rows["<4@example.com>"]["kind"] == "held"
+    assert log.items[-1]["uid"] == 9  # passes since the update stay the newest
+    assert log.backfill(history, ratings, usage) is False  # only once
+
+    cleared = ActivityLog(hass, "core-y")
+    await cleared.async_load()
+    await cleared.async_clear()
+    assert cleared.backfill(history, ratings, usage) is False  # cleared on purpose stays empty
+
+
+async def test_setup_backfills_the_activity(hass: HomeAssistant) -> None:
+    """Setting up the entry fills a new activity list from the run history."""
+    core = await setup_core(hass)
+    with patch(
+        "custom_components.friedafetch_mail.rules.RuleEngine.history",
+        return_value=[{"started": dt_now_iso(), "trigger": "push", "mails": [_mail(7)]}],
+    ):
+        entry = await setup_postfach(hass, core, rules_auto=False)
+    assert [i["uid"] for i in entry.runtime_data.activity.items] == [7]
