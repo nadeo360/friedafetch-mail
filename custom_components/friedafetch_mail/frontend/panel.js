@@ -32,7 +32,15 @@ const fmtSeconds = (iso) => {
 };
 
 const trigLabel = (t, trig) =>
-  trig === "auto" ? t.triggerAuto : trig === "push" ? t.triggerPush : trig === "assistant" ? t.triggerAssistant : t.triggerManual;
+  trig === "auto"
+    ? t.triggerAuto
+    : trig === "push"
+      ? t.triggerPush
+      : trig === "assistant"
+        ? t.triggerAssistant
+        : trig === "rerate"
+          ? t.triggerRerate
+          : t.triggerManual;
 
 // Sortable column header; sort = { key, dir }.
 const sortTh = (action, sort, key, label, cls = "") => {
@@ -345,17 +353,20 @@ class FriedaPostfachPanel extends HTMLElement {
   }
 
   // Confirmation in the panel's own design (window.confirm looks foreign and is not shown by every app).
-  _confirm({ title, text, ok, irreversible = true }) {
+  _confirm({ title, text, ok, irreversible = true, tone, icon, note, option }) {
     if (this._confirmResolve) this._confirmResolve(false);
+    this._confirmOption = false;
     return new Promise((resolve) => {
       this._confirmResolve = resolve;
-      this._s.confirm = { title, text, ok, irreversible };
+      this._s.confirm = { title, text, ok, irreversible, tone, icon, note, option };
       this._render();
       this.shadowRoot.querySelector('.modal [data-action="confirm-no"]')?.focus({ preventScroll: true });
     });
   }
 
   _confirmDone(value) {
+    // the dialog's switch (e.g. "run the actions of the new category"), read before the dialog goes away
+    this._confirmOption = value && !!this.shadowRoot.querySelector("#confirm-option")?.checked;
     const resolve = this._confirmResolve;
     this._confirmResolve = null;
     this._s.confirm = null;
@@ -517,11 +528,61 @@ class FriedaPostfachPanel extends HTMLElement {
   }
 
   // The AI's recent ratings, as a data table like the other lists.
+  // Progress of a re-rating, or its result (until hidden; for half an hour).
+  _renderBatch(ai) {
+    const t = this.t;
+    const b = ai.batch;
+    if (!b) return "";
+    if (b.state === "running") {
+      const pct = b.total ? Math.round((b.done / b.total) * 100) : 0;
+      return `<div class="batch"><span class="spinner" aria-hidden="true"></span><div class="bt"><strong>${esc(fmt(t.rerateRunning, b.done, b.total))}</strong><div class="bar" aria-hidden="true"><span style="width:${pct}%"></span></div></div><button class="secondary small" data-action="rerate-cancel">${esc(t.rerateCancel)}</button></div>`;
+    }
+    const age = Date.now() - (parseTime(b.finished)?.getTime() || 0);
+    if (this._s.batchHidden === b.started || age > 30 * 60000) return "";
+    const head = { cancelled: t.rerateCancelled, limit: t.rerateLimit }[b.state] || t.rerateDone;
+    const parts = [
+      fmt(t.rerateRated, b.rated),
+      b.held ? fmt(t.rerateHeld, b.held) : "",
+      b.missing ? fmt(t.rerateMissing, b.missing) : "",
+      b.applied ? fmt(t.rerateApplied, b.applied) : "",
+    ].filter(Boolean);
+    const err = (b.errors || [])[0];
+    return `<div class="batch done ${err ? "err" : ""}" data-announce>${ico(err ? "alert-circle-outline" : "check-circle-outline")}<div class="bt"><strong>${esc(head)}</strong><span class="muted">${esc(parts.join(" · "))}</span>${err ? `<span class="aiu-error">${esc(err)}</span>` : ""}</div><button class="icon" data-action="batch-hide" aria-label="${esc(t.close)}" title="${esc(t.close)}">${ico("close")}</button></div>`;
+  }
+
+  // Rate chosen messages again (ratings by id, or messages by Message-ID); asks first.
+  async _rerate({ ratingIds = [], messages = [] }) {
+    const t = this.t;
+    const st = this._s.ai?.status || {};
+    const n = ratingIds.length + messages.length;
+    if (!n) return;
+    const left = Math.max(0, Number(st.limit || 0) - Number(st.used_this_hour || 0));
+    const act = st.mode === "act";
+    const ok = await this._confirm({
+      tone: "neutral",
+      icon: "refresh",
+      title: n === 1 ? t.rerateTitleOne : fmt(t.rerateTitle, n),
+      text: t.rerateText,
+      note: left < n ? fmt(t.rerateNoteLimit, left, n - left) : fmt(t.rerateNote, left),
+      ok: t.rerate,
+      irreversible: false,
+      option: act ? { label: t.rerateApply, checked: false } : null,
+    });
+    if (!ok) return;
+    const apply = act && this._confirmOption;
+    await this._call(async () => {
+      this._s.ai = await this._ws({ type: "friedafetch_mail/ai/rerate", entry_id: this._s.entryId, rating_ids: ratingIds, messages, apply });
+      this._s.rateSel = new Set();
+      this._s.batchHidden = null;
+    });
+  }
+
   _renderRatings(ai, cats, catLabel) {
     const t = this.t;
     const s = this._s;
     const list = (ai.ratings || []).map((r, i) => ({ r, i }));
-    if (!list.length) return `<p class="muted">${esc(t.aiNoRatings)}</p>`;
+    if (!list.length) return `${this._renderBatch(ai)}<p class="muted">${esc(t.aiNoRatings)}</p>`;
+    const sel = (s.rateSel ||= new Set());
     const kinds = {
       "": () => true,
       important: ({ r }) => Number(r.importance) >= 4,
@@ -546,7 +607,9 @@ class FriedaPostfachPanel extends HTMLElement {
           .join("");
         const opt = (val, label) => `<option value="${esc(val)}" ${val === cur ? "selected" : ""}>${esc(label)}</option>`;
         const search = [r.subject, r.from, r.from_domain, cur, r.reason].join(" ").toLowerCase();
-        return `<tr class="arow rrate" data-search="${esc(search)}">
+        const picked = sel.has(r.id);
+        return `<tr class="arow rrate ${picked ? "picked" : ""}" data-rid="${esc(r.id)}" data-search="${esc(search)}">
+            <td class="c-sel"><input type="checkbox" class="selbox" data-action="rate-sel" data-id="${esc(r.id)}" ${picked ? "checked" : ""} aria-label="${esc(fmt(t.selectMail, r.subject || "–"))}"></td>
             <td class="c-imp"><span class="imp i${esc(r.importance)}" role="img" aria-label="${esc(fmt(t.aiImportance, r.importance))}" title="${esc(fmt(t.aiImportance, r.importance))}">${esc(r.importance)}</span></td>
             <td class="c-time num dim" title="${esc(fmtDateTime(r.time))}">${esc(fmtShort(r.time))}</td>
             <td class="c-subj"><button class="rtext go" data-action="rate-open" data-id="${esc(r.id)}" aria-haspopup="dialog" title="${esc(r.subject || "")}"><span class="rt">${esc(r.subject || "–")}</span>${ico("chevron-right")}</button></td>
@@ -573,14 +636,20 @@ class FriedaPostfachPanel extends HTMLElement {
       const active = sort.key === key;
       return `<th class="${cls}" aria-sort="${active ? (sort.dir < 0 ? "descending" : "ascending") : "none"}"><button class="sort ${active ? "on" : ""}" data-action="rate-sort" data-k="${key}">${esc(label)}${ico(active ? (sort.dir < 0 ? "arrow-down" : "arrow-up") : "swap-vertical")}</button></th>`;
     };
-    return `<div class="tbar">
+    const shown = list.filter(kinds[f]);
+    const all = shown.length > 0 && shown.every(({ r }) => sel.has(r.id));
+    const running = ai.batch?.state === "running";
+    const selbar = sel.size
+      ? `<div class="selbar"><strong>${esc(fmt(t.selected, sel.size))}</strong><span class="grow"></span><button class="link small" data-action="rate-sel-clear">${esc(t.selectionClear)}</button><button class="pill" data-action="rerate" ${s.busy || running ? "disabled" : ""}>${ico("refresh")}${esc(t.rerate)}</button></div>`
+      : "";
+    return `${this._renderBatch(ai)}<div class="tbar">
         <label class="search">${ico("magnify")}<input type="search" data-search-table="rates" value="${esc(s.searchRates || "")}" placeholder="${esc(t.searchAi)}" aria-label="${esc(t.searchAi)}"></label>
         <div class="segs" role="group">${seg("", "format-list-bulleted", t.aiuAll)}${seg("important", "alert-circle-outline", t.aiImportant)}${seg("corrected", "pencil-outline", t.aiCorrected)}${seg("suspicious", "alert-outline", t.aiSuspicious)}</div>
         <span class="grow"></span>${W.columnMenu(this._layout, "rates", cols, t)}
-      </div>${W.columnStyle(this._layout, "rates", cols)}
+      </div>${W.columnStyle(this._layout, "rates", cols)}${selbar}
       <div class="scroll aiu-scroll"><table class="dtable atable ratetable" data-table="rates"><thead><tr>
-        ${th("imp", "!", "c-imp")}${th("time", t.colTime, "c-time num")}<th class="c-subj">${esc(t.colSubjectOnly)}</th><th class="c-from">${esc(t.colSender)}</th><th class="c-cat">${esc(t.colCategory)}</th><th class="c-applied">${esc(t.colApplied)}</th>
-      </tr></thead><tbody>${rows || `<tr><td colspan="7" class="muted">${esc(t.noMatches)}</td></tr>`}</tbody></table></div>${W.pagerSlot ? W.pagerSlot("rates") : ""}
+        <th class="c-sel"><input type="checkbox" class="selbox" data-action="rate-sel-all" ${all ? "checked" : ""} aria-label="${esc(t.selectAllMatching)}" title="${esc(t.selectAllMatching)}"></th>${th("imp", "!", "c-imp")}${th("time", t.colTime, "c-time num")}<th class="c-subj">${esc(t.colSubjectOnly)}</th><th class="c-from">${esc(t.colSender)}</th><th class="c-cat">${esc(t.colCategory)}</th><th class="c-applied">${esc(t.colApplied)}</th>
+      </tr></thead><tbody>${rows || `<tr><td colspan="8" class="muted">${esc(t.noMatches)}</td></tr>`}</tbody></table></div>${W.pagerSlot ? W.pagerSlot("rates") : ""}
       <p class="muted nomatch" hidden>${esc(t.noMatches)}</p>`;
   }
 
@@ -961,7 +1030,11 @@ class FriedaPostfachPanel extends HTMLElement {
           ${chips.length ? `<div class="chips">${chips.join("")}</div>` : ""}
         </div>
         <div class="sheet-body">${body}</div>
-        <div class="sheet-foot"><span class="muted">${esc(d.message_id || sheet.key.message_id ? t.tlFoot : t.tlFootOld)}</span></div>
+        <div class="sheet-foot"><span class="muted">${esc(d.message_id || sheet.key.message_id ? t.tlFoot : t.tlFootOld)}</span>${
+          (d.message_id || sheet.key.message_id) && this._s.ai?.status?.active
+            ? `<button class="secondary small ib" data-action="tl-rerate" ${this._s.busy || this._s.ai?.batch?.state === "running" ? "disabled" : ""}>${ico("refresh")}${esc(t.rerate)}</button>`
+            : ""
+        }</div>
       </aside>`;
   }
 
@@ -1015,7 +1088,7 @@ class FriedaPostfachPanel extends HTMLElement {
     } else if (e.kind === "rated") {
       icon = "tag-outline";
       tone = "ai";
-      title = fmt(t.tlRated, cat(e.category));
+      title = fmt(e.again ? t.tlRatedAgain : t.tlRated, cat(e.category));
       sub = e.importance ? fmt(t.tlImportance, e.importance) : "";
       quote = e.reason || "";
       if (e.suspicious) minis = [t.aiSuspicious];
@@ -1076,7 +1149,7 @@ class FriedaPostfachPanel extends HTMLElement {
       errors: (h) => errorsOf(h).length > 0,
     };
     const f = kinds[s.runFilter] ? s.runFilter : "";
-    const trigIcon = { auto: "timer-outline", push: "lightning-bolt", assistant: "robot-outline", manual: "gesture-tap" };
+    const trigIcon = { auto: "timer-outline", push: "lightning-bolt", assistant: "robot-outline", manual: "gesture-tap", rerate: "refresh" };
     const sort = s.runsSort || { key: "time", dir: -1 };
     const mailCount = (h) => Math.max(Number(h.checked || 0), (h.mails || []).length + Number(h.mails_more || 0));
     const runValue = (h) =>
@@ -1685,6 +1758,40 @@ class FriedaPostfachPanel extends HTMLElement {
           if (m) this._openTimeline({ message_id: m.message_id || null, subject: m.subject || "", sender: m.from || "" });
         },
         "sheet-close": () => this._closeTimeline(),
+        "rate-sel": () => {
+          const sel = (this._s.rateSel ||= new Set());
+          if (el.checked) sel.add(el.dataset.id);
+          else sel.delete(el.dataset.id);
+          this._render();
+        },
+        "rate-sel-all": () => {
+          // every row that matches the filter and the search, on all pages
+          const sel = (this._s.rateSel ||= new Set());
+          for (const tr of root.querySelectorAll('table[data-table="rates"] tbody tr[data-rid]')) {
+            if (tr.dataset.nomatch === "1") continue;
+            if (el.checked) sel.add(tr.dataset.rid);
+            else sel.delete(tr.dataset.rid);
+          }
+          this._render();
+        },
+        "rate-sel-clear": () => {
+          this._s.rateSel = new Set();
+          this._render();
+        },
+        rerate: () => this._rerate({ ratingIds: [...(this._s.rateSel || [])] }),
+        "tl-rerate": () => {
+          const sheet = this._s.sheet;
+          const mid = sheet?.data?.message_id || sheet?.key?.message_id;
+          if (mid) this._rerate({ messages: [{ message_id: mid, ...(sheet.data?.mailbox ? { mailbox: sheet.data.mailbox } : {}) }] });
+        },
+        "rerate-cancel": () =>
+          this._call(async () => {
+            this._s.ai = await this._ws({ type: "friedafetch_mail/ai/rerate/cancel", entry_id: this._s.entryId });
+          }),
+        "batch-hide": () => {
+          this._s.batchHidden = this._s.ai?.batch?.started;
+          this._render();
+        },
         reload: () => window.location.reload(),
         "aiu-charts": () => {
           this._layout.setOpt("aiu", "charts", !this._layout.opt("aiu", "charts", false));

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from types import SimpleNamespace
 from typing import Any
@@ -448,3 +449,106 @@ async def test_transmission_keeps_its_send_time_and_duration(hass: HomeAssistant
     rated = sorter.ratings[-1]
     gap = datetime.fromisoformat(rated["time"]) - datetime.fromisoformat(sent["time"])
     assert gap.total_seconds() == 7 and sent["duration"] == 7
+
+
+async def test_rerate_chosen_messages_keeps_the_earlier_rating(hass: HomeAssistant, hass_ws_client) -> None:
+    """A batch rates chosen messages again – also one that was moved since – and shows up under Runs."""
+    entry = await _setup(hass, ai_enabled=True, ai_entity=AI_ENTITY, ai_mode="act")
+    sorter = entry.runtime_data.ai
+    with patch(f"{MAIL}.async_mailboxes", AsyncMock(return_value=[{"name": "Belege"}, {"name": "Archive"}])):
+        await sorter.async_set_categories(
+            [
+                {"name": "Bills", "description": "invoices", "move_to": "Belege"},
+                {"name": "Personal", "description": "people"},
+            ]
+        )
+    first = SimpleNamespace(data={"category": "Personal", "importance": 3, "reason": "a person"})
+    with (
+        patch(f"{MAIL}.async_search_uids", AsyncMock(side_effect=[[1], [1, 2, 3]])),
+        patch(f"{MAIL}.async_summaries", AsyncMock(return_value=[_summary(2), _summary(3)])),
+        patch(GENERATE, AsyncMock(return_value=first)),
+    ):
+        await sorter.async_process()
+        await sorter.async_process("push")
+    ids = [r["id"] for r in sorter.ratings]
+    assert len(ids) == 2
+
+    # uid 3 was moved to "Archive" meanwhile: found again by its Message-ID
+    async def summaries(box: str, uids: list[int]) -> list[dict[str, Any]]:
+        if box == "INBOX" and uids == [2]:
+            return [_summary(2)]
+        if box == "Archive" and uids == [7]:
+            return [{**_summary(3), "uid": 7}]
+        return []
+
+    async def search(box: str, criteria: list[str]) -> list[int]:
+        return (
+            [7]
+            if box == "Archive" and criteria[:2] == ["HEADER", "Message-ID"] and "<3@example.com>" in criteria[2]
+            else []
+        )
+
+    again = SimpleNamespace(data={"category": "Bills", "importance": 2, "reason": "an invoice"})
+    ws = await hass_ws_client(hass)
+    with (
+        patch(f"{MAIL}.async_summaries", side_effect=summaries),
+        patch(f"{MAIL}.async_search_uids", side_effect=search),
+        patch(f"{MAIL}.async_mailboxes", AsyncMock(return_value=[{"name": "INBOX"}, {"name": "Archive"}])),
+        patch(f"{MAIL}.async_move", AsyncMock()) as move,
+        patch(GENERATE, AsyncMock(return_value=again)) as generate,
+    ):
+        await ws.send_json(
+            {
+                "id": 1,
+                "type": "friedafetch_mail/ai/rerate",
+                "entry_id": entry.entry_id,
+                "rating_ids": ids,
+                "apply": True,
+            }
+        )
+        msg = await ws.receive_json()
+        assert msg["success"], msg
+        assert msg["result"]["batch"]["total"] == 2  # started (with these instant mocks it may already be done)
+        await hass.async_block_till_done()
+    assert generate.await_count == 2
+    batch = sorter.batch_status()
+    assert batch["state"] == "done" and batch["done"] == 2 and batch["rated"] == 2 and batch["missing"] == 0
+    # the new category's action ran where the message is now
+    assert sorted(c.args[0] for c in move.await_args_list) == ["Archive", "INBOX"]
+    moved = next(r for r in sorter.ratings if r["message_id"] == "<3@example.com>")
+    assert moved["mailbox"] == "Archive" and moved["uid"] == 7 and moved["category"] == "Bills"
+    assert moved["previous"]["category"] == "Personal"
+    assert len(sorter.ratings) == 2  # replaced, not added
+    runs = entry.runtime_data.rules.history()
+    assert runs[0]["trigger"] == "rerate"
+
+
+async def test_rerate_without_actions_and_cancel(hass: HomeAssistant) -> None:
+    """Without "apply" nothing is moved; a cancelled batch stops after the message in progress."""
+    entry = await _setup(hass, ai_enabled=True, ai_entity=AI_ENTITY, ai_mode="act")
+    sorter = entry.runtime_data.ai
+    with patch(f"{MAIL}.async_mailboxes", AsyncMock(return_value=[{"name": "Belege"}])):
+        await sorter.async_set_categories([{"name": "Bills", "description": "invoices", "move_to": "Belege"}])
+    answer = SimpleNamespace(data={"category": "Bills", "importance": 2, "reason": "x"})
+    gate = asyncio.Event()
+
+    async def slow_ai(*args: Any, **kwargs: Any) -> Any:
+        await gate.wait()  # the AI takes its time
+        return answer
+
+    items = [{"message_id": f"<{u}@example.com>", "mailbox": "INBOX", "uid": u} for u in (4, 5, 6)]
+    with (
+        patch(f"{MAIL}.async_summaries", AsyncMock(side_effect=lambda box, uids: [_summary(uids[0])])),
+        patch(f"{MAIL}.async_move", AsyncMock()) as move,
+        patch(GENERATE, side_effect=slow_ai),
+    ):
+        status = await sorter.async_start_rerate(items, apply=False)
+        assert status["state"] == "running" and status["apply"] is False
+        with pytest.raises(AiSortError):
+            await sorter.async_start_rerate(items, apply=False)  # one batch at a time
+        sorter.cancel_rerate()  # stops after the message in progress
+        gate.set()
+        await hass.async_block_till_done()
+    batch = sorter.batch_status()
+    assert batch["state"] == "cancelled" and batch["done"] == 1 and batch["rated"] == 1
+    move.assert_not_awaited()

@@ -218,6 +218,8 @@ class AiSorter:
         self._language = "de" if language.lower().startswith("de") else "en"
         self._store: Store[dict[str, Any]] = Store(hass, STORAGE_VERSION, f"{DOMAIN}.ai.{core_entry_id}")
         self._lock = asyncio.Lock()
+        self._batch: dict[str, Any] | None = None  # a re-rating in progress or just finished (panel)
+        self.on_batch_done: Any | None = None  # async (report) -> None: records the pass in the run history
         self._loaded = False
         self.categories: list[dict[str, Any]] = []
         self.ratings: list[dict[str, Any]] = []
@@ -513,6 +515,127 @@ class AiSorter:
             await self._finish(report)
         return report
 
+    # ---------------------------------------------------------- re-rating
+    def batch_status(self) -> dict[str, Any] | None:
+        """Progress of the re-rating for the panel (None before the first one)."""
+        return None if self._batch is None else {k: v for k, v in self._batch.items() if k != "cancel"}
+
+    async def async_start_rerate(self, items: list[dict[str, Any]], *, apply: bool) -> dict[str, Any]:
+        """Rate chosen messages again with the current categories, one AI call each, in the background.
+
+        items: {message_id, mailbox, uid, applied} – the message is looked up where it was rated, or by its
+        Message-ID in the other folders if it was moved since. The hourly limit and the kill switch apply as always.
+        """
+        if not self.settings["active"]:
+            raise AiSortError("AI sorting is off or no AI entity is selected (options of Frieda Postfach)")
+        if self._batch is not None and self._batch["state"] == "running":
+            raise AiSortError("A re-rating is already running")
+        await self.async_load()
+        todo: list[dict[str, Any]] = []
+        keys: set[Any] = set()
+        for item in items:
+            key = item.get("message_id") or (item.get("mailbox"), item.get("uid"))
+            if key not in keys and (item.get("message_id") or item.get("uid") is not None):
+                keys.add(key)
+                todo.append(item)
+        if not todo:
+            raise AiSortError("No messages chosen")
+        self._batch = {
+            "state": "running",  # running | done | cancelled | limit
+            "total": len(todo),
+            "done": 0,
+            "rated": 0,
+            "held": 0,
+            "missing": 0,
+            "applied": 0,
+            "errors": [],
+            "apply": bool(apply and self.settings["mode"] == "act"),
+            "started": _now_iso(),
+            "finished": None,
+            "cancel": False,
+        }
+        self._hass.async_create_background_task(self._run_rerate(todo), "frieda_postfach_rerate")
+        async_notify(self._hass, self._entry_id, "ai")
+        return self.batch_status() or {}
+
+    def cancel_rerate(self) -> None:
+        """Stop after the message in progress."""
+        if self._batch is not None and self._batch["state"] == "running":
+            self._batch["cancel"] = True
+
+    async def _run_rerate(self, todo: list[dict[str, Any]]) -> None:
+        batch = self._batch
+        assert batch is not None  # noqa: S101 - set by async_start_rerate
+        report = self._report("rerate")
+        try:
+            for item in todo:
+                if batch["cancel"]:
+                    batch["state"] = "cancelled"
+                    break
+                if self._budget() <= 0:
+                    batch["state"] = "limit"
+                    break
+                async with self._lock:  # one message at a time; new mail can be sorted in between
+                    found = await self._locate(item)
+                    if found is None:
+                        batch["missing"] += 1
+                    else:
+                        await self._rate(
+                            [found[1]], report, advance=False, mailbox=found[0], apply=batch["apply"], again=True
+                        )
+                batch.update(rated=report["rated"], held=report["skipped"], applied=report["applied"])
+                batch["done"] += 1
+                async_notify(self._hass, self._entry_id, "ai")
+            await self._finish(report)
+        except Exception as err:  # noqa: BLE001 - report instead of losing the task
+            _LOGGER.warning("Re-rating failed: %s", err)
+            report["errors"].append(str(err) or err.__class__.__name__)
+        finally:
+            if batch["state"] == "running":
+                batch["state"] = "done"
+            batch["finished"] = _now_iso()
+            batch["errors"] = list(report["errors"])[:20]
+            async_notify(self._hass, self._entry_id, "ai")
+        if self.on_batch_done is not None and report["items"]:
+            await self.on_batch_done(report)
+
+    async def _locate(self, item: dict[str, Any]) -> tuple[str, int] | None:
+        """Where the message is now: where it was rated, else found by its Message-ID (moved since)."""
+        mid = item.get("message_id")
+        box = item.get("mailbox") or MAILBOX
+        uid = item.get("uid")
+        if uid is not None:
+            try:
+                found = await self._mail.async_summaries(box, [int(uid)])
+            except (MailError, MailboxNotFound):
+                found = []
+            if found and (not mid or found[0].get("message_id") == mid):
+                return box, int(uid)
+        if not mid:
+            return None
+        boxes = [box]
+        boxes += [str(a)[6:] for a in item.get("applied") or [] if str(a).startswith("moved:")]
+        boxes += [c["move_to"] for c in self.categories if c.get("move_to")]
+        try:
+            boxes += [m["name"] for m in await self._mail.async_mailboxes() if m.get("special_use") != "\\Trash"]
+        except MailError:
+            pass
+        guard = getattr(self._clients, "guard", None)
+        quoted = '"' + str(mid).replace("\\", "\\\\").replace('"', '\\"') + '"'
+        for name in dict.fromkeys(boxes):
+            if guard is not None:
+                try:
+                    guard.check_mailbox_visible(name)
+                except Exception:  # noqa: BLE001, S112 - hidden from the AI: not searched
+                    continue
+            try:
+                uids = await self._mail.async_search_uids(name, ["HEADER", "Message-ID", quoted])
+            except (MailError, MailboxNotFound):
+                continue
+            if uids:
+                return name, uids[-1]
+        return None
+
     def _current_validity(self) -> int | None:
         getter = getattr(self._mail, "uidvalidity", None)
         value = getter(MAILBOX) if callable(getter) else None
@@ -569,10 +692,20 @@ class AiSorter:
             except Exception as err:  # noqa: BLE001
                 _LOGGER.debug("Audit logging of AI sorting failed: %s", err)
 
-    async def _rate(self, uids: list[int], report: dict[str, Any], *, advance: bool) -> None:
+    async def _rate(
+        self,
+        uids: list[int],
+        report: dict[str, Any],
+        *,
+        advance: bool,
+        mailbox: str = MAILBOX,
+        apply: bool | None = None,
+        again: bool = False,
+    ) -> None:
+        """Rate messages of a mailbox. apply None: run the category actions in act mode; again: a re-rating."""
         if not uids:
             return
-        summaries = {s["uid"]: s for s in await self._mail.async_summaries(MAILBOX, uids)}
+        summaries = {s["uid"]: s for s in await self._mail.async_summaries(mailbox, uids)}
         for uid in uids:
             summary = summaries.get(uid)
             if summary is None:  # moved or deleted in the meantime
@@ -590,7 +723,7 @@ class AiSorter:
             if self.settings["block_terms"] or (self.settings["include_body"] and not held):
                 # read locally (PEEK, stays unread): to check the kill-switch terms in the text, or to send it
                 try:
-                    message = await self._mail.async_get_message(MAILBOX, uid, max_chars=20000)
+                    message = await self._mail.async_get_message(mailbox, uid, max_chars=20000)
                 except (MailError, MailboxNotFound) as err:
                     report["errors"].append(f"Could not read message {uid}: {err}")
                     break
@@ -601,7 +734,7 @@ class AiSorter:
                 report["skipped"] += 1
                 report["items"].append(
                     {
-                        "mailbox": MAILBOX,
+                        "mailbox": mailbox,
                         "uid": uid,
                         "subject": summary.get("subject"),
                         "from": sender.get("email"),
@@ -635,17 +768,18 @@ class AiSorter:
                 break  # keep the uid for the next run
             self._hour_count += 1
             self.last_error = None
-            rating = self._record(summary, result)
+            rating = self._record(summary, result, mailbox=mailbox, again=again)
             report["rated"] += 1
             if advance:
                 self._last_uid[MAILBOX] = max(self._last_uid.get(MAILBOX, 0), uid)
-            if self.settings["mode"] == "act":
-                if await self._apply(uid, rating, report):
+            if self.settings["mode"] == "act" and apply is not False:
+                if await self._apply(uid, rating, report, mailbox=mailbox):
                     report["applied"] += 1
-            self._fire(rating)
+            if not again:  # a re-rating does not announce the message to automations again
+                self._fire(rating)
             report["items"].append(
                 {
-                    "mailbox": MAILBOX,
+                    "mailbox": mailbox,
                     "uid": uid,
                     "subject": summary.get("subject"),
                     "from": sender.get("email"),
@@ -796,13 +930,15 @@ class AiSorter:
                 out.append(r)
         return out
 
-    def _record(self, summary: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+    def _record(
+        self, summary: dict[str, Any], result: dict[str, Any], *, mailbox: str = MAILBOX, again: bool = False
+    ) -> dict[str, Any]:
         sender = (summary.get("from") or [{}])[0]
         email = str(sender.get("email") or "")
         rating = {
             "id": uuid.uuid4().hex[:10],
             "time": _now_iso(),
-            "mailbox": MAILBOX,
+            "mailbox": mailbox,
             "uid": summary["uid"],
             "message_id": summary.get("message_id"),
             "subject": summary.get("subject") or "",
@@ -814,12 +950,26 @@ class AiSorter:
             "corrected": None,
             **result,
         }
-        self.ratings = [r for r in self.ratings if not (r.get("mailbox") == MAILBOX and r.get("uid") == summary["uid"])]
+        mid = summary.get("message_id")
+
+        def same(r: dict[str, Any]) -> bool:
+            return (r.get("mailbox") == mailbox and r.get("uid") == summary["uid"]) or bool(
+                mid and r.get("message_id") == mid
+            )
+
+        old = next((r for r in reversed(self.ratings) if same(r)), None)
+        if again and old is not None:
+            # the timeline shows the earlier rating next to the new one
+            rating["previous"] = {
+                k: old.get(k)
+                for k in ("time", "category", "importance", "reason", "corrected", "corrected_at", "applied")
+            }
+        self.ratings = [r for r in self.ratings if not same(r)]
         self.ratings.append(rating)
         self.ratings = self.ratings[-MAX_RATINGS:]
         return rating
 
-    async def _apply(self, uid: int, rating: dict[str, Any], report: dict[str, Any]) -> bool:
+    async def _apply(self, uid: int, rating: dict[str, Any], report: dict[str, Any], *, mailbox: str = MAILBOX) -> bool:
         """Run the category actions (act mode). Never deletes."""
         cat = next((c for c in self.categories if c["name"] == rating["category"]), None)
         notify = self.settings["notify"] and rating["importance"] >= self.settings["notify"]
@@ -837,18 +987,18 @@ class AiSorter:
                 return False
         try:
             if cat and cat.get("mark_seen"):
-                await self._mail.async_set_flags(MAILBOX, [uid], seen=True)
+                await self._mail.async_set_flags(mailbox, [uid], seen=True)
                 applied.append("seen")
             if flag:
-                await self._mail.async_set_flags(MAILBOX, [uid], flagged=True)
+                await self._mail.async_set_flags(mailbox, [uid], flagged=True)
                 applied.append("flagged")
             if notify and self._notify is not None:
                 await self._notify(rating)
                 applied.append("notified")
-            if cat and cat.get("move_to"):
+            if cat and cat.get("move_to") and cat["move_to"] != mailbox:
                 if self._clients.guard is not None:
                     self._clients.guard.check_mailbox_visible(cat["move_to"])
-                await self._mail.async_move(MAILBOX, [uid], cat["move_to"])
+                await self._mail.async_move(mailbox, [uid], cat["move_to"])
                 applied.append(f"moved:{cat['move_to']}")
         except Exception as err:  # noqa: BLE001 - one message must not stop the run
             report["errors"].append(f"UID {uid}: {err}")

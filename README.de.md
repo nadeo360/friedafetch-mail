@@ -153,8 +153,15 @@ So funktioniert es:
    Tagesüberblicks, sonst als Benachrichtigung in Home Assistant). Löschen oder Senden kann die KI nie.
 
 Im Panel korrigierst du eine Bewertung, indem du die richtige Kategorie wählst; bis zu 30 Korrekturen gehen als
-Beispiele an die KI. Ein Stundenlimit (Standard 30) begrenzt die KI-Aufrufe; jede Mail wird höchstens einmal
-bewertet. Aktionen, die Mails verändert haben, stehen in Friedas Änderungsprotokoll.
+Beispiele an die KI. Ein Stundenlimit (Standard 30) begrenzt die KI-Aufrufe; jede Mail wird automatisch höchstens
+einmal bewertet.
+
+**Neu bewerten:** Nach geänderten Kategorien wählst du unter *Zuletzt bewertet* beliebig viele bewertete Mails aus
+(auch „alle passenden“ über alle Seiten) oder öffnest den Verlauf einer einzelnen Mail und wählst **Neu bewerten**.
+Die Mails gehen mit den aktuellen Kategorien erneut an die KI – Killswitch und Stundenlimit gelten wie immer –, und
+inzwischen verschobene Mails werden über ihre Message-ID im neuen Ordner gefunden. Auf Wunsch laufen danach die
+Aktionen der neuen Kategorie. Die Neubewertung läuft im Hintergrund mit Fortschritt und lässt sich abbrechen; die
+frühere Bewertung bleibt im Verlauf der Mail sichtbar. Aktionen, die Mails verändert haben, stehen in Friedas Änderungsprotokoll.
 
 Die Panel-Karte **An KI übermittelt** zeigt, was an eine KI ging: Aufrufe und Zeichen heute, in 7 und 30 Tagen,
 wie viele davon mit Mailtext, je KI-Entität und Zweck (Sortierung, Tagesüberblick), und ein Protokoll jeder

@@ -199,6 +199,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
     sorter.account = link.label
     link.ai = sorter
 
+    async def _rerated(report: dict[str, Any]) -> None:
+        await rules.async_record_ai("rerate", report)  # the re-rating shows up under Runs as well
+
+    sorter.on_batch_done = _rerated
+    entry.async_on_unload(sorter.cancel_rerate)
+
     async def _ai_after_rules(trigger: str) -> dict[str, Any] | None:
         if not sorter.settings["active"]:
             return None

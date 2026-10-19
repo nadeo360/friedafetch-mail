@@ -120,10 +120,34 @@ def build_timeline(
         if not _matches(rating, message_id, subject, sender):
             continue
         note(rating)
+        prev = rating.get("previous")
+        if prev:  # rated again later: the earlier rating, its actions and correction come first
+            events.append(
+                {
+                    "time": prev.get("time"),
+                    "kind": "rated",
+                    "category": prev.get("category"),
+                    "importance": prev.get("importance"),
+                    "reason": prev.get("reason"),
+                    "suspicious": False,
+                }
+            )
+            if prev.get("applied"):
+                events.append({"time": prev.get("time"), "kind": "ai_applied", "applied": list(prev["applied"])})
+            if prev.get("corrected"):
+                events.append(
+                    {
+                        "time": prev.get("corrected_at"),
+                        "kind": "corrected",
+                        "before": prev.get("category"),
+                        "after": prev.get("corrected"),
+                    }
+                )
         events.append(
             {
                 "time": rating.get("time"),
                 "kind": "rated",
+                "again": bool(prev),
                 "category": rating.get("category"),
                 "importance": rating.get("importance"),
                 "reason": rating.get("reason"),

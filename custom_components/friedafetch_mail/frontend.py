@@ -67,6 +67,8 @@ async def async_setup_frontend(hass: HomeAssistant, version: str) -> None:
         ws_ai_run,
         ws_ai_clear,
         ws_ai_usage_clear,
+        ws_ai_rerate,
+        ws_ai_rerate_cancel,
     ):
         websocket_api.async_register_command(hass, command)
     await panel_custom.async_register_panel(
@@ -314,6 +316,7 @@ def _ai_payload(sorter: Any, limit: int = 200) -> dict[str, Any]:  # all kept ra
         "ratings": list(reversed(sorter.ratings[-limit:])),
         "examples": len(sorter.examples),
         "usage": sorter.usage_summary(limit=300),  # the whole log; the panel pages it
+        "batch": sorter.batch_status(),
     }
 
 
@@ -375,6 +378,48 @@ async def ws_ai_run(hass: HomeAssistant, connection: websocket_api.ActiveConnect
     entry = _entry(hass, msg.get("entry_id"))
     await entry.runtime_data.rules.async_record_ai("manual", report)  # shows up under Runs as well
     connection.send_result(msg["id"], {"report": report, **_ai_payload(sorter)})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/ai/rerate",
+        vol.Optional("entry_id"): str,
+        vol.Optional("rating_ids"): [str],
+        vol.Optional("messages"): [
+            {vol.Required("message_id"): str, vol.Optional("mailbox"): str, vol.Optional("uid"): vol.Any(int, None)}
+        ],
+        vol.Optional("apply", default=False): bool,
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+@_ws_errors
+async def ws_ai_rerate(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """Rate chosen messages again (ratings by id, or messages by Message-ID); runs in the background."""
+    sorter = _sorter(hass, msg.get("entry_id"))
+    await sorter.async_load()
+    wanted = set(msg.get("rating_ids") or [])
+    items = [
+        {k: r.get(k) for k in ("message_id", "mailbox", "uid", "applied")}
+        for r in sorter.ratings
+        if r.get("id") in wanted
+    ]
+    items += [dict(m) for m in msg.get("messages") or []]
+    await sorter.async_start_rerate(items, apply=msg["apply"])
+    connection.send_result(msg["id"], _ai_payload(sorter))
+
+
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/ai/rerate/cancel", vol.Optional("entry_id"): str})
+@websocket_api.require_admin
+@websocket_api.async_response
+@_ws_errors
+async def ws_ai_rerate_cancel(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Stop the re-rating after the message in progress."""
+    sorter = _sorter(hass, msg.get("entry_id"))
+    sorter.cancel_rerate()
+    connection.send_result(msg["id"], _ai_payload(sorter))
 
 
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/ai/clear", vol.Optional("entry_id"): str})

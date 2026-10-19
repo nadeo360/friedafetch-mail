@@ -152,3 +152,26 @@ async def test_timeline_websocket(hass: HomeAssistant, hass_ws_client) -> None:
         {"id": 2, "type": "friedafetch_mail/mail/timeline", "entry_id": entry.entry_id, "message_id": "<none@x>"}
     )
     assert (await ws.receive_json())["result"]["found"] is False
+
+
+def test_timeline_shows_the_earlier_rating_after_a_rerating() -> None:
+    rating = {
+        **RATINGS[0],
+        "time": "2026-10-19T09:00:00+02:00",
+        "category": "Persönlich",
+        "corrected": None,
+        "applied": [],
+        "previous": {
+            "time": "2026-10-18T16:45:08+02:00",
+            "category": "Rechnungen",
+            "importance": 4,
+            "reason": "Finanzen",
+            "corrected": None,
+            "corrected_at": None,
+            "applied": ["moved:Belege"],
+        },
+    }
+    tl = build_timeline([], [rating], [], message_id=MID)
+    rated = [e for e in tl["events"] if e["kind"] == "rated"]
+    assert [(e["category"], e.get("again")) for e in rated] == [("Rechnungen", None), ("Persönlich", True)]
+    assert [e["kind"] for e in tl["events"]] == ["rated", "ai_applied", "rated"]

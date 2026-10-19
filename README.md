@@ -147,7 +147,15 @@ How it works:
    Assistant). The AI can never delete or send.
 
 In the panel you correct a rating by choosing the right category; up to 30 corrections are passed to the AI as
-examples. An hourly limit (default 30) caps the number of AI calls; every mail is rated at most once. Actions that
+examples. An hourly limit (default 30) caps the number of AI calls; every mail is rated at most once
+automatically.
+
+**Rate again:** after changing the categories you can select any number of rated messages under *Recently rated*
+(also "all matching" across pages) or open one message's timeline, and choose **Rate again**. The messages go to the
+AI once more with the current categories – the kill switch and the hourly limit apply as always – and messages that
+were moved since are found in their new folder by their Message-ID. On request the actions of the new category run
+afterwards. The re-rating runs in the background with progress and can be cancelled; the earlier rating stays
+visible in the message timeline. Actions that
 changed mail are written to Frieda's change log.
 
 The panel card **Sent to AI** shows what went to an AI: calls and characters today, in 7 and 30 days, how many of

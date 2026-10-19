@@ -166,7 +166,8 @@ export const STYLE = `
     .row { margin-bottom: 8px; }
     .editor h3.title { font-size: 17px; }
     .row label:has(input[type=checkbox]) { display: flex; align-items: center; gap: 10px; min-height: 44px; }
-    input[type=checkbox]:not(.switch) { width: 22px; height: 22px; }
+    input[type=checkbox]:not(.switch):not(.selbox) { width: 22px; height: 22px; }
+    input.selbox { width: 20px; height: 20px; }
   }
   @container (max-width: 720px) {
     table.dtable tr.rrow { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto 36px; grid-template-areas: "on name hits menu" ". cond cond cond" ". act act act"; align-items: center; column-gap: 6px; padding: 6px 0; border-bottom: 1px solid var(--divider-color, #e0e0e0); }
@@ -286,5 +287,32 @@ export const STYLE = `
   @container (max-width: 720px) {
     .scroll.aiu-scroll { overflow-x: hidden; overflow-y: auto; }
   }
+
+  /* selection in "Recently rated" and the re-rating */
+  .ratetable .c-sel { width: 28px; padding-right: 0; }
+  /* selection boxes in the theme's colours (native ones stay light in dark themes) */
+  input.selbox { appearance: none; -webkit-appearance: none; flex: none; width: 18px; height: 18px; min-height: 0; margin: 0; padding: 0; border-radius: 5px; border: 1.5px solid var(--secondary-text-color); background: transparent; display: inline-grid; place-content: center; cursor: pointer; vertical-align: middle; }
+  input.selbox:checked { background: var(--primary-color); border-color: var(--primary-color); }
+  input.selbox:checked::after { content: ""; width: 9px; height: 5px; border: 2px solid var(--text-primary-color, #fff); border-top: 0; border-right: 0; transform: translateY(-1px) rotate(-45deg); }
+  input.selbox:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
+  table.dtable tbody tr.picked > td { background: color-mix(in srgb, var(--primary-color) 7%, transparent); }
+  .selbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 8px 12px; margin: 0 0 8px; border-radius: 12px; background: color-mix(in srgb, var(--primary-color) 9%, transparent); font-size: 14px; }
+  .selbar .grow { flex: 1; }
+  .batch { display: flex; align-items: center; gap: 12px; padding: 10px 12px; margin: 0 0 10px; border-radius: 12px; background: var(--secondary-background-color); --mdc-icon-size: 20px; }
+  .batch .bt { flex: 1; min-width: 0; display: grid; gap: 4px; font-size: 14px; }
+  .batch .bt .muted { font-size: 13px; }
+  .batch .bar { height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--primary-color) 18%, transparent); overflow: hidden; }
+  .batch .bar span { display: block; height: 100%; background: var(--primary-color); border-radius: 3px; transition: width .3s; }
+  .batch.done > ha-icon { color: var(--frieda-text-ok); }
+  .batch.done.err > ha-icon { color: var(--frieda-text-err); }
+  .sheet-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .sheet-foot .muted { flex: 1 1 220px; }
+  @container (max-width: 720px) {
+    .ratetable tbody tr[data-search] { grid-template-columns: 28px 40px minmax(0, 1fr) auto; grid-template-areas: "sel imp subj time" "sel . from from" "sel . cat cat"; }
+    .ratetable .c-sel { grid-area: sel; align-self: start; padding-top: 6px; }
+    table.dtable tbody tr.picked { background: color-mix(in srgb, var(--primary-color) 7%, transparent); border-radius: 10px; }
+    table.dtable tbody tr.picked > td { background: none; }
+  }
+  @media (prefers-reduced-motion: reduce) { .batch .bar span { transition: none; } }
 
 `;
