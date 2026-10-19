@@ -571,7 +571,8 @@ class FriedaPostfachPanel extends HTMLElement {
       return `<div class="batch"><span class="spinner" aria-hidden="true"></span><div class="bt"><strong>${esc(fmt(t.rerateRunning, b.done, b.total))}</strong><div class="bar" aria-hidden="true"><span style="width:${pct}%"></span></div></div><button class="secondary small" data-action="rerate-cancel">${esc(t.rerateCancel)}</button></div>`;
     }
     const age = Date.now() - (parseTime(b.finished)?.getTime() || 0);
-    if (this._s.batchHidden === b.started || age > 30 * 60000) return "";
+    // closed by the user: remembered per user in Home Assistant, so it stays closed after reopening the panel
+    if (this._s.batchHidden === b.started || this._layout.opt("batch", "hidden", null) === b.started || age > 30 * 60000) return "";
     const head = { cancelled: t.rerateCancelled, limit: t.rerateLimit }[b.state] || t.rerateDone;
     const parts = [
       fmt(t.rerateRated, b.rated),
@@ -2446,6 +2447,7 @@ class FriedaPostfachPanel extends HTMLElement {
           }),
         "batch-hide": () => {
           this._s.batchHidden = this._s.ai?.batch?.started;
+          this._layout.setOpt("batch", "hidden", this._s.batchHidden || null);
           this._render();
         },
         reload: () => window.location.reload(),
