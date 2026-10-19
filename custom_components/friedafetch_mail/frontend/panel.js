@@ -902,7 +902,28 @@ class FriedaPostfachPanel extends HTMLElement {
       sheet.error = err.message || String(err);
     }
     sheet.loading = false;
-    this._render();
+    this._renderWhenFree();
+  }
+
+  // A redraw replaces every control; an open dropdown would close under the finger. Results that arrive in the
+  // background (timeline, location) therefore wait until the dropdown is left.
+  _renderWhenFree() {
+    const active = this.shadowRoot.activeElement;
+    if (active?.tagName !== "SELECT") return this._render();
+    if (this._waitingSelect === active) return;
+    this._waitingSelect = active;
+    const go = () => {
+      if (this._waitingSelect !== active) return;
+      clearInterval(timer);
+      active.removeEventListener("blur", go);
+      active.removeEventListener("change", go);
+      this._waitingSelect = null;
+      this._render();
+    };
+    // blur is not always reported (e.g. when the window itself loses the focus): look again every half second
+    const timer = setInterval(() => this.shadowRoot.activeElement !== active && go(), 500);
+    active.addEventListener("blur", go);
+    active.addEventListener("change", go);
   }
 
   // Swipe down on the sheet: on its head at any time, in the list once it is scrolled to the top.
@@ -1825,7 +1846,7 @@ class FriedaPostfachPanel extends HTMLElement {
     } catch (err) {
       loc.set(mid, { busy: false, hint, error: err.message || String(err), checked: new Date().toISOString() });
     }
-    this._render();
+    this._renderWhenFree();
   }
 
   _locHtml(mid, frieda) {
@@ -2239,6 +2260,15 @@ class FriedaPostfachPanel extends HTMLElement {
   _bind() {
     const root = this.shadowRoot;
     if (!this._pageReset) {
+      // phones and tablets open a dropdown again as soon as it gets the focus: after a choice it keeps none, so the
+      // redraw that follows does not hand it back (capture phase, before the choice redraws)
+      root.addEventListener(
+        "change",
+        (ev) => {
+          if (ev.target?.tagName === "SELECT" && window.matchMedia?.("(pointer: coarse)").matches) ev.target.blur();
+        },
+        true
+      );
       // a filter shows other rows: start on the first page (capture phase, before the filter redraws)
       this._pageReset = true;
       root.addEventListener(
