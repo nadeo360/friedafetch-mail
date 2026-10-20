@@ -222,6 +222,7 @@ class AiSorter:
         self._lock = asyncio.Lock()
         self._batch: dict[str, Any] | None = None  # a re-rating in progress or just finished (panel)
         self.on_batch_done: Any | None = None  # async (report) -> None: records the pass in the run history
+        self.activity: Any | None = None  # ActivityLog: the steps of each message for its timeline
         self._loaded = False
         self.categories: list[dict[str, Any]] = []
         self.ratings: list[dict[str, Any]] = []
@@ -350,6 +351,21 @@ class AiSorter:
         }
         self.usage_log.append(entry)
         self.usage_log = self.usage_log[-MAX_LOG:]
+        if kind == "sort" and entry["message_id"]:
+            if held_back is not None:
+                step = {"time": entry["time"], "kind": "ai_held", "reasons": list(held_back)}
+            else:
+                step = {
+                    "time": entry["time"],
+                    "kind": "ai_sent",
+                    "entity": entity,
+                    "fields": list(fields),
+                    "chars": chars,
+                    "ok": ok,
+                    "error": error,
+                    "duration": duration,
+                }
+            self._step({"message_id": entry["message_id"]}, step)
         day = self.usage_days.setdefault(datetime.now().date().isoformat(), {})
         if held_back is None:
             day["calls"] = day.get("calls", 0) + 1
@@ -453,8 +469,10 @@ class AiSorter:
         rating = next((r for r in self.ratings if r.get("id") == rating_id), None)
         if rating is None:
             raise AiSortError("Rating not found")
+        before = rating.get("corrected") or rating.get("category")
         rating["corrected"] = category
         rating["corrected_at"] = _now_iso()
+        self._step(rating, {"time": rating["corrected_at"], "kind": "corrected", "before": before, "after": category})
         self.examples = [e for e in self.examples if e.get("rating_id") != rating_id]
         self.examples.append(
             {
@@ -1199,7 +1217,23 @@ class AiSorter:
         self.ratings = [r for r in self.ratings if not same(r)]
         self.ratings.append(rating)
         self.ratings = self.ratings[-MAX_RATINGS:]
+        self._step(
+            rating,
+            {
+                "time": rating["time"],
+                "kind": "rated",
+                "again": bool(rating.get("previous")),
+                "category": rating.get("category"),
+                "importance": rating.get("importance"),
+                "reason": rating.get("reason"),
+                "suspicious": bool(rating.get("suspicious")),
+            },
+        )
         return rating
+
+    def _step(self, mail: dict[str, Any], event: dict[str, Any]) -> None:
+        if self.activity is not None:
+            self.activity.add_event(mail, event)
 
     async def _apply(self, uid: int, rating: dict[str, Any], report: dict[str, Any], *, mailbox: str = MAILBOX) -> bool:
         """Run the category actions (act mode). Never deletes."""
@@ -1214,6 +1248,7 @@ class AiSorter:
                 guard.check_quota(QUOTA_MAIL_MODIFY, 1)
             except Exception as err:  # noqa: BLE001 - PolicyError: hourly quota of mail changes used up
                 rating["applied"] = ["quota"]
+                self._step(rating, {"time": rating["time"], "kind": "ai_applied", "applied": ["quota"]})
                 report["limited"] = report.get("limited", 0) + 1
                 _LOGGER.info("AI sorting: no action for message %s: %s", uid, err)
                 return False
@@ -1237,6 +1272,8 @@ class AiSorter:
         if changes and guard is not None and applied:
             guard.consume(QUOTA_MAIL_MODIFY, 1)
         rating["applied"] = applied
+        if applied:
+            self._step(rating, {"time": rating["time"], "kind": "ai_applied", "applied": list(applied)})
         return bool(applied)
 
 

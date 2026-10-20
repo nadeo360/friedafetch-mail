@@ -454,3 +454,17 @@ async def test_setup_backfills_the_activity(hass: HomeAssistant) -> None:
     ):
         entry = await setup_postfach(hass, core, rules_auto=False)
     assert [i["uid"] for i in entry.runtime_data.activity.items] == [7]
+
+
+async def test_steps_wait_for_their_line_and_merge_quiet_passes(hass: HomeAssistant) -> None:
+    entry = await _setup(hass)
+    log = entry.runtime_data.activity
+    log.add_event({"message_id": "<1@example.com>"}, {"time": "2026-10-20T10:00:01+02:00", "kind": "ai_sent"})
+    assert log.items == []  # no line yet: the step waits
+    log.add_pass("push", "2026-10-20T10:00:00+02:00", [_mail(1)])
+    log.add_pass("auto", "2026-10-20T11:00:00+02:00", [_mail(1)])
+    log.add_pass("auto", "2026-10-20T12:00:00+02:00", [_mail(1, rules=["Bank"], move_to="Bank")])
+    log.add_pass("auto", "2026-10-20T12:00:00+02:00", [_mail(1, rules=["Bank"], move_to="Bank")])  # twice: once
+    events = log.items[0]["events"]
+    assert [(e["kind"], e.get("count")) for e in events] == [("ai_sent", None), ("checked", 2), ("checked", 1)]
+    assert events[2]["rules"] == ["Bank"]

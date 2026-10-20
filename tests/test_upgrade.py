@@ -2,8 +2,9 @@
 
 The stored data below has the shapes older releases wrote (from their code in git): runs without mails or AI part
 (1.0.0), AI ratings and the AI log of the first AI sorting (1.0.4, the kill-switch reason still a plain string), runs
-with mails but without UID or Message-ID (1.0.12), and the activity list of 1.0.20 that started empty. After the
-update every answer of the panel must still have the shape of tests/contracts/ws.json.
+with mails but without UID or Message-ID (1.0.12), the activity list of 1.0.20 that started empty, and lines of
+1.0.23 without their steps. After the update every answer of the panel must still have the shape of
+tests/contracts/ws.json.
 """
 
 from __future__ import annotations
@@ -193,6 +194,7 @@ async def test_update_from_the_first_versions(hass: HomeAssistant, hass_storage,
     items = link.activity.items
     # the rating (with its Message-ID) is in the list; mails of runs without UID and Message-ID cannot be keyed
     assert [i["message_id"] for i in items] == ["<7@example.com>"]
+    assert [e["kind"] for e in items[0]["events"]] == ["rated"]  # its steps, from the rating kept
     answers = await _answers(hass, hass_ws_client, entry)
     assert _contract_problems(answers) == []
     assert answers["friedafetch_mail/activity/list"]["items"][0]["ai"]["category"] == "Bills & receipts"
@@ -229,3 +231,32 @@ async def test_update_from_1_0_20_fills_the_empty_activity(hass: HomeAssistant, 
 async def test_no_second_fill_after_1_0_21(hass: HomeAssistant, hass_storage) -> None:
     entry = await _upgrade(hass, hass_storage, activity={"items": [], "backfilled": True})
     assert entry.runtime_data.activity.items == []  # filled once already (or cleared on purpose)
+
+
+async def test_update_from_1_0_23_gives_the_lines_their_steps(
+    hass: HomeAssistant, hass_storage, hass_ws_client
+) -> None:
+    line = {
+        "key": "<7@example.com>",
+        "message_id": "<7@example.com>",
+        "mailbox": "INBOX",
+        "uid": 7,
+        "subject": "Rechnung Oktober",
+        "from": "",
+        "name": "Stadtwerke",
+        "date": "2026-10-11T08:59:00+02:00",
+        "time": "2026-10-11T09:00:00+02:00",
+        "updated": "2026-10-11T09:00:00+02:00",
+        "trigger": "auto",
+        "rules": [],
+        "move_to": None,
+        "delete": False,
+        "seen": None,
+        "flag": None,
+        "ai": {"category": "Bills & receipts", "importance": 3, "applied": [], "held": None},
+    }
+    entry = await _upgrade(hass, hass_storage, activity={"items": [line], "backfilled": True})
+    assert [e["kind"] for e in entry.runtime_data.activity.items[0]["events"]] == ["rated"]
+    answers = await _answers(hass, hass_ws_client, entry)
+    assert _contract_problems(answers) == []
+    assert [e["kind"] for e in answers["friedafetch_mail/mail/timeline"]["events"]] == ["received", "rated"]

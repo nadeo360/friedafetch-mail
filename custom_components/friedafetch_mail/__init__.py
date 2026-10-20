@@ -207,6 +207,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
     link.ai = sorter
     # the activity list came with 1.0.20: once, it starts with the runs, ratings and holds kept before
     activity.backfill(rules.history(limit=10_000), list(sorter.ratings), list(sorter.usage_log))
+    # the steps of each message came with 1.0.24: once, the older lines get theirs from what is still kept
+    activity.fill_events(rules.history(limit=10_000), list(sorter.ratings), list(sorter.usage_log))
+    sorter.activity = activity
 
     async def _rerated(report: dict[str, Any]) -> None:
         await rules.async_record_ai("rerate", report)  # the re-rating shows up under Runs as well

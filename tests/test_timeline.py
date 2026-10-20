@@ -175,3 +175,59 @@ def test_timeline_shows_the_earlier_rating_after_a_rerating() -> None:
     rated = [e for e in tl["events"] if e["kind"] == "rated"]
     assert [(e["category"], e.get("again")) for e in rated] == [("Rechnungen", None), ("Persönlich", True)]
     assert [e["kind"] for e in tl["events"]] == ["rated", "ai_applied", "rated"]
+
+
+async def test_timeline_keeps_its_steps_when_the_sources_move_on(hass: HomeAssistant, hass_ws_client) -> None:
+    """Rules, AI and two corrections are written to the message's line; the timeline still has them all after the
+    run history and the AI log were cleared."""
+    from types import SimpleNamespace  # noqa: PLC0415
+    from unittest.mock import AsyncMock, patch  # noqa: PLC0415
+
+    core = await setup_core(hass)
+    hass.config.components.add("ai_task")
+    hass.states.async_set("ai_task.test_ai", "unknown")
+    entry = await setup_postfach(hass, core, rules_auto=False, ai_enabled=True, ai_entity="ai_task.test_ai")
+    link = entry.runtime_data
+    sorter = link.ai
+    sorter._last_uid["INBOX"] = 1  # noqa: SLF001
+    summary = {
+        "uid": 2,
+        "subject": "Treffen morgen?",
+        "from": [{"name": "Anna", "email": "anna@example.com"}],
+        "to": [{"name": "", "email": "me@icloud.com"}],
+        "date": "2026-10-18T09:00:00+02:00",
+        "newsletter": False,
+        "message_id": "<2@example.com>",
+    }
+    answer = SimpleNamespace(data={"category": "Notifications", "importance": 2, "reason": "automatic"})
+    mail = "custom_components.friedafetch.mail.ICloudMail"
+    with (
+        patch(f"{mail}.async_search_uids", AsyncMock(return_value=[2])),
+        patch(f"{mail}.async_summaries", AsyncMock(return_value=[summary])),
+        patch("custom_components.friedafetch_mail.ai._generate", AsyncMock(return_value=answer)),
+    ):
+        report = await sorter.async_process()
+    await link.rules.async_record_ai("push", report)  # the pass after the AI: the line gets the waiting steps
+    rating = sorter.ratings[-1]
+    await sorter.async_correct(rating["id"], "Personal & important")
+    await sorter.async_correct(rating["id"], "Bills & receipts")
+    link.rules._history = []  # noqa: SLF001
+    sorter.usage_log = []
+
+    ws = await hass_ws_client(hass)
+    await ws.send_json(
+        {"id": 1, "type": "friedafetch_mail/mail/timeline", "entry_id": entry.entry_id, "message_id": "<2@example.com>"}
+    )
+    result = (await ws.receive_json())["result"]
+    kinds = [e["kind"] for e in result["events"]]
+    assert kinds[0] == "received"
+    assert sorted(kinds[1:]) == sorted(["checked", "ai_sent", "rated", "corrected", "corrected"])
+    corrections = [e for e in result["events"] if e["kind"] == "corrected"]
+    assert [(c["before"], c["after"]) for c in corrections] == [
+        ("Notifications", "Personal & important"),
+        ("Personal & important", "Bills & receipts"),
+    ]
+    assert result["category"] == "Bills & receipts" and result["rating_id"] == rating["id"]
+    # the list stays small: the steps are only in the timeline
+    await ws.send_json({"id": 2, "type": "friedafetch_mail/activity/list", "entry_id": entry.entry_id})
+    assert "events" not in (await ws.receive_json())["result"]["items"][0]

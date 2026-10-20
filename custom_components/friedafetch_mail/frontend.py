@@ -465,6 +465,10 @@ async def ws_mail_timeline(
     if sorter is not None:
         await sorter.async_load()
         ratings, usage = list(sorter.ratings), list(sorter.usage_log)
+    line = None
+    if msg.get("message_id"):
+        await link.activity.async_load()
+        line = link.activity.find({"message_id": msg["message_id"]})
     connection.send_result(
         msg["id"],
         build_timeline(
@@ -474,6 +478,7 @@ async def ws_mail_timeline(
             message_id=msg.get("message_id") or None,
             subject=msg.get("subject") or None,
             sender=msg.get("sender") or None,
+            stored=(line or {}).get("events"),
         ),
     )
 

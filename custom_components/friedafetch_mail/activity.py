@@ -6,6 +6,11 @@ stored as it was, and overlaid with the current rating (a correction, a re-ratin
 
 "Folder" is where Frieda put a message (or where it arrived), not a promise of where it is now; the panel looks the
 real place up on request (locate.py).
+
+Every line also keeps the steps of its message ("events": checked by the rules, sent to or held back from the AI,
+rated, its actions, your corrections), written when they happen. The timeline reads them from here, so it stays
+complete when the run history or the AI log have long moved on. Steps that come before the pass that adds the line
+(the AI rates first, the pass is recorded after it) wait in memory until then.
 """
 
 from __future__ import annotations
@@ -26,6 +31,8 @@ MAX_DAYS = 30
 TRASH = "trash"  # deleted by a rule, or moved by the AI into the trash folder
 TRASH_NAMES = {"deleted messages", "trash", "papierkorb", "gelöschte objekte", "deleted items"}
 KINDS = ("ai", "rule", "held", "none")
+MAX_EVENTS = 25  # steps per message; a busy one keeps its newest
+MAX_PENDING = 500  # messages whose steps wait for their line
 
 
 def _ts(value: Any) -> float:
@@ -84,6 +91,8 @@ class ActivityLog:
         self._items: list[dict[str, Any]] = []
         self._loaded = False
         self._backfilled = False  # the list was filled once from what was kept before it existed
+        self._events_filled = False  # the lines of 1.0.23 and older got their steps from what was kept
+        self._pending: dict[str, list[dict[str, Any]]] = {}
 
     async def async_load(self) -> None:
         if self._loaded:
@@ -91,10 +100,11 @@ class ActivityLog:
         data = await self._store.async_load() or {}
         self._items = list(data.get("items") or [])[-MAX_ENTRIES:]
         self._backfilled = bool(data.get("backfilled"))
+        self._events_filled = bool(data.get("events_filled"))
         self._loaded = True
 
     def _data(self) -> dict[str, Any]:
-        return {"items": self._items, "backfilled": self._backfilled}
+        return {"items": self._items, "backfilled": self._backfilled, "events_filled": self._events_filled}
 
     def _changed(self) -> None:
         self._store.async_delay_save(self._data, 2)
@@ -105,8 +115,36 @@ class ActivityLog:
         return self._items
 
     # ------------------------------------------------------------ writing
-    def add_pass(self, trigger: str, time: str, mails: list[dict[str, Any]]) -> None:
-        """Add the messages of one pass (entries of rules._handled_mails); known messages are updated."""
+    def find(self, mail: dict[str, Any]) -> dict[str, Any] | None:
+        """The line of a message: by Message-ID, else by folder and UID."""
+        key = self._key(mail)
+        uid = (mail.get("mailbox") or "INBOX", mail.get("uid"))
+        for item in reversed(self._items):
+            if (key is not None and item.get("key") == key) or (
+                mail.get("uid") is not None and (item.get("mailbox"), item.get("uid")) == uid
+            ):
+                return item
+        return None
+
+    def add_event(self, mail: dict[str, Any], event: dict[str, Any]) -> None:
+        """Note one step of a message (mail: message_id, or mailbox and uid). Waits for its line if there is none."""
+        key = self._key(mail)
+        if not self._loaded or key is None:
+            return
+        item = self.find(mail)
+        if item is None:
+            self._pending.setdefault(key, []).append(event)
+            while len(self._pending) > MAX_PENDING:
+                self._pending.pop(next(iter(self._pending)))
+            return
+        _append(item, event)
+        self._changed()
+
+    def add_pass(self, trigger: str, time: str, mails: list[dict[str, Any]], *, record: bool = True) -> None:
+        """Add the messages of one pass (entries of rules._handled_mails); known messages are updated.
+
+        record: the pass is a step of each message (not when the list is filled from ratings or held mails).
+        """
         if not self._loaded or not mails:
             return
         index = {self._key(i): i for i in self._items}
@@ -147,6 +185,25 @@ class ActivityLog:
                 if item["uid"] is not None:
                     by_uid[(item["mailbox"], item["uid"])] = item
             item["updated"] = time
+            if mail.get("events") and not item.get("events"):  # a line carried over (backfill)
+                item["events"] = list(mail["events"])
+            for event in self._pending.pop(key, []):
+                _append(item, event)
+            if record:
+                _append(
+                    item,
+                    {
+                        "time": time,
+                        "kind": "checked",
+                        "trigger": trigger,
+                        "rules": list(mail.get("rules") or []),
+                        "move_to": mail.get("move_to"),
+                        "delete": bool(mail.get("delete")),
+                        "seen": mail.get("seen"),
+                        "flag": mail.get("flag"),
+                        "count": 1,
+                    },
+                )
             for k in ("message_id", "date", "name"):
                 if mail.get(k) and not item.get(k):
                     item[k] = str(mail[k])[:300]
@@ -195,7 +252,7 @@ class ActivityLog:
                     "held": None,
                 },
             }
-            self.add_pass("auto", str(rating.get("time") or ""), [mail])
+            self.add_pass("auto", str(rating.get("time") or ""), [mail], record=False)
         for entry in sorted(usage_log, key=lambda e: _ts(e.get("time"))):
             if entry.get("kind", "sort") != "sort" or entry.get("sent") is not False or not entry.get("message_id"):
                 continue
@@ -207,11 +264,43 @@ class ActivityLog:
                 "from": entry.get("sender"),
                 "ai": {"held": held},
             }
-            self.add_pass(str(entry.get("trigger") or "auto"), str(entry.get("time") or ""), [mail])
+            self.add_pass(str(entry.get("trigger") or "auto"), str(entry.get("time") or ""), [mail], record=False)
         for item in newest:
-            self.add_pass(item.get("trigger") or "auto", item.get("time") or "", [item])
+            self.add_pass(item.get("trigger") or "auto", item.get("time") or "", [item], record=False)
         self._backfilled = True
         self._prune()
+        self._changed()
+        return True
+
+    def fill_events(
+        self, history: list[dict[str, Any]], ratings: list[dict[str, Any]], usage_log: list[dict[str, Any]]
+    ) -> bool:
+        """Once, for lines from before the steps were kept (1.0.23 and older): their steps from what is still kept."""
+        from .timeline import build_timeline  # noqa: PLC0415
+
+        if not self._loaded or self._events_filled:
+            return False
+        runs: dict[str, list[dict[str, Any]]] = {}
+        for run in history:
+            for mail in run.get("mails") or []:
+                if (key := self._key(mail)) is not None:
+                    runs.setdefault(key, []).append({**run, "mails": [{**mail, "message_id": key}]})
+        rated: dict[str, list[dict[str, Any]]] = {}
+        for rating in ratings:
+            if (key := self._key(rating)) is not None:
+                rated.setdefault(key, []).append({**rating, "message_id": key})
+        logged: dict[str, list[dict[str, Any]]] = {}
+        for entry in usage_log:
+            if entry.get("message_id"):
+                logged.setdefault(str(entry["message_id"]), []).append(entry)
+        for item in self._items:
+            if item.get("events"):
+                continue
+            key = item["key"]
+            found = build_timeline(runs.get(key, []), rated.get(key, []), logged.get(key, []), message_id=key)
+            events = [e for e in found["events"] if e["kind"] != "received"]
+            item["events"] = events[-MAX_EVENTS:]
+        self._events_filled = True
         self._changed()
         return True
 
@@ -222,7 +311,9 @@ class ActivityLog:
     async def async_clear(self) -> None:
         await self.async_load()
         self._items = []
+        self._pending = {}
         self._backfilled = True  # cleared on purpose: never filled again from the old entries
+        self._events_filled = True
         await self._store.async_save(self._data())
         async_notify(self._hass, self._entry_id, "activity")
 
@@ -242,6 +333,7 @@ class ActivityLog:
         out = []
         for item in sorted(self._items, key=lambda i: _ts(i.get("time")), reverse=True):
             row = dict(item)
+            row.pop("events", None)  # the timeline has them; the list stays small
             rating = by_mid.get(item.get("message_id")) or by_uid.get((item.get("mailbox"), item.get("uid")))
             ai = dict(item.get("ai") or {})
             if rating is not None and not ai.get("held"):
@@ -261,6 +353,21 @@ class ActivityLog:
             row["selectable"] = bool(ai_active and row.get("message_id") and row["kind"] != "rule")
             out.append(row)
         return out
+
+
+def _append(item: dict[str, Any], event: dict[str, Any]) -> None:
+    """Add a step: once only, and passes without a match one after the other as one (like the timeline)."""
+    events = item.setdefault("events", [])
+    same = {k: v for k, v in event.items() if k != "count"}
+    if any({k: v for k, v in e.items() if k != "count"} == same for e in events):
+        return  # the same step again (a pass recorded twice, the list filled once more)
+    if event.get("kind") == "checked" and not event.get("rules"):
+        last = next((e for e in reversed(events) if e.get("kind") == "checked"), None)
+        if last is not None and not last.get("rules"):
+            last["count"] = last.get("count", 1) + 1
+            return
+    events.append(dict(event))
+    del events[:-MAX_EVENTS]
 
 
 def matches(row: dict[str, Any], view: str, query: str) -> bool:

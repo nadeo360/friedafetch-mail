@@ -1,8 +1,10 @@
 """Timeline of one message: what Frieda Postfach did with it, from arrival to your last correction.
 
-Nothing new is stored for it. The steps are collected from what is kept anyway: the run history (rules), the log of
-what went to an AI (or was held back by the kill switch) and the AI ratings. They are linked by the message's
-Message-ID, which survives moves (the IMAP UID does not). Older entries without it are matched by subject and sender.
+The steps come from the message's line in the activity (activity.py keeps them as they happen). Without such a line
+(older than the activity keeps, or asked for by subject and sender) they are collected from what is kept anyway: the
+run history (rules), the log of what went to an AI (or was held back by the kill switch) and the AI ratings. These are
+linked by the message's Message-ID, which survives moves (the IMAP UID does not); older entries without it are matched
+by subject and sender. The header (category, the rating to correct) always comes from the current rating.
 """
 
 from __future__ import annotations
@@ -45,8 +47,12 @@ def build_timeline(
     message_id: str | None = None,
     subject: str | None = None,
     sender: str | None = None,
+    stored: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Steps of one message, oldest first, plus a short header (subject, sender, where it is, its category)."""
+    """Steps of one message, oldest first, plus a short header (subject, sender, where it is, its category).
+
+    stored: the steps the activity kept for the message; they replace the collected ones.
+    """
     events: list[dict[str, Any]] = []
     head: dict[str, Any] = {
         "message_id": message_id,
@@ -92,8 +98,6 @@ def build_timeline(
                 last["count"] += 1  # checked again without a match: one step
                 continue
             events.append(step)
-            if step["move_to"] or step["delete"]:
-                head["location"] = "trash" if step["delete"] else step["move_to"]
 
     # what went to an AI, or was held back by the kill switch
     for entry in usage_log:
@@ -101,7 +105,6 @@ def build_timeline(
             continue
         note(entry)
         if entry.get("sent") is False:
-            head["held"] = True
             events.append({"time": entry.get("time"), "kind": "ai_held", "reasons": list(entry.get("held_back") or [])})
         else:
             events.append(
@@ -159,9 +162,6 @@ def build_timeline(
         applied = list(rating.get("applied") or [])
         if applied:
             events.append({"time": rating.get("time"), "kind": "ai_applied", "applied": applied})
-            moved = next((a[6:] for a in applied if str(a).startswith("moved:")), None)
-            if moved:
-                head["location"] = moved
         head["category"] = rating.get("corrected") or rating.get("category")
         head["importance"] = rating.get("importance")
         head["rating_id"] = rating.get("id")
@@ -176,8 +176,18 @@ def build_timeline(
                 }
             )
 
+    if stored:
+        events = [dict(e) for e in stored]
     if head["date"]:
         events.insert(0, {"time": head["date"], "kind": "received", "mailbox": head["mailbox"]})
     # steps without a time (older corrections) stay at the end, the rest in time order
     events.sort(key=lambda e: _ts(e.get("time")))
+    for event in events:  # where the message went last, and whether the kill switch held it
+        if event["kind"] == "checked" and (event.get("move_to") or event.get("delete")):
+            head["location"] = "trash" if event.get("delete") else event["move_to"]
+        elif event["kind"] == "ai_applied":
+            moved = next((a[6:] for a in event.get("applied") or [] if str(a).startswith("moved:")), None)
+            head["location"] = moved or head["location"]
+        elif event["kind"] == "ai_held":
+            head["held"] = True
     return {**head, "found": bool(events), "events": events}

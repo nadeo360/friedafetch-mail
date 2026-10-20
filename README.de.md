@@ -118,9 +118,11 @@ die gewählte Mail (auf dem Handy öffnet sich die Mail in einem Blatt über der
   sie abgelegt hat. Das ist, was Frieda getan hat – beim Öffnen einer Mail sieht Frieda nach, wo sie wirklich liegt
   (eine Suche über ihre Message-ID): noch dort, inzwischen verschoben oder nicht mehr gefunden.
 - **Die Mail** zeigt ihren ganzen Weg als Zeitleiste – eingegangen, Regeln geprüft, an die KI übermittelt oder vom
-  Killswitch zurückgehalten, Bewertung, Aktion, deine Korrektur. Die Kategorie lässt sich direkt dort korrigieren.
-  Verknüpft wird über die Message-ID der Mail (sie bleibt beim Verschieben erhalten); ältere Einträge werden über
-  Betreff und Absender zugeordnet. Auch das Änderungsprotokoll von Frieda verlinkt dorthin.
+  Killswitch zurückgehalten, Bewertung, Aktion, jede Korrektur. Die Kategorie lässt sich direkt dort korrigieren.
+  Jede Mail der Aktivität hält ihre Schritte fest, sobald sie passieren – so bleibt die Zeitleiste vollständig, auch
+  wenn der Laufverlauf schon weiter ist; bei älteren Mails werden die Schritte über die Message-ID (sie bleibt beim
+  Verschieben erhalten) oder über Betreff und Absender zugeordnet. Auch das Änderungsprotokoll von Frieda verlinkt
+  dorthin.
 - **Auswählen** (oder ⌘/Strg-Klick, ⇧-Klick für einen Bereich) wählt Mails für **Neu bewerten**: alle einer Ansicht,
   einen ganzen Tag (Heute, Gestern, …) oder einzelne; Mails, die eine Regel erledigt hat, sind nicht für die KI.
   Während des Laufs zeigt jede Mail, ob sie wartet, gerade bewertet wird oder fertig ist.
@@ -250,6 +252,12 @@ Frieda Postfach bringt keine eigenen Zugangsdaten und keine eigenen Netzwerk-End
 Verbindung, Leitplanken und Änderungsprotokoll; die Push-Verbindung ist eine zweite IMAP-Sitzung, die nur auf neue
 Mails wartet. Die Tools von Frieda Postfach folgen Friedas Optionen: Schreibende Regel-Tools verschwinden im
 Nur-Lesen-Modus, und Freigaben gelten wie für jedes andere Frieda-Tool. Siehe [SECURITY.md](https://github.com/nadeo360/friedafetch-mail/blob/main/SECURITY.md).
+
+**Diagnose** (Einstellungen → Geräte & Dienste → Frieda Postfach → ⋮ → Diagnose herunterladen) enthält Versionen,
+Optionen, den Aufbau der Regeln, Automatik- und Push-Status, Läufe und KI-Nutzung als Zahlen sowie die Größe der
+Aktivität – keine Betreffs, Absender, Namen, Message-IDs, Regelwerte, Killswitch-Begriffe oder den Benachrichtigungsdienst.
+Ist Frieda älter, als diese Version braucht, weist eine Reparatur unter Einstellungen → Reparaturen darauf hin, bis
+Frieda aktualisiert ist.
 
 ## Entwicklung
 

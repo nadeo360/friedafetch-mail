@@ -115,9 +115,9 @@ mail on the right (on phones the mail opens in a sheet over the list that you sw
   what Frieda did – opening a mail looks up where it really is now (one search by its Message-ID): still there, moved
   elsewhere since, or no longer found.
 - **The mail** shows its whole path as a timeline – received, rules checked, sent to the AI or held back by the kill
-  switch, rating, action, your correction. The category is the place to correct it. Steps are linked by the
-  message's Message-ID (it survives moves); older entries are matched by subject and sender. Frieda's change log links
-  here too.
+  switch, rating, action, every correction. The category is the place to correct it. Each mail of the activity keeps
+  its steps as they happen, so the timeline stays complete when the run history has moved on; for older mails the
+  steps are linked by the Message-ID (it survives moves) or by subject and sender. Frieda's change log links here too.
 - **Select** (or Cmd/Ctrl-click, Shift-click for a range) picks mails for **Rate again**: all of a view, a whole day
   (Today, Yesterday, …) or single ones; mails handled by a rule are not for the AI. While the batch runs, every mail
   shows whether it waits, is being rated or is done.
@@ -242,6 +242,11 @@ Frieda Postfach adds no credentials and no network endpoints of its own. It reus
 and change log; the push connection is a second, read-only IMAP session that only listens for new mail. Tools of
 Frieda Postfach follow Frieda's options: writing rule tools disappear in read-only mode, and approvals apply as for
 every other Frieda tool. See [SECURITY.md](https://github.com/nadeo360/friedafetch-mail/blob/main/SECURITY.md).
+
+**Diagnostics** (Settings → Devices & services → Frieda Postfach → ⋮ → Download diagnostics) contain versions,
+options, the structure of the rules, automation and push status, runs and AI use as numbers, and the size of the
+activity – no subjects, senders, names, Message-IDs, rule values, kill-switch terms or the notify service. If Frieda
+is older than this version needs, a repair under Settings → Repairs says so until Frieda is updated.
 
 ## Development
 
