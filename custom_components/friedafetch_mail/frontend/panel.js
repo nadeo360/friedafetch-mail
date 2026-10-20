@@ -1769,16 +1769,20 @@ class FriedaPostfachPanel extends HTMLElement {
       const picked = a.sel.has(item.key);
       const name = item.name || item.from || "–";
       const when = fmtClock(item.time);
-      const aria = `${name}, ${item.subject || "–"}, ${this._dayLabel(item.day)} ${when}`;
+      // read / flagged as the mailbox has it now (kept current in the background; CONDSTORE where the server has it)
+      const st = item.state && !item.state.gone ? item.state : null;
+      const unread = st?.seen === false;
+      const flag = st?.flagged ? `<span class="fl" aria-hidden="true">${ico("flag")}</span>` : "";
+      const aria = `${name}, ${item.subject || "–"}, ${this._dayLabel(item.day)} ${when}${unread ? `, ${t.stUnread}` : ""}${st?.flagged ? `, ${t.stFlagged}` : ""}`;
       const role = a.picking
         ? item.selectable
           ? `role="checkbox" aria-checked="${picked}" aria-label="${esc(aria)}"`
           : `aria-disabled="true" aria-label="${esc(`${aria} – ${item.kind === "rule" ? t.actRuleNotAi : t.actNotSelectable}`)}"`
         : `aria-current="${a.open === item.key}" aria-label="${esc(aria)}"`;
       const av = a.picking ? `<span class="av ${item.selectable ? "pick" : "off"}" aria-hidden="true">${picked ? ico("check") : ""}</span>` : "";
-      parts.push(`<li class="m ${!a.picking && a.open === item.key ? "open" : ""} ${picked ? "picked" : ""} ${a.picking && !item.selectable ? "dim" : ""} ${this._fresh?.has?.(item.key) ? "fresh" : ""}">
+      parts.push(`<li class="m ${!a.picking && a.open === item.key ? "open" : ""} ${picked ? "picked" : ""} ${a.picking && !item.selectable ? "dim" : ""} ${this._fresh?.has?.(item.key) ? "fresh" : ""} ${unread ? "unread" : ""}">
           ${av}<button class="mitem" data-action="act-open" data-id="${esc(item.key)}" ${role}>
-            <span class="r1"><span class="from">${esc(name)}</span><span class="time">${esc(when)}</span></span>
+            <span class="r1">${unread ? `<span class="ud" aria-hidden="true"></span>` : ""}<span class="from">${esc(name)}</span>${flag}<span class="time">${esc(when)}</span></span>
             <span class="subj">${esc(item.subject || "–")}</span>
             <span class="r3">${this._actMeta(item)}${this._actRowBatch(item.key)}</span>
           </button></li>`);
@@ -1890,13 +1894,21 @@ class FriedaPostfachPanel extends HTMLElement {
           <span class="av" aria-hidden="true">${esc(initials(name || address))}</span>
           <span class="who">${who}</span>
           <span class="date">${esc(d.date ? fmtDateTime(d.date) : item ? fmtDateTime(item.time) : "")}</span>
-          <div class="chips">${meta}${this._actRowBatch(item ? item.key : mid)}</div>
+          <div class="chips">${meta}${this._stateChips(item)}${this._actRowBatch(item ? item.key : mid)}</div>
           ${mid ? this._locHtml(mid, item?.folder || d.location || d.mailbox) : ""}
         </div>
         <h3 class="sect">${esc(t.actHistory)}</h3>
         ${body}
       </div>
       <div class="rfoot">${esc(mid ? t.tlFoot : t.tlFootOld)}</div>`;
+  }
+
+  // Read / flagged as the mailbox has it now (not shown once the mail has left the inbox: the location says where)
+  _stateChips(item) {
+    const t = this.t;
+    const st = item?.state;
+    if (!st || st.gone || st.seen == null) return "";
+    return `<span class="mv">${ico(st.seen ? "email-open-outline" : "email-outline")}${esc(st.seen ? t.stRead : t.stUnread)}</span>${st.flagged ? `<span class="mv fl">${ico("flag")}${esc(t.stFlagged)}</span>` : ""}`;
   }
 
   // ------------------------------------------------------------ where a mail really is (on opening, once)

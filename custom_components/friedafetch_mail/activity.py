@@ -126,6 +126,43 @@ class ActivityLog:
                 return item
         return None
 
+    def tracked_uids(self, mailbox: str, limit: int) -> list[int]:
+        """UIDs of the newest lines that are in this mailbox as far as Frieda knows (for mailstate.py)."""
+        uids: list[int] = []
+        newest = sorted(self._items, key=lambda i: (_ts(i.get("time")), i.get("uid") or 0), reverse=True)
+        for item in newest:
+            if len(uids) >= limit:
+                break
+            state = item.get("state") or {}
+            if (
+                item.get("uid") is not None
+                and (item.get("mailbox") or "INBOX") == mailbox
+                and folder_of(item) == (_folder_name(mailbox) or "INBOX")
+                and not state.get("gone")
+            ):
+                uids.append(int(item["uid"]))
+        return uids
+
+    def set_state(self, mailbox: str, flags: dict[int, list[str]], gone: set[int], time: str) -> int:
+        """The flags the server reported (read, flagged) and the lines no longer in the mailbox; returns the changes."""
+        changed = 0
+        for item in self._items:
+            uid = item.get("uid")
+            if uid is None or (item.get("mailbox") or "INBOX") != mailbox or (uid not in flags and uid not in gone):
+                continue
+            old = item.get("state") or {}
+            if uid in gone:
+                new = {"seen": old.get("seen"), "flagged": old.get("flagged"), "gone": True}  # as last seen
+            else:
+                names = {f.lower() for f in flags[uid]}
+                new = {"seen": "\\seen" in names, "flagged": "\\flagged" in names, "gone": False}
+            if {k: old.get(k) for k in new} != new:
+                changed += 1
+            item["state"] = {**new, "checked": time}
+        if changed:
+            self._changed()
+        return changed
+
     def add_event(self, mail: dict[str, Any], event: dict[str, Any]) -> None:
         """Note one step of a message (mail: message_id, or mailbox and uid). Waits for its line if there is none."""
         key = self._key(mail)
@@ -347,6 +384,7 @@ class ActivityLog:
                 row["rating_id"] = rating.get("id")
                 row["corrected"] = bool(rating.get("corrected"))
                 row["name"] = row.get("name") or rating.get("from")
+            row["state"] = item.get("state")  # read / flagged as the mailbox has it (mailstate.py), or None
             if ai:
                 ai.setdefault("confidence", None)  # lines from before 1.0.24
             row["ai"] = ai or None

@@ -77,6 +77,12 @@
     "rules": [],
     "seen": "null",
     "selectable": "bool",
+    "state": {
+     "checked": "str",
+     "flagged": "bool|null",
+     "gone": "bool",
+     "seen": "bool|null"
+    },
     "subject": "str",
     "time": "str",
     "trigger": "str",

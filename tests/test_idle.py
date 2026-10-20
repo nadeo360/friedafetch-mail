@@ -129,3 +129,30 @@ async def test_connect_refreshes_capabilities_after_login() -> None:
     with patch("custom_components.friedafetch_mail.idle.aioimaplib.IMAP4_SSL", return_value=client):
         await watcher._connect()
     client.protocol.capability.assert_not_awaited()
+
+
+def test_has_changes() -> None:
+    from custom_components.friedafetch_mail.idle import _has_changes  # noqa: PLC0415
+
+    assert _has_changes([b"1 FETCH (FLAGS (\\Seen))"])
+    assert _has_changes(["* 5 EXPUNGE"])
+    assert _has_changes([b"VANISHED (EARLIER) 41:43"])
+    assert not _has_changes([b"12 EXISTS", b"3 RECENT"])
+    assert not _has_changes(None)
+
+
+async def test_changed_flags_refresh_the_state_but_run_no_rules() -> None:
+    new_mail, changed = AsyncMock(), AsyncMock()
+    watcher = MailWatcher(
+        username="u", password="p", host="h", port=993, on_new_mail=new_mail, on_change=changed, debounce=0.05
+    )
+    client = _client([[b"1 FETCH (FLAGS (\\Seen))"], [b"2 FETCH (FLAGS (\\Seen))"], [b"3 EXPUNGE"]])
+    with (
+        patch.object(MailWatcher, "_connect", AsyncMock(return_value=client)),
+        patch("custom_components.friedafetch_mail.idle.CHANGE_DEBOUNCE", 0.05),
+    ):
+        watcher.start(lambda coro, name: asyncio.get_running_loop().create_task(coro))
+        await asyncio.sleep(0.2)
+        await watcher.async_stop()
+    changed.assert_awaited_once()  # reading several mails in a row: one refresh
+    new_mail.assert_not_awaited()

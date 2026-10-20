@@ -36,7 +36,7 @@ Aufgaben und ohne Dateizugriffe – solange Frieda Postfach nicht installiert is
 ## Voraussetzungen
 
 - Home Assistant 2026.10 oder neuer
-- **Frieda 2.0.14 oder neuer** (`friedafetch`; ältere Versionen funktionieren, das Panel zeigt dann aber nur einen Update-Hinweis) mit mindestens einem eingerichteten iCloud-Konto. Frieda Postfach nutzt
+- **Frieda 2.0.18 oder neuer** (`friedafetch`; bei älteren Versionen bittet eine Reparatur ums Update, und Teile des Panels fehlen) mit mindestens einem eingerichteten iCloud-Konto. Frieda Postfach nutzt
   dessen Verbindung und fragt selbst nie nach Apple-ID oder Passwort.
 
 ## Installation
@@ -114,6 +114,11 @@ die gewählte Mail (auf dem Handy öffnet sich die Mail in einem Blatt über der
   passiert ist – die Regel, Kategorie und Wichtigkeit der KI, ein Killswitch-Stopp oder „keine Aktion“; ein Ordner
   nur, wenn die Mail verschoben wurde. Die Tage sind gruppiert (und lassen sich einklappen), die Liste lädt beim
   Scrollen je 50 Mails nach, die Suche umfasst alle. Sie reicht 30 Tage zurück (höchstens 3.000 Mails).
+- **Gelesen und markiert** so, wie es das Postfach gerade hat: ungelesene Mails fallen mit einem Punkt auf, markierte
+  tragen eine Fahne – liest oder markierst du eine Mail am iPhone, zeigt die Aktivität das. Mit Push sieht Frieda die
+  Änderung binnen Sekunden, sonst schaut sie alle 10 Minuten in den Posteingang. Unterstützt der IMAP-Server CONDSTORE
+  (RFC 7162), fragt Frieda nur, ob sich etwas geändert hat und welche Markierungen seit dem letzten Blick anders
+  sind; ohne CONDSTORE liest sie die Markierungen der neuesten 500 Mails im Posteingang mit einer Anfrage.
 - **Ansichten:** alle Mails, nach Ergebnis (KI, Regel, Killswitch, keine Aktion) und nach dem Ordner, in den Frieda
   sie abgelegt hat. Das ist, was Frieda getan hat – beim Öffnen einer Mail sieht Frieda nach, wo sie wirklich liegt
   (eine Suche über ihre Message-ID): noch dort, inzwischen verschoben oder nicht mehr gefunden.
@@ -266,7 +271,8 @@ Nur-Lesen-Modus, und Freigaben gelten wie für jedes andere Frieda-Tool. Siehe [
 
 **Diagnose** (Einstellungen → Geräte & Dienste → Frieda Postfach → ⋮ → Diagnose herunterladen) enthält Versionen,
 Optionen, den Aufbau der Regeln, Automatik- und Push-Status, Läufe und KI-Nutzung als Zahlen sowie die Größe der
-Aktivität – keine Betreffs, Absender, Namen, Message-IDs, Regelwerte, Killswitch-Begriffe oder den Benachrichtigungsdienst.
+Aktivität und ob der Server CONDSTORE anbietet – keine Betreffs, Absender, Namen, Message-IDs, Regelwerte,
+Killswitch-Begriffe oder den Benachrichtigungsdienst.
 Ist Frieda älter, als diese Version braucht, weist eine Reparatur unter Einstellungen → Reparaturen darauf hin, bis
 Frieda aktualisiert ist.
 

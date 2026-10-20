@@ -376,6 +376,11 @@ export const STYLE = `
   .mitem .r1 { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
   .mitem .from { flex: 1; min-width: 0; font-size: 14px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .mitem .time { flex: none; font-size: 12px; color: var(--secondary-text-color); font-variant-numeric: tabular-nums; }
+  .mitem .ud { flex: none; align-self: center; width: 8px; height: 8px; border-radius: 50%; background: var(--primary-color); }
+  .mlist li.unread .from { font-weight: 650; }
+  .mlist li.unread .subj { color: var(--primary-text-color); }
+  .fl { flex: none; align-self: center; display: inline-flex; color: var(--frieda-text-warn); --mdc-icon-size: 14px; }
+  .mv.fl { color: var(--frieda-text-warn); }
   .mitem .subj { font-size: 13.5px; color: var(--secondary-text-color); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .mitem .r3 { display: flex; align-items: center; gap: 10px; min-width: 0; margin-top: 2px; }
   .meta, .mv { display: inline-flex; align-items: center; gap: 5px; min-width: 0; font-size: 12.5px; color: var(--secondary-text-color); --mdc-icon-size: 14px; }

@@ -36,7 +36,7 @@ no file writes unless you install Frieda Postfach.
 ## Requirements
 
 - Home Assistant 2026.10 or newer
-- **Frieda 2.0.14 or newer** (`friedafetch`; older versions work, but the panel then only shows an update hint), set up with at least one iCloud account. Frieda Postfach uses that
+- **Frieda 2.0.18 or newer** (`friedafetch`; with older versions a repair asks for the update, and parts of the panel are missing), set up with at least one iCloud account. Frieda Postfach uses that
   account's connection; it never asks for your Apple ID or password itself.
 
 ## Installation
@@ -111,6 +111,11 @@ mail on the right (on phones the mail opens in a sheet over the list that you sw
   rule, the AI's category and importance, a kill-switch hold or "no action"; a folder only when the mail was moved.
   Days are grouped (and can be folded), the list loads 50 mails at a time while you scroll, the search covers all of
   them. It keeps the last 30 days (at most 3,000 mails).
+- **Read and flagged** as the mailbox has it now: unread mails stand out with a dot, flagged ones carry a flag – read
+  or flag a mail on the iPhone and the activity shows it. Push notices the change within seconds, otherwise the
+  inbox is looked at every 10 minutes. Where the IMAP server supports CONDSTORE (RFC 7162), Frieda only asks
+  whether anything changed and which flags changed since the last look; without it the flags of the newest 500 inbox
+  mails are read in one request.
 - **Views:** all mails, by result (AI, rule, kill switch, no action) and by the folder Frieda put them in. That is
   what Frieda did – opening a mail looks up where it really is now (one search by its Message-ID): still there, moved
   elsewhere since, or no longer found.
@@ -254,7 +259,8 @@ every other Frieda tool. See [SECURITY.md](https://github.com/nadeo360/friedafet
 
 **Diagnostics** (Settings → Devices & services → Frieda Postfach → ⋮ → Download diagnostics) contain versions,
 options, the structure of the rules, automation and push status, runs and AI use as numbers, and the size of the
-activity – no subjects, senders, names, Message-IDs, rule values, kill-switch terms or the notify service. If Frieda
+activity and whether the server offers CONDSTORE – no subjects, senders, names, Message-IDs, rule values,
+kill-switch terms or the notify service. If Frieda
 is older than this version needs, a repair under Settings → Repairs says so until Frieda is updated.
 
 ## Development

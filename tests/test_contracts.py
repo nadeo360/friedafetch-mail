@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from homeassistant.core import HomeAssistant
 
 from custom_components.friedafetch_mail import ai as _ai  # noqa: F401 - loaded, so the AI call can be patched
@@ -39,6 +40,7 @@ def _summary(uid: int, subject: str, sender: str = "anna@example.com") -> dict[s
     }
 
 
+@pytest.mark.real_mail_state
 async def test_panel_answers_keep_their_shape(hass: HomeAssistant, hass_ws_client) -> None:
     core = await setup_core(hass)
     hass.config.components.add("ai_task")
@@ -94,6 +96,9 @@ async def test_panel_answers_keep_their_shape(hass: HomeAssistant, hass_ws_clien
         report = await sorter.async_process("push")
     await link.rules.async_record_ai("push", report)
     await sorter.async_correct(sorter.ratings[-1]["id"], sorter.categories[0]["name"])
+    # read / flagged as the mailbox has it: 3 read, 4 flagged, 5 moved away meanwhile
+    with patch(f"{MAIL}.async_flags", AsyncMock(return_value={3: ["\\Seen"], 4: ["\\Flagged"]})):
+        await link.state.async_sync()
 
     shapes: dict[str, Any] = {}
     with patch(f"{MAIL}.async_mailboxes", AsyncMock(return_value=BOXES)):

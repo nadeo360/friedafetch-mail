@@ -63,5 +63,5 @@ MAX_EVENTS_PER_RUN = 25  # a large run must not flood the event bus
 DEFAULT_IMPORTANT_FROM = 4  # threshold for "important" when no notification threshold is set
 SIGNAL_UPDATED = "friedafetch_mail_updated_{}"  # dispatcher signal per Frieda account: rules/AI state changed
 
-# Frieda that Frieda Postfach needs for everything of its panel (the tabs of Frieda UI 5); older ones get a repair
-MIN_FRIEDA_VERSION = "2.0.15"
+# Frieda that Frieda Postfach needs for everything (the tabs of Frieda UI 5, the IMAP state of 2.0.18); older ones get a repair
+MIN_FRIEDA_VERSION = "2.0.18"

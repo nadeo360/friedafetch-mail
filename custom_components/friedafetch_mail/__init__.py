@@ -13,7 +13,7 @@ from homeassistant.exceptions import ConfigEntryError, ConfigEntryNotReady, Home
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
-from homeassistant.helpers.event import async_track_time_change, async_track_time_interval
+from homeassistant.helpers.event import async_call_later, async_track_time_change, async_track_time_interval
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.loader import async_get_integration
 from homeassistant.util import dt as dt_util
@@ -39,6 +39,7 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+STATE_INTERVAL = timedelta(minutes=10)  # read/flagged of the activity's inbox mails, besides pushes
 
 PLATFORMS = [Platform.SENSOR]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
@@ -179,6 +180,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
     )
     entry.runtime_data = link
     rules.account = link.label
+    from .mailstate import MailState  # noqa: PLC0415
+
+    state: MailState | None = None
+    if core_opts.get(CONF_ENABLE_MAIL, DEFAULT_ENABLE_MAIL) and hasattr(auto_mail, "async_flags"):
+        state = link.state = MailState(auto_mail, activity)  # (Frieda before 2.0.18 cannot read flags)
+
+    @callback
+    def _sync_state(*_: Any) -> None:
+        """Read / flagged of the activity's inbox mails, in the background (after passes, pushes, and regularly)."""
+        if state is not None:
+            entry.async_create_background_task(hass, state.async_sync(), "frieda_postfach_mail_state")
+
+    if state is not None:
+        entry.async_on_unload(async_track_time_interval(hass, _sync_state, STATE_INTERVAL))
+        entry.async_on_unload(async_call_later(hass, 20, _sync_state))
     clients.extensions[EXTENSION_NAME] = extension
 
     async def _notify_important(rating: dict[str, Any]) -> None:
@@ -258,6 +274,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
                 return
             rules.note_check("error" if report["errors"] else "ran", next_run)
             await rules.async_record(report, await _ai_after_rules("auto"))
+            _sync_state()
             if report["matched"]:
                 _LOGGER.info("Inbox rules: %s messages checked, %s matched", report["checked"], report["matched"])
 
@@ -280,6 +297,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
                         await rules.async_record_ai("push", ai)
                 finally:
                     rules.end_pass()
+                    _sync_state()
+
+            async def _on_change() -> None:
+                # a mail read, flagged or moved on another device
+                if state is not None:
+                    await state.async_sync()
 
             watcher = MailWatcher(
                 username=core.data[CONF_APPLE_ID],
@@ -287,6 +310,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
                 host=IMAP_HOST,
                 port=IMAP_PORT,
                 on_new_mail=_on_new_mail,
+                on_change=_on_change,
                 ssl_context=client_context(),
                 timeout=REQUEST_TIMEOUT,
             )

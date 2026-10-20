@@ -1,7 +1,8 @@
 """Push delivery via IMAP IDLE: run the inbox rules seconds after new mail arrives.
 
-The watcher keeps its own IMAP connection (independent of the tool connection) and only reacts to
-EXISTS notifications; the periodic timer stays active as a fallback.
+The watcher keeps its own IMAP connection (independent of the tool connection). New mail (EXISTS) runs the rules;
+changed flags or removed mails (FETCH, EXPUNGE – a mail read or moved on another device) only refresh what shows the
+mailbox's state. The periodic timer stays active as a fallback.
 """
 
 from __future__ import annotations
@@ -21,14 +22,27 @@ _LOGGER = logging.getLogger(__name__)
 
 IDLE_RENEW = 25 * 60  # seconds; servers drop IDLE after 29 minutes
 DEBOUNCE = 5.0  # seconds to wait for further messages before running the rules
+CHANGE_DEBOUNCE = 3.0  # seconds to wait for further flag changes (reading several mails in a row)
 BACKOFF_START = 15.0
 BACKOFF_MAX = 600.0
 
 
+def _texts(lines: Any) -> list[str]:
+    return [
+        (bytes(line).decode(errors="replace") if isinstance(line, (bytes, bytearray)) else str(line)).upper().strip()
+        for line in lines or []
+    ]
+
+
 def _has_new_mail(lines: Any) -> bool:
-    for line in lines or []:
-        text = bytes(line).decode(errors="replace") if isinstance(line, (bytes, bytearray)) else str(line)
-        if text.upper().rstrip().endswith("EXISTS"):
+    return any(text.endswith("EXISTS") for text in _texts(lines))
+
+
+def _has_changes(lines: Any) -> bool:
+    """Flags changed (FETCH) or a mail left the mailbox (EXPUNGE, or VANISHED with QRESYNC)."""
+    for text in _texts(lines):
+        words = text.lstrip("* ").split()
+        if (len(words) >= 2 and words[0].isdigit() and words[1] in ("FETCH", "EXPUNGE")) or words[:1] == ["VANISHED"]:
             return True
     return False
 
@@ -44,6 +58,7 @@ class MailWatcher:
         host: str,
         port: int,
         on_new_mail: Callable[[], Awaitable[None]],
+        on_change: Callable[[], Awaitable[None]] | None = None,
         mailbox: str = "INBOX",
         ssl_context: ssl.SSLContext | None = None,
         timeout: int = 30,
@@ -54,6 +69,8 @@ class MailWatcher:
         self._host = host
         self._port = port
         self._on_new_mail = on_new_mail
+        self._on_change = on_change
+        self._change_pending: asyncio.TimerHandle | None = None
         self.mailbox = mailbox
         self._ssl_context = ssl_context
         self._timeout = timeout
@@ -84,9 +101,10 @@ class MailWatcher:
 
     async def async_stop(self) -> None:
         self._running = False
-        if self._pending is not None:
-            self._pending.cancel()
-            self._pending = None
+        for handle in (self._pending, self._change_pending):
+            if handle is not None:
+                handle.cancel()
+        self._pending = self._change_pending = None
         if self._task is not None:
             self._task.cancel()
             try:
@@ -120,6 +138,21 @@ class MailWatcher:
         if self._pending is not None:
             self._pending.cancel()
         self._pending = loop.call_later(self._debounce, lambda: loop.create_task(self._fire()))
+
+    def _schedule_change(self) -> None:
+        if self._on_change is None:
+            return
+        loop = asyncio.get_running_loop()
+        if self._change_pending is not None:
+            self._change_pending.cancel()
+        self._change_pending = loop.call_later(CHANGE_DEBOUNCE, lambda: loop.create_task(self._fire_change()))
+
+    async def _fire_change(self) -> None:
+        self._change_pending = None
+        try:
+            await self._on_change()  # type: ignore[misc]
+        except Exception as err:  # noqa: BLE001 - keep listening
+            _LOGGER.debug("Push-triggered state refresh failed: %s", err)
 
     async def _fire(self) -> None:
         self._pending = None
@@ -181,5 +214,7 @@ class MailWatcher:
                     break
                 if _has_new_mail(lines):
                     self._schedule()
+                elif _has_changes(lines):
+                    self._schedule_change()
             if client.get_state() not in ("AUTH", "SELECTED"):
                 raise ConnectionError("IMAP connection closed")

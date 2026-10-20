@@ -89,6 +89,9 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: Any) ->
             "usage": {k: usage[k] for k in ("today", "week", "month")},
             "batch": batch and batch | {"errors": _count(batch.get("errors"))},
         }
+    if link.state is not None:
+        # CONDSTORE: whether the server reports only changes; mode: what the last look used
+        out["mail_state"] = link.state.status()
     if activity is not None:
         await activity.async_load()
         kinds: dict[str, int] = {}

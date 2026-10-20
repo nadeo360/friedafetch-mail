@@ -29,6 +29,16 @@ def no_imap_idle() -> Generator[None]:
 
 
 @pytest.fixture(autouse=True)
+def no_mail_state_sync(request: pytest.FixtureRequest) -> Generator[None]:
+    """The read/flagged look runs in the background after passes; its own tests call it directly."""
+    if "real_mail_state" in request.keywords:
+        yield
+        return
+    with patch("custom_components.friedafetch_mail.mailstate.MailState.async_sync", AsyncMock()):
+        yield
+
+
+@pytest.fixture(autouse=True)
 def no_network() -> Generator[None]:
     """CalDAV discovery and contacts succeed without network."""
     with (
