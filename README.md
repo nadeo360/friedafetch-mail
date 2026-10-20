@@ -271,6 +271,15 @@ ln -s /tmp/frieda/custom_components/friedafetch custom_components/friedafetch
 pytest && ruff check . && ruff format --check .
 ```
 
+### Releases
+
+`scripts/release.py VERSION --notes NOTES.md` releases from a clean `dev`: it stops if `origin/main` has commits
+`dev` lacks, sets the version in the manifest, runs ruff and the tests, moves `main` on by fast-forward and pushes
+it, waits until every CI run of that commit has passed, creates the GitHub release with the notes (German, `---`,
+English), and then checks the zip the release workflow attached – checksum, version and every file against the
+tagged source. `--dry-run` only checks and tests; `--draft` prints a notes skeleton from the commits since the last
+release.
+
 ## About the use of AI
 
 This integration was developed with substantial help from an AI coding assistant (Anthropic's Claude), working from
