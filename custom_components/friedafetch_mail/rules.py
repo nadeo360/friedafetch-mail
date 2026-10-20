@@ -360,7 +360,7 @@ class RuleEngine:
         self._uidvalidity = {k: int(v) for k, v in (data.get("uidvalidity") or {}).items()}
         self.last_run = data.get("last_run")
         self.last_check = data.get("last_check")
-        self._history = list(data.get("history") or [])[-HISTORY_MAX:]
+        self._history = [_complete_run(r) for r in list(data.get("history") or [])[-HISTORY_MAX:]]
         self._history_seq = int(data.get("history_seq") or len(self._history))
         self._loaded = True
 
@@ -967,11 +967,13 @@ def _handled_mails(
                 "uid": uid,
                 "message_id": None,
                 "date": None,
+                "name": None,
                 "rules": [],
                 "move_to": None,
                 "delete": False,
                 "seen": None,
                 "flag": None,
+                "ai": None,  # set below for mails the AI rated or the kill switch held back
             },
         )
         # the Message-ID links the entry to the mail's timeline (it survives moves, the UID does not)
@@ -999,6 +1001,14 @@ def _handled_mails(
         mail = entry(item.get("mailbox") or "INBOX", item.get("uid"), item.get("subject"), item.get("from"), item)
         mail["ai"] = {k: item.get(k) for k in ("category", "importance", "applied", "held")}
     return list(mails.values())
+
+
+def _complete_run(run: dict[str, Any]) -> dict[str, Any]:
+    """A run as stored by any version, with every field of today (older ones lack the mails and their IDs)."""
+    run = {"ai": None, "mails": [], "mails_more": 0, **run}
+    blank = {"uid": None, "message_id": None, "date": None, "name": None, "ai": None}
+    run["mails"] = [{**blank, **mail} for mail in run["mails"] or []]
+    return run
 
 
 def _audit_mails(actions: list[dict[str, Any]]) -> list[dict[str, Any]]:

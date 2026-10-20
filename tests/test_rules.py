@@ -391,6 +391,7 @@ async def test_run_history_merges_idle_auto_runs(hass: HomeAssistant) -> None:
             "delete": False,
             "seen": True,
             "flag": None,
+            "ai": None,
         }
     ]
     assert history[1]["mails_more"] == 0 and history[2]["mails"] == []

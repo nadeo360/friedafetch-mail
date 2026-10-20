@@ -249,7 +249,7 @@ class AiSorter:
         usage = data.get("usage") or {}
         self._hour, self._hour_count = str(usage.get("hour") or ""), int(usage.get("count") or 0)
         self.last_run = data.get("last_run")
-        self.usage_log = list(data.get("usage_log") or [])[-MAX_LOG:]
+        self.usage_log = [_complete_log_entry(e) for e in list(data.get("usage_log") or [])[-MAX_LOG:]]
         self.usage_days = dict(data.get("usage_days") or {})
         if not self.categories:
             self.categories = [
@@ -1238,6 +1238,19 @@ class AiSorter:
             guard.consume(QUOTA_MAIL_MODIFY, 1)
         rating["applied"] = applied
         return bool(applied)
+
+
+def _complete_log_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    """An AI-log entry as stored by any version, with every field of today.
+
+    In 1.0.4 the kill-switch reason was a plain string ("sender" or "term:<term>"); now it is the list of hits.
+    """
+    entry = {"duration": None, "message_id": None, "items": None, "error": None, **entry}
+    held = entry.get("held_back")
+    if isinstance(held, str):
+        kind, _, value = held.partition(":")
+        entry["held_back"] = [{"type": "sender" if kind == "sender" else "term", "value": value, "where": []}]
+    return entry
 
 
 def _audit_mails(items: Any) -> list[dict[str, Any]]:
