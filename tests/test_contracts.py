@@ -76,7 +76,9 @@ async def test_panel_answers_keep_their_shape(hass: HomeAssistant, hass_ws_clien
         _summary(4, "Treffen morgen?"),
         _summary(5, "Befund: Diagnose", "praxis@example.com"),
     ]
-    answer = SimpleNamespace(data={"category": sorter.categories[1]["name"], "importance": 3, "reason": "invoice"})
+    answer = SimpleNamespace(
+        data={"category": sorter.categories[1]["name"], "importance": 3, "confidence": "low", "reason": "invoice"}
+    )
     with (
         patch(f"{MAIL}.async_search_uids", AsyncMock(side_effect=[[1, 2], [1, 2, 3, 4, 5]])),
         patch(f"{MAIL}.async_summaries", AsyncMock(return_value=mails)),
@@ -143,6 +145,12 @@ async def test_panel_answers_keep_their_shape(hass: HomeAssistant, hass_ws_clien
         shapes["friedafetch_mail/ai/assist/test"] = await call(
             "friedafetch_mail/ai/assist/test", proposal={"name": "Steuer", "description": "Finanzamt"}
         )
+    with (
+        patch(f"{MAIL}.async_summaries", AsyncMock(side_effect=lambda box, uids: [_summary(uids[0], "Treffen")])),
+        patch(f"{MAIL}.async_get_message", AsyncMock(return_value={"body": "Hallo"})),
+        patch(GENERATE, AsyncMock(return_value=answer)),
+    ):
+        shapes["friedafetch_mail/ai/check"] = await call("friedafetch_mail/ai/check")
     with (
         patch(f"{MAIL}.async_mailboxes", AsyncMock(return_value=BOXES)),
         patch(f"{MAIL}.async_search_uids", AsyncMock(return_value=[8])),

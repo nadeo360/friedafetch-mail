@@ -999,7 +999,7 @@ def _handled_mails(
             mail["rules"].append(act["rule"])
     for item in (ai or {}).get("items") or []:
         mail = entry(item.get("mailbox") or "INBOX", item.get("uid"), item.get("subject"), item.get("from"), item)
-        mail["ai"] = {k: item.get(k) for k in ("category", "importance", "applied", "held")}
+        mail["ai"] = {k: item.get(k) for k in ("category", "importance", "confidence", "applied", "held")}
     return list(mails.values())
 
 
@@ -1008,6 +1008,9 @@ def _complete_run(run: dict[str, Any]) -> dict[str, Any]:
     run = {"ai": None, "mails": [], "mails_more": 0, **run}
     blank = {"uid": None, "message_id": None, "date": None, "name": None, "ai": None}
     run["mails"] = [{**blank, **mail} for mail in run["mails"] or []]
+    for mail in run["mails"]:
+        if isinstance(mail["ai"], dict):  # the AI's confidence came with 1.0.24
+            mail["ai"] = {"confidence": None, **mail["ai"]}
     return run
 
 

@@ -178,8 +178,19 @@ einmal bewertet.
 oder alles, was eine Ansicht zeigt) oder öffnest eine einzelne Mail und wählst **Neu bewerten**. Die Mails gehen mit
 den aktuellen Kategorien erneut an die KI – Killswitch und Stundenlimit gelten wie immer –, und inzwischen verschobene
 Mails werden über ihre Message-ID im neuen Ordner gefunden. Auf Wunsch laufen danach die Aktionen der neuen
-Kategorie. Die Neubewertung läuft im Hintergrund mit Fortschritt und lässt sich abbrechen; die frühere Bewertung
-bleibt im Verlauf der Mail sichtbar. Aktionen, die Mails verändert haben, stehen in Friedas Änderungsprotokoll.
+Kategorie. Die Neubewertung läuft im Hintergrund mit Fortschritt und lässt sich abbrechen; ist das Stundenlimit
+aufgebraucht, wartet sie auf die nächste Stunde und macht dann von selbst weiter. Die frühere Bewertung bleibt im
+Verlauf der Mail sichtbar. Aktionen, die Mails verändert haben, stehen in Friedas Änderungsprotokoll.
+
+**Unsichere Bewertungen:** Zu jeder Bewertung sagt die KI, wie sicher sie ist. Bewertungen, bei denen sie unsicher war,
+sind in der Liste markiert und haben unter *Aktivität* eine eigene Ansicht, *Unsicher* – dort lohnt der erste Blick.
+Korrigierst du eine, verschwindet sie aus der Ansicht.
+
+**Treffsicherheit:** Unter *KI-Sortierung* schickt *Treffsicherheit prüfen* deine zuletzt korrigierten Mails (bis zu
+20) mit den aktuellen Kategorien noch einmal an die KI – jede ohne ihre eigene Korrektur unter den Beispielen – und
+zeigt, wie viele dort landen, wo du sie hingelegt hast, und welche noch daneben liegen. Für den Vergleich von Modellen
+lässt sich eine andere KI-Entität wählen. Nichts wird gespeichert oder verändert; die Prüfung zählt aufs Stundenlimit,
+der Killswitch gilt.
 
 **Mit Frieda beschreiben:** Neben **+** für eine neue Kategorie öffnet *Mit Frieda beschreiben* ein kurzes Gespräch:
 Du sagst in eigenen Worten, welche Mails dazugehören und was mit ihnen passieren soll, und die gewählte KI-Entität

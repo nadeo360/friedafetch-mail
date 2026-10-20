@@ -39,7 +39,8 @@
    },
    "kinds": {
     "*": "num"
-   }
+   },
+   "unsure": "num"
   },
   "days": [
    {
@@ -53,6 +54,7 @@
     "ai": {
      "applied": [],
      "category": "null|str",
+     "confidence": "null|str",
      "held": [
       "str"
      ],
@@ -79,6 +81,7 @@
     "time": "str",
     "trigger": "str",
     "uid": "num",
+    "unsure": "bool",
     "updated": "str"
    }
   ],
@@ -106,11 +109,13 @@
     "name": "str"
    }
   ],
+  "corrected": "num",
   "examples": "num",
   "ratings": [
    {
     "applied": [],
     "category": "str",
+    "confidence": "str",
     "corrected": "null|str",
     "?corrected_at": "str",
     "date": "str",
@@ -237,6 +242,30 @@
    {
     "after": "str",
     "before": "str",
+    "confidence": "null",
+    "expected": "null|str",
+    "first": "str",
+    "from": "str",
+    "subject": "str"
+   }
+  ],
+  "tested": "num"
+ },
+ "friedafetch_mail/ai/check": {
+  "corrected": "num",
+  "entity": "str",
+  "errors": [],
+  "held": "num",
+  "hits": "num",
+  "limit": "bool",
+  "missing": "num",
+  "results": [
+   {
+    "after": "str",
+    "before": "str",
+    "confidence": "str",
+    "expected": "str",
+    "first": "str",
     "from": "str",
     "subject": "str"
    }
@@ -251,6 +280,7 @@
  },
  "friedafetch_mail/mail/timeline": {
   "category": "str",
+  "confidence": "str",
   "corrected": "bool",
   "date": "str",
   "events": [
@@ -260,6 +290,7 @@
     "?before": "str",
     "?category": "str",
     "?chars": "num",
+    "?confidence": "str",
     "?count": "num",
     "?delete": "bool",
     "?duration": "num",
@@ -321,6 +352,7 @@
       "ai": {
        "applied": [],
        "category": "null|str",
+       "confidence": "null|str",
        "held": [
         "str"
        ],

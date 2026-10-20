@@ -73,6 +73,7 @@ async def async_setup_frontend(hass: HomeAssistant, version: str) -> None:
         ws_ai_rerate_cancel,
         ws_ai_assist,
         ws_ai_assist_test,
+        ws_ai_check,
         ws_activity_list,
         ws_activity_select,
         ws_activity_clear,
@@ -323,6 +324,7 @@ def _ai_payload(sorter: Any, limit: int = 200) -> dict[str, Any]:  # all kept ra
         "categories": sorter.categories,
         "ratings": list(reversed(sorter.ratings[-limit:])),
         "examples": len(sorter.examples),
+        "corrected": sum(1 for r in sorter.ratings if r.get("corrected")),  # mails for the accuracy check
         "usage": sorter.usage_summary(limit=300),  # the whole log; the panel pages it
         "batch": sorter.batch_status(),
     }
@@ -661,3 +663,15 @@ async def ws_ai_assist_test(
     """Test run of a proposed category with the last rated mails (nothing is stored or changed)."""
     sorter = _sorter(hass, msg.get("entry_id"))
     connection.send_result(msg["id"], await sorter.async_try_category(msg["proposal"]))
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{DOMAIN}/ai/check", vol.Optional("entry_id"): str, vol.Optional("entity"): str}
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+@_ws_errors
+async def ws_ai_check(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """Accuracy check with the mails you corrected, optionally with another AI entity (nothing is stored)."""
+    sorter = _sorter(hass, msg.get("entry_id"))
+    connection.send_result(msg["id"], await sorter.async_check(msg.get("entity") or None))

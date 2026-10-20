@@ -304,6 +304,7 @@ export const STYLE = `
   .batch .bar { height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--primary-color) 18%, transparent); overflow: hidden; }
   .batch .bar span { display: block; height: 100%; background: var(--primary-color); border-radius: 3px; transition: width .3s; }
   .batch.done > ha-icon { color: var(--frieda-text-ok); }
+  .batch.wait > ha-icon { color: var(--frieda-text-warn); }
   .batch.done.err > ha-icon { color: var(--frieda-text-err); }
   .sheet-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .sheet-foot .muted { flex: 1 1 220px; }
@@ -386,6 +387,15 @@ export const STYLE = `
   .meta.rule ha-icon { color: var(--frieda-text-info); }
   .meta.held ha-icon { color: var(--frieda-text-ok); }
   .meta .catsel + .rl { flex: none; overflow: visible; }
+  .uns { flex: none; font-size: 12px; color: var(--frieda-text-warn); }
+  .check-h { margin: 18px 0 4px; }
+  .check-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 4px 0 8px; }
+  .check-row .fsel { max-width: 100%; }
+  .check-res p { margin: 6px 0; }
+  .check-list { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 6px; }
+  .check-list li { display: grid; gap: 2px; padding: 6px 10px; border-radius: 8px; background: var(--secondary-background-color); font-size: 13.5px; }
+  .check-list li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .check-list small { color: var(--secondary-text-color); }
   select.catsel { min-height: 0; height: auto; padding: 1px 22px 1px 6px; margin: -2px 0; border-radius: 8px; border: 1px solid var(--divider-color, #e0e0e0); background-color: var(--card-background-color, #fff); color: var(--primary-text-color); font: inherit; font-size: 13px; max-width: 100%; }
   .rr { display: inline-flex; align-items: center; gap: 5px; flex: none; font-size: 12px; color: var(--secondary-text-color); --mdc-icon-size: 14px; }
   .rr.done { color: var(--frieda-text-ok); }

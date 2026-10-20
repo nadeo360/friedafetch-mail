@@ -120,6 +120,7 @@ class FriedaPostfachPanel extends HTMLElement {
       act: newActivity(),
       loc: new Map(), // Message-ID -> where the mail really is (looked up when it is opened)
       assist: null, // the category assistant, while it is open
+      check: null, // the accuracy check: { busy, entity, result, err }
       expanded: new Set(),
       focusEditor: false,
       scrollTo: null,
@@ -561,11 +562,21 @@ class FriedaPostfachPanel extends HTMLElement {
     </div>`;
   }
 
+  // A re-rating runs, or waits for the next hour of the hourly limit.
+  _batchBusy() {
+    const st = this._s.ai?.batch?.state;
+    return st === "running" || st === "waiting";
+  }
+
   // Progress of a re-rating, or its result (until hidden; for half an hour).
   _renderBatch(ai) {
     const t = this.t;
     const b = ai.batch;
     if (!b) return "";
+    if (b.state === "waiting") {
+      const pct = b.total ? Math.round((b.done / b.total) * 100) : 0;
+      return `<div class="batch wait" role="status">${ico("timer-sand")}<div class="bt"><strong>${esc(fmt(t.rerateWaiting, b.done, b.total))}</strong><span class="muted">${esc(fmt(t.rerateWaitingSub, fmtClock(b.resume_at)))}</span><div class="bar" aria-hidden="true"><span style="width:${pct}%"></span></div></div><button class="secondary small" data-action="rerate-cancel">${esc(t.rerateCancel)}</button></div>`;
+    }
     if (b.state === "running") {
       const pct = b.total ? Math.round((b.done / b.total) * 100) : 0;
       return `<div class="batch"><span class="spinner" aria-hidden="true"></span><div class="bt"><strong>${esc(fmt(t.rerateRunning, b.done, b.total))}</strong><div class="bar" aria-hidden="true"><span style="width:${pct}%"></span></div></div><button class="secondary small" data-action="rerate-cancel">${esc(t.rerateCancel)}</button></div>`;
@@ -665,7 +676,60 @@ class FriedaPostfachPanel extends HTMLElement {
         <button class="secondary small ib" data-action="assist-open" ${edit || s.busy ? "disabled" : ""}>${ico("creation")}${esc(t.assistOpen)}</button></div>
       <p class="muted" style="margin:-4px 0 8px">${esc(t.aiCategoriesHint)}</p>
       <div class="ai-cats">${catRows}${edit && edit.index < 0 ? editor(edit) : ""}</div>
+      ${this._renderCheck(st)}
     </div>`;
+  }
+
+  // Accuracy check: your corrected mails go to the AI again – with the current categories, optionally another entity.
+  _renderCheck(st) {
+    const t = this.t;
+    const s = this._s;
+    const n = Math.min(Number(s.ai?.corrected || 0), 20);
+    const c = s.check || {};
+    const head = `<h3 class="muted check-h">${esc(t.checkTitle)}</h3>`;
+    if (!n) return `${head}<p class="muted">${esc(t.checkNone)}</p>`;
+    const entities = Object.keys(this._hass?.states || {}).filter((id) => id.startsWith("ai_task.")).sort();
+    const entity = c.entity || st.entity;
+    const pick = entities.length > 1
+      ? `<select class="fsel" data-action="check-entity" aria-label="${esc(t.checkEntity)}">${entities.map((id) => `<option value="${esc(id)}" ${id === entity ? "selected" : ""}>${esc(this._hass.states[id]?.attributes?.friendly_name || id)}</option>`).join("")}</select>`
+      : "";
+    const cat = (x) => (x === "other" ? t.aiOther : x);
+    const r = c.result;
+    let out = "";
+    if (c.busy) out = `<p class="working"><span class="spinner" aria-hidden="true"></span>${esc(fmt(t.checkRunning, n))}</p>`;
+    else if (c.err) out = `<div class="error">${esc(c.err)}</div>`;
+    else if (r) {
+      const misses = r.results.filter((x) => x.after !== x.expected);
+      const pct = r.tested ? Math.round((r.hits / r.tested) * 100) : 0;
+      const notes = [
+        r.held ? fmt(t.checkHeld, r.held) : "",
+        r.missing ? fmt(t.checkMissing, r.missing) : "",
+        r.limit ? t.checkLimit : "",
+        r.errors?.[0] || "",
+      ].filter(Boolean);
+      out = `<div class="check-res" role="status">
+          <p><strong>${esc(r.tested ? fmt(t.checkResult, r.hits, r.tested, pct) : t.checkNothing)}</strong> <span class="muted">${esc(String(r.entity || "").replace(/^ai_task\./, ""))}</span></p>
+          ${notes.length ? `<p class="muted">${esc(notes.join(" · "))}</p>` : ""}
+          ${misses.length ? `<p class="muted">${esc(t.checkMisses)}</p><ul class="check-list">${misses.map((x) => `<li><span>${esc(x.subject || "–")}</span><small>${esc(fmt(t.checkMiss, cat(x.expected), cat(x.after)))}</small></li>`).join("")}</ul>` : r.tested ? `<p class="muted">${esc(t.checkAllRight)}</p>` : ""}
+        </div>`;
+    }
+    return `${head}<p class="muted">${esc(n === 1 ? t.checkHintOne : fmt(t.checkHint, n))}</p>
+      <div class="check-row">${pick}<button class="secondary small ib" data-action="ai-check" ${c.busy || s.busy ? "disabled" : ""}>${ico("bullseye-arrow")}${esc(r ? t.checkAgain : t.checkRun)}</button></div>
+      ${out}`;
+  }
+
+  async _check() {
+    const s = this._s;
+    const entity = s.check?.entity || null;
+    s.check = { busy: true, entity, result: null, err: "" };
+    this._render();
+    try {
+      const result = await this._ws({ type: "friedafetch_mail/ai/check", entry_id: s.entryId, ...(entity ? { entity } : {}) });
+      s.check = { busy: false, entity, result, err: "" };
+    } catch (err) {
+      s.check = { busy: false, entity, result: null, err: err.message || String(err) };
+    }
+    this._renderWhenFree();
   }
 
   async _call(fn) {
@@ -1044,7 +1108,7 @@ class FriedaPostfachPanel extends HTMLElement {
       icon = "tag-outline";
       tone = "ai";
       title = fmt(e.again ? t.tlRatedAgain : t.tlRated, cat(e.category));
-      sub = e.importance ? fmt(t.tlImportance, e.importance) : "";
+      sub = [e.importance ? fmt(t.tlImportance, e.importance) : "", e.confidence ? t[`tlConf_${e.confidence}`] || "" : ""].filter(Boolean).join(" · ");
       quote = e.reason || "";
       if (e.suspicious) minis = [t.aiSuspicious];
     } else if (e.kind === "ai_applied") {
@@ -1576,8 +1640,8 @@ class FriedaPostfachPanel extends HTMLElement {
     const k = a.batch.keys.indexOf(key);
     if (k < 0) return "";
     if (k < b.done) return `<span class="rr done">${ico("check")}${esc(t.rowDone)}</span>`;
-    if (b.state !== "running") return "";
-    return k === b.done
+    if (!this._batchBusy()) return "";
+    return k === b.done && b.state === "running"
       ? `<span class="rr work"><span class="spinner" aria-hidden="true"></span>${esc(t.rowWorking)}</span>`
       : `<span class="rr wait">${ico("clock-outline")}${esc(t.rowWaiting)}</span>`;
   }
@@ -1618,8 +1682,9 @@ class FriedaPostfachPanel extends HTMLElement {
       none: [t.actNone, "minus-circle-outline", ""],
     }[item.kind] || ["–", "circle-small", ""];
     const moved = item.folder !== "INBOX";
+    const unsure = item.unsure ? `<span class="uns">${esc(t.actUnsureMark)}</span>` : "";
     const where = full || moved ? `<span class="mv">${ico(full ? this._folderIcon(item.folder) : "arrow-right")}${esc(this._folderName(item.folder))}</span>` : "";
-    return `<span class="meta ${cls}">${ico(icon)}<span class="rl">${esc(label)}</span></span>${where}`;
+    return `<span class="meta ${cls}">${ico(icon)}<span class="rl">${esc(label)}</span></span>${unsure}${where}`;
   }
 
   _actViews() {
@@ -1629,6 +1694,7 @@ class FriedaPostfachPanel extends HTMLElement {
     const kindViews = [
       ["all", t.actAll, "email-multiple-outline", c.all || 0],
       ["k:ai", t.actKindAi, "creation", kinds.ai || 0],
+      ["unsure", t.actUnsure, "help-circle-outline", c.unsure || 0],
       ["k:rule", t.actKindRule, "filter-outline", kinds.rule || 0],
       ["k:held", t.actKindHeld, "shield-check-outline", kinds.held || 0],
       ["k:none", t.actKindNone, "minus-circle-outline", kinds.none || 0],
@@ -1746,7 +1812,7 @@ class FriedaPostfachPanel extends HTMLElement {
       : "";
     const batch = s.ai?.batch ? this._renderBatch(s.ai) : "";
     const actbar = a.picking
-      ? `<div class="actbar"><span>${esc(fmt(t.selected, a.sel.size))}</span><span class="grow"></span><button class="pill" data-action="act-rerate" ${a.sel.size && s.ai?.batch?.state !== "running" && !s.busy ? "" : "disabled"}>${ico("refresh")}${esc(t.rerate)}</button></div>`
+      ? `<div class="actbar"><span>${esc(fmt(t.selected, a.sel.size))}</span><span class="grow"></span><button class="pill" data-action="act-rerate" ${a.sel.size && !this._batchBusy() && !s.busy ? "" : "disabled"}>${ico("refresh")}${esc(t.rerate)}</button></div>`
       : "";
     const empty = !a.loaded ? `<p class="lempty">${esc(t.loading)}</p>` : `<p class="lempty">${esc(a.counts?.all ? t.actEmptyView : t.actEmpty)}</p>`;
     return `<div class="listpane ${a.picking ? "picking" : ""}">
@@ -1773,7 +1839,7 @@ class FriedaPostfachPanel extends HTMLElement {
           <strong>${esc(n === 0 ? t.actPickInfo0 : n === 1 ? t.actPickInfo1 : fmt(t.actPickInfoN, n))}</strong>
           <span>${esc(t.actPickHint)}</span>
           ${picked.length ? `<ul class="picklist">${picked.slice(0, 6).map((i) => `<li><span>${esc(i.subject || "–")}</span><small>${esc(i.name || i.from || "")}</small></li>`).join("")}${n > 6 ? `<li class="muted">${esc(fmt(t.actPickMore, n - Math.min(6, picked.length)))}</li>` : ""}</ul>` : ""}
-          ${n ? `<button class="pill" data-action="act-rerate" ${s.ai?.batch?.state === "running" || s.busy ? "disabled" : ""}>${ico("refresh")}${esc(n === 1 ? t.rerate : fmt(t.actRerateN, n))}</button>` : ""}
+          ${n ? `<button class="pill" data-action="act-rerate" ${this._batchBusy() || s.busy ? "disabled" : ""}>${ico("refresh")}${esc(n === 1 ? t.rerate : fmt(t.actRerateN, n))}</button>` : ""}
         </div></section>`;
     }
     const sheet = s.sheet?.inline ? s.sheet : null;
@@ -1808,13 +1874,13 @@ class FriedaPostfachPanel extends HTMLElement {
     let meta;
     if (d.rating_id && cats.length && !d.held) {
       const options = [...cats.map((c) => c.name), "other"].map((c) => `<option value="${esc(c)}" ${c === d.category ? "selected" : ""}>${esc(cat(c))}</option>`).join("");
-      meta = `<span class="meta ai">${ico(d.corrected ? "pencil-outline" : "creation")}<select class="catsel" data-action="ai-correct" data-id="${esc(d.rating_id)}" aria-label="${esc(t.actCorrect)}">${options}</select>${imp ? `<span class="rl">· ${esc(imp)}/5</span>` : ""}</span>`;
+      meta = `<span class="meta ai">${ico(d.corrected ? "pencil-outline" : "creation")}<select class="catsel" data-action="ai-correct" data-id="${esc(d.rating_id)}" aria-label="${esc(t.actCorrect)}">${options}</select>${imp ? `<span class="rl">· ${esc(imp)}/5</span>` : ""}</span>${d.confidence === "low" && !d.corrected ? `<span class="uns">${esc(t.actUnsureMark)}</span>` : ""}`;
     } else if (item) meta = this._actMeta(item);
     else if (d.held) meta = `<span class="meta held">${ico("shield-check-outline")}<span class="rl">${esc(t.actHeld)}</span></span>`;
     else meta = d.category ? `<span class="meta ai">${ico(d.corrected ? "pencil-outline" : "creation")}<span class="rl">${esc(cat(d.category))}</span></span>` : "";
     const canRerate = mid && s.ai?.status?.active && (!item || item.selectable);
     const rerate = canRerate
-      ? `<button class="secondary small ib" data-action="tl-rerate" ${s.busy || s.ai?.batch?.state === "running" ? "disabled" : ""}>${ico("refresh")}${esc(t.rerate)}</button>`
+      ? `<button class="secondary small ib" data-action="tl-rerate" ${s.busy || this._batchBusy() ? "disabled" : ""}>${ico("refresh")}${esc(t.rerate)}</button>`
       : "";
     const who = name && address && name !== address ? `<strong>${esc(name)}</strong><small>${esc(address)}</small>` : `<strong>${esc(name || address || "–")}</strong>`;
     return `<div class="rtop"><span class="grow"></span>${rerate}</div>
@@ -2461,6 +2527,7 @@ class FriedaPostfachPanel extends HTMLElement {
           this._render();
         },
         "assist-test": () => this._assistTest(),
+        "ai-check": () => this._check(),
         "assist-apply": () => this._assistApply(),
         "tl-rerate": () => {
           // one way for every opened mail (activity, AI log, runs, a link): the mail and the list show the progress
@@ -2505,6 +2572,11 @@ class FriedaPostfachPanel extends HTMLElement {
         el.addEventListener("change", () => {
           if (el.value !== "runs") return this._actView(el.value);
           this._s.act.runs = true;
+          this._render();
+        });
+      } else if (action === "check-entity") {
+        el.addEventListener("change", () => {
+          this._s.check = { ...(this._s.check || {}), entity: el.value, result: null, err: "" };
           this._render();
         });
       } else if (action === "ai-correct") {

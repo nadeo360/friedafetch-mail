@@ -63,6 +63,7 @@ def build_timeline(
         "location": None,
         "category": None,
         "importance": None,
+        "confidence": None,
         "rating_id": None,  # lets the panel correct the category right there
         "corrected": False,
         "held": False,
@@ -101,7 +102,9 @@ def build_timeline(
 
     # what went to an AI, or was held back by the kill switch
     for entry in usage_log:
-        if entry.get("kind", "sort") != "sort" or not _matches(entry, message_id, subject, sender):
+        if entry.get("kind", "sort") != "sort" or entry.get("trigger") in ("test", "check"):
+            continue  # test runs and accuracy checks are no steps of the mail
+        if not _matches(entry, message_id, subject, sender):
             continue
         note(entry)
         if entry.get("sent") is False:
@@ -133,6 +136,7 @@ def build_timeline(
                     "kind": "rated",
                     "category": prev.get("category"),
                     "importance": prev.get("importance"),
+                    "confidence": prev.get("confidence"),
                     "reason": prev.get("reason"),
                     "suspicious": False,
                 }
@@ -155,6 +159,7 @@ def build_timeline(
                 "again": bool(prev),
                 "category": rating.get("category"),
                 "importance": rating.get("importance"),
+                "confidence": rating.get("confidence"),
                 "reason": rating.get("reason"),
                 "suspicious": bool(rating.get("suspicious")),
             }
@@ -164,6 +169,7 @@ def build_timeline(
             events.append({"time": rating.get("time"), "kind": "ai_applied", "applied": applied})
         head["category"] = rating.get("corrected") or rating.get("category")
         head["importance"] = rating.get("importance")
+        head["confidence"] = rating.get("confidence")
         head["rating_id"] = rating.get("id")
         if rating.get("corrected"):
             head["corrected"] = True

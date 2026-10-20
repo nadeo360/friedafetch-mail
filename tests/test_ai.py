@@ -552,3 +552,115 @@ async def test_rerate_without_actions_and_cancel(hass: HomeAssistant) -> None:
     batch = sorter.batch_status()
     assert batch["state"] == "cancelled" and batch["done"] == 1 and batch["rated"] == 1
     move.assert_not_awaited()
+
+
+async def test_rerate_waits_for_the_next_hour_and_goes_on(hass: HomeAssistant) -> None:
+    """At the hourly limit the batch waits (cancellable) instead of stopping, and rates the rest afterwards."""
+    entry = await _setup(hass, ai_enabled=True, ai_entity=AI_ENTITY, ai_hourly_limit=1)
+    sorter = entry.runtime_data.ai
+    answer = SimpleNamespace(data={"category": "Notifications", "importance": 2, "reason": "x"})
+    seen: list[dict[str, Any]] = []
+
+    async def next_hour(seconds: float) -> None:
+        seen.append(dict(sorter.batch_status() or {}))
+        sorter._hour_count = 0  # the hour is over
+
+    items = [{"message_id": f"<{u}@example.com>", "mailbox": "INBOX", "uid": u} for u in (4, 5, 6)]
+    with (
+        patch(f"{MAIL}.async_summaries", AsyncMock(side_effect=lambda box, uids: [_summary(uids[0])])),
+        patch(GENERATE, AsyncMock(return_value=answer)) as generate,
+        patch("custom_components.friedafetch_mail.ai._wait", side_effect=next_hour),
+    ):
+        await sorter.async_start_rerate(items, apply=False)
+        await hass.async_block_till_done()
+    assert generate.await_count == 3
+    assert [s["state"] for s in seen] == ["waiting", "waiting"] and all(s["resume_at"] for s in seen)
+    batch = sorter.batch_status()
+    assert batch["state"] == "done" and batch["rated"] == 3 and batch["resume_at"] is None
+
+    # cancelled while it waits: it stops without another rating
+    sorter._hour_count = 1
+
+    async def cancel_meanwhile(seconds: float) -> None:
+        sorter.cancel_rerate()
+
+    with (
+        patch(f"{MAIL}.async_summaries", AsyncMock(side_effect=lambda box, uids: [_summary(uids[0])])),
+        patch(GENERATE, AsyncMock(return_value=answer)) as generate,
+        patch("custom_components.friedafetch_mail.ai._wait", side_effect=cancel_meanwhile),
+    ):
+        await sorter.async_start_rerate(items, apply=False)
+        await hass.async_block_till_done()
+    generate.assert_not_awaited()
+    assert sorter.batch_status()["state"] == "cancelled"
+
+
+async def test_accuracy_check_with_the_corrected_mails(hass: HomeAssistant, hass_ws_client) -> None:
+    """Corrected mails go to the AI again (also another AI entity), each without its own correction as example."""
+    entry = await _setup(hass, ai_enabled=True, ai_entity=AI_ENTITY)
+    sorter = entry.runtime_data.ai
+    hass.states.async_set("ai_task.other_ai", "unknown")
+    first = SimpleNamespace(data={"category": "Notifications", "importance": 2, "confidence": "low", "reason": "x"})
+    with (
+        patch(f"{MAIL}.async_search_uids", AsyncMock(side_effect=[[1], [1, 2, 3]])),
+        patch(f"{MAIL}.async_summaries", AsyncMock(return_value=[_summary(2), _summary(3, subject="Rechnung")])),
+        patch(GENERATE, AsyncMock(return_value=first)),
+    ):
+        await sorter.async_process()
+        await sorter.async_process("push")
+    assert [r["confidence"] for r in sorter.ratings] == ["low", "low"]
+    personal, bills = sorter.categories[0]["name"], sorter.categories[1]["name"]
+    two, three = sorter.ratings
+    await sorter.async_correct(two["id"], personal)
+    await sorter.async_correct(three["id"], bills)
+
+    answer = SimpleNamespace(data={"category": personal, "importance": 3, "confidence": "high", "reason": "y"})
+    ws = await hass_ws_client(hass)
+    with (
+        patch(f"{MAIL}.async_summaries", AsyncMock(side_effect=lambda box, uids: [_summary(uids[0])])),
+        patch(GENERATE, AsyncMock(return_value=answer)) as generate,
+    ):
+        await ws.send_json(
+            {"id": 1, "type": "friedafetch_mail/ai/check", "entry_id": entry.entry_id, "entity": "ai_task.other_ai"}
+        )
+        msg = await ws.receive_json()
+    assert msg["success"], msg
+    out = msg["result"]
+    assert out["entity"] == "ai_task.other_ai" and out["corrected"] == 2 and out["tested"] == 2 and out["hits"] == 1
+    assert {(r["expected"], r["after"], r["first"]) for r in out["results"]} == {
+        (personal, personal, "Notifications"),
+        (bills, personal, "Notifications"),
+    }
+    assert {c.kwargs["entity_id"] for c in generate.await_args_list} == {"ai_task.other_ai"}
+    # the mail's own correction is no example for it; the other one is
+    sent = {c.kwargs["instructions"].split("<<<EMAIL")[1]: c.kwargs["instructions"] for c in generate.await_args_list}
+    assert all(text.count("-> ") == 1 for text in sent.values())
+    # nothing is stored: same ratings, and the check is no step of the mails
+    assert [r["category"] for r in sorter.ratings] == ["Notifications", "Notifications"]
+    assert [e["trigger"] for e in sorter.usage_log[-2:]] == ["check", "check"]
+    with pytest.raises(AiSortError):
+        await sorter.async_check("ai_task.missing")
+
+
+async def test_unsure_ratings_have_their_own_view(hass: HomeAssistant) -> None:
+    from custom_components.friedafetch_mail.activity import summarize  # noqa: PLC0415
+
+    entry = await _setup(hass, ai_enabled=True, ai_entity=AI_ENTITY)
+    link = entry.runtime_data
+    sorter = link.ai
+    sure = SimpleNamespace(data={"category": "Notifications", "importance": 2, "confidence": "high", "reason": "x"})
+    guess = SimpleNamespace(data={"category": "Notifications", "importance": 2, "confidence": "LOW", "reason": "x"})
+    with (
+        patch(f"{MAIL}.async_search_uids", AsyncMock(side_effect=[[1], [1, 2, 3]])),
+        patch(f"{MAIL}.async_summaries", AsyncMock(return_value=[_summary(2), _summary(3)])),
+        patch(GENERATE, AsyncMock(side_effect=[sure, guess])),
+    ):
+        await sorter.async_process()
+        report = await sorter.async_process("push")
+    await link.rules.async_record_ai("push", report)
+    rows = link.activity.view(sorter.ratings, ai_active=True)
+    out = summarize(rows, "unsure", "", 0, 50)
+    assert out["counts"]["unsure"] == 1 and [r["uid"] for r in out["items"]] == [3]
+    await sorter.async_correct(sorter.ratings[-1]["id"], sorter.categories[0]["name"])  # you decided: no longer unsure
+    rows = link.activity.view(sorter.ratings, ai_active=True)
+    assert summarize(rows, "unsure", "", 0, 50)["total"] == 0

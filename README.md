@@ -170,8 +170,17 @@ automatically.
 everything a view shows) or open one mail, and choose **Rate again**. The messages go to the AI once more with the
 current categories – the kill switch and the hourly limit apply as always – and messages that were moved since are
 found in their new folder by their Message-ID. On request the actions of the new category run afterwards. The
-re-rating runs in the background with progress and can be cancelled; the earlier rating stays visible in the message
-timeline. Actions that changed mail are written to Frieda's change log.
+re-rating runs in the background with progress and can be cancelled; when the hourly limit is used up it waits for the
+next hour and goes on by itself. The earlier rating stays visible in the message timeline. Actions that changed mail
+are written to Frieda's change log.
+
+**Unsure ratings:** with each rating the AI says how sure it is. Ratings it was unsure about get a mark in the list and
+their own view, *Unsure*, under *Activity* – the place to look first. Correcting one removes it from the view.
+
+**Accuracy:** under *AI sorting*, *Check accuracy* sends your most recently corrected messages (up to 20) to the AI
+again with the current categories, each without its own correction among the examples, and shows how many land where
+you put them and which are still off. You can pick another AI entity for the check to compare models. Nothing is
+stored or changed; it counts towards the hourly limit and the kill switch applies.
 
 **Describe with Frieda:** next to **+** for a new category, *Describe with Frieda* opens a short conversation: you say
 in your own words which mails belong to it and what should happen to them, and the AI entity you chose turns it into a

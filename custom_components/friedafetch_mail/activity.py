@@ -216,7 +216,7 @@ class ActivityLog:
             if mail.get("delete"):
                 item["delete"] = True
             if mail.get("ai"):
-                item["ai"] = {k: mail["ai"].get(k) for k in ("category", "importance", "applied", "held")}
+                item["ai"] = {k: mail["ai"].get(k) for k in ("category", "importance", "confidence", "applied", "held")}
         self._prune()
         self._changed()
 
@@ -341,13 +341,17 @@ class ActivityLog:
                 ai.update(
                     category=rating.get("corrected") or rating.get("category"),
                     importance=rating.get("importance"),
+                    confidence=rating.get("confidence"),
                     applied=list(rating.get("applied") or []),
                 )
                 row["rating_id"] = rating.get("id")
                 row["corrected"] = bool(rating.get("corrected"))
                 row["name"] = row.get("name") or rating.get("from")
+            if ai:
+                ai.setdefault("confidence", None)  # lines from before 1.0.24
             row["ai"] = ai or None
             row["kind"] = kind_of(row)
+            row["unsure"] = bool(row["kind"] == "ai" and ai.get("confidence") == "low" and not row.get("corrected"))
             row["folder"] = folder_of(row)
             row["day"] = _day(item.get("time"))
             row["selectable"] = bool(ai_active and row.get("message_id") and row["kind"] != "rule")
@@ -371,7 +375,9 @@ def _append(item: dict[str, Any], event: dict[str, Any]) -> None:
 
 
 def matches(row: dict[str, Any], view: str, query: str) -> bool:
-    """view: all | k:<kind> | f:<folder>; query: words in subject, sender, category or rule."""
+    """view: all | unsure | k:<kind> | f:<folder>; query: words in subject, sender, category or rule."""
+    if view == "unsure" and not row.get("unsure"):
+        return False
     if view.startswith("k:") and row["kind"] != view[2:]:
         return False
     if view.startswith("f:") and row["folder"] != view[2:]:
@@ -404,5 +410,10 @@ def summarize(rows: list[dict[str, Any]], view: str, query: str, offset: int, li
         "total": len(hits),
         "selectable": sum(1 for r in hits if r["selectable"]),
         "days": [{"day": d, **v} for d, v in days.items()],
-        "counts": {"all": len(rows), "kinds": kinds, "folders": folders},
+        "counts": {
+            "all": len(rows),
+            "unsure": sum(1 for r in rows if r.get("unsure")),
+            "kinds": kinds,
+            "folders": folders,
+        },
     }
