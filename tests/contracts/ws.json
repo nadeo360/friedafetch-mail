@@ -1,0 +1,438 @@
+{
+ "friedafetch_mail/accounts": {
+  "accounts": [
+   {
+    "apple_id": "str",
+    "attachments": "bool",
+    "automation": {
+     "enabled": "bool",
+     "enabled_rules": "num",
+     "idle_reason": "null",
+     "interval": "null",
+     "last_check": "null",
+     "next_run": "null",
+     "push": "null"
+    },
+    "core_entry_id": "str",
+    "digest_time": "null",
+    "entry_id": "str",
+    "hits": "num",
+    "label": "str",
+    "last_run": "null",
+    "mail_enabled": "bool",
+    "read_only": "bool",
+    "rules_auto": "bool",
+    "rules_enabled": "num",
+    "rules_interval": "num",
+    "rules_push": "bool",
+    "rules_total": "num",
+    "title": "str"
+   }
+  ],
+  "version": "str"
+ },
+ "friedafetch_mail/activity/list": {
+  "counts": {
+   "all": "num",
+   "folders": {
+    "*": "num"
+   },
+   "kinds": {
+    "*": "num"
+   }
+  },
+  "days": [
+   {
+    "day": "str",
+    "selectable": "num",
+    "total": "num"
+   }
+  ],
+  "items": [
+   {
+    "ai": {
+     "applied": [],
+     "category": "null|str",
+     "held": [
+      "str"
+     ],
+     "importance": "null|num"
+    },
+    "?corrected": "bool",
+    "date": "null",
+    "day": "str",
+    "delete": "bool",
+    "flag": "null",
+    "folder": "str",
+    "from": "str",
+    "key": "str",
+    "kind": "str",
+    "mailbox": "str",
+    "message_id": "str",
+    "move_to": "null",
+    "name": "str",
+    "?rating_id": "str",
+    "rules": [],
+    "seen": "null",
+    "selectable": "bool",
+    "subject": "str",
+    "time": "str",
+    "trigger": "str",
+    "uid": "num",
+    "updated": "str"
+   }
+  ],
+  "selectable": "num",
+  "total": "num"
+ },
+ "friedafetch_mail/activity/select": {
+  "messages": [
+   {
+    "key": "str",
+    "mailbox": "str",
+    "message_id": "str"
+   }
+  ]
+ },
+ "friedafetch_mail/ai": {
+  "batch": "null",
+  "categories": [
+   {
+    "description": "str",
+    "flag": "bool",
+    "id": "str",
+    "mark_seen": "bool",
+    "move_to": "null",
+    "name": "str"
+   }
+  ],
+  "examples": "num",
+  "ratings": [
+   {
+    "applied": [],
+    "category": "str",
+    "corrected": "null|str",
+    "?corrected_at": "str",
+    "date": "str",
+    "from": "str",
+    "from_domain": "str",
+    "id": "str",
+    "importance": "num",
+    "mailbox": "str",
+    "message_id": "str",
+    "mode": "str",
+    "reason": "str",
+    "subject": "str",
+    "suspicious": "bool",
+    "time": "str",
+    "uid": "num"
+   }
+  ],
+  "status": {
+   "active": "bool",
+   "block_terms": "num",
+   "body_chars": "num",
+   "enabled": "bool",
+   "entity": "str",
+   "entity_ok": "bool",
+   "excluded": "num",
+   "include_body": "bool",
+   "last_error": "null",
+   "last_run": "str",
+   "limit": "num",
+   "mode": "str",
+   "notify": "num",
+   "used_this_hour": "num"
+  },
+  "usage": {
+   "log": [
+    {
+     "chars": "num",
+     "duration": "null|num",
+     "entity": "str",
+     "error": "null",
+     "fields": [
+      "str"
+     ],
+     "held_back": [
+      {
+       "type": "str",
+       "value": "str",
+       "where": [
+        "str"
+       ]
+      }
+     ],
+     "items": "null",
+     "kind": "str",
+     "message_id": "str",
+     "ok": "bool",
+     "sender": "str",
+     "sent": "bool",
+     "subject": "str",
+     "time": "str",
+     "trigger": "str"
+    }
+   ],
+   "month": {
+    "assist": "num",
+    "body": "num",
+    "calls": "num",
+    "chars": "num",
+    "digest": "num",
+    "entities": {
+     "*": "num"
+    },
+    "errors": "num",
+    "held_back": "num",
+    "sort": "num"
+   },
+   "today": {
+    "assist": "num",
+    "body": "num",
+    "calls": "num",
+    "chars": "num",
+    "digest": "num",
+    "entities": {
+     "*": "num"
+    },
+    "errors": "num",
+    "held_back": "num",
+    "sort": "num"
+   },
+   "week": {
+    "assist": "num",
+    "body": "num",
+    "calls": "num",
+    "chars": "num",
+    "digest": "num",
+    "entities": {
+     "*": "num"
+    },
+    "errors": "num",
+    "held_back": "num",
+    "sort": "num"
+   }
+  }
+ },
+ "friedafetch_mail/ai/assist": {
+  "overlap": "null",
+  "proposal": {
+   "description": "str",
+   "flag": "bool",
+   "mark_seen": "bool",
+   "move_to": "str",
+   "name": "str"
+  },
+  "reply": "str"
+ },
+ "friedafetch_mail/ai/assist/test": {
+  "errors": [],
+  "held": "num",
+  "hits": "num",
+  "limit": "bool",
+  "missing": "num",
+  "name": "str",
+  "results": [
+   {
+    "after": "str",
+    "before": "str",
+    "from": "str",
+    "subject": "str"
+   }
+  ],
+  "tested": "num"
+ },
+ "friedafetch_mail/mail/locate": {
+  "checked": "str",
+  "found": "bool",
+  "mailbox": "str",
+  "trash": "bool"
+ },
+ "friedafetch_mail/mail/timeline": {
+  "category": "str",
+  "corrected": "bool",
+  "date": "str",
+  "events": [
+   {
+    "?after": "str",
+    "?again": "bool",
+    "?before": "str",
+    "?category": "str",
+    "?chars": "num",
+    "?count": "num",
+    "?delete": "bool",
+    "?duration": "num",
+    "?entity": "str",
+    "?error": "null",
+    "?fields": [
+     "str"
+    ],
+    "?flag": "null",
+    "?importance": "num",
+    "kind": "str",
+    "?mailbox": "str",
+    "?move_to": "null",
+    "?ok": "bool",
+    "?reason": "str",
+    "?rules": [],
+    "?seen": "null",
+    "?suspicious": "bool",
+    "time": "str",
+    "?trigger": "str"
+   }
+  ],
+  "found": "bool",
+  "held": "bool",
+  "importance": "num",
+  "location": "null",
+  "mailbox": "str",
+  "message_id": "str",
+  "rating_id": "str",
+  "sender": "str",
+  "subject": "str"
+ },
+ "friedafetch_mail/mailboxes": {
+  "mailboxes": [
+   "str"
+  ]
+ },
+ "friedafetch_mail/rules/history": {
+  "current": "null",
+  "runs": [
+   {
+    "actions": "num",
+    "ai": {
+     "applied": "num",
+     "errors": [],
+     "held": "num",
+     "rated": "num"
+    },
+    "checked": "num",
+    "errors": [],
+    "finished": "str",
+    "id": "num",
+    "idle": "bool",
+    "mailboxes": [
+     "str"
+    ],
+    "mails": [
+     {
+      "ai": {
+       "applied": [],
+       "category": "null|str",
+       "held": [
+        "str"
+       ],
+       "importance": "null|num"
+      },
+      "date": "null",
+      "delete": "bool",
+      "flag": "null",
+      "from": "str",
+      "mailbox": "str",
+      "message_id": "str",
+      "move_to": "null",
+      "name": "str",
+      "rules": [],
+      "seen": "null",
+      "subject": "str",
+      "uid": "num"
+     }
+    ],
+    "mails_more": "num",
+    "matched": "num",
+    "rules": {
+     "*": "null"
+    },
+    "runs": "num",
+    "saved_files": "num",
+    "scope": "str",
+    "skipped": "num",
+    "started": "str",
+    "trigger": "str"
+   }
+  ],
+  "total": "num"
+ },
+ "friedafetch_mail/rules/list": {
+  "automation": {
+   "enabled": "bool",
+   "enabled_rules": "num",
+   "idle_reason": "null",
+   "interval": "null",
+   "last_check": "null",
+   "next_run": "null",
+   "push": "null"
+  },
+  "entry_id": "str",
+  "last_run": "null",
+  "rules": [
+   {
+    "actions": {
+     "attachments_folder": "null",
+     "delete": "bool",
+     "flag": "null",
+     "mark_seen": "null",
+     "move_to": "null",
+     "save_attachments": "bool",
+     "stop": "bool"
+    },
+    "conditions": [
+     {
+      "field": "str",
+      "op": "str",
+      "value": "str"
+     }
+    ],
+    "created": "str",
+    "enabled": "bool",
+    "hits": "num",
+    "id": "str",
+    "mailbox": "str",
+    "match": "str",
+    "name": "str"
+   }
+  ]
+ },
+ "friedafetch_mail/rules/run": {
+  "actions": [
+   {
+    "delete": "bool",
+    "flag": "null",
+    "from": [
+     "str"
+    ],
+    "mailbox": "str",
+    "mark_seen": "null",
+    "message_id": "str",
+    "move_to": "null",
+    "rule": "str",
+    "rule_id": "str",
+    "save_attachments": "bool",
+    "subject": "str",
+    "uid": "num"
+   }
+  ],
+  "checked": "num",
+  "checked_mails": [
+   {
+    "date": "str",
+    "from": "str",
+    "mailbox": "str",
+    "message_id": "str",
+    "name": "str",
+    "subject": "str",
+    "uid": "num"
+   }
+  ],
+  "dry_run": "bool",
+  "errors": [],
+  "finished": "str",
+  "matched": "num",
+  "scope": "str",
+  "skipped": [],
+  "started": "str",
+  "trigger": "str"
+ }
+}
