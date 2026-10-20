@@ -33,6 +33,7 @@ from .const import (
     DOMAIN,
     EXTENSION_NAME,
     MAX_RULES_INTERVAL,
+    MIN_FRIEDA_VERSION,
     MIN_RULES_INTERVAL,
     SERVICE_SEND_DIGEST,
 )
@@ -132,6 +133,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
     from .link import AccountLink, MailExtension  # noqa: PLC0415
     from .rules import RuleEngine  # noqa: PLC0415
 
+    await _check_frieda_version(hass)
     core = _core_entry(hass, entry)
     if core is None:
         raise ConfigEntryError("The Frieda account of this entry no longer exists; remove and re-add Frieda Postfach")
@@ -332,6 +334,29 @@ async def async_unload_entry(hass: HomeAssistant, entry: PostfachConfigEntry) ->
     if not [e for e in hass.config_entries.async_loaded_entries(DOMAIN) if e.entry_id != entry.entry_id]:
         async_remove_frontend(hass)
     return unloaded
+
+
+async def _check_frieda_version(hass: HomeAssistant) -> None:
+    """A repair while Frieda is older than what this version needs (the panel then lacks some of its parts)."""
+    from awesomeversion import AwesomeVersion  # noqa: PLC0415
+
+    try:
+        version = (await async_get_integration(hass, CORE_DOMAIN)).version
+    except Exception:  # noqa: BLE001 - no Frieda at all is reported by the setup itself
+        return
+    if version and AwesomeVersion(str(version)) < AwesomeVersion(MIN_FRIEDA_VERSION):
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            "frieda_too_old",
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="frieda_too_old",
+            translation_placeholders={"installed": str(version), "required": MIN_FRIEDA_VERSION},
+            learn_more_url="https://github.com/nadeo360/friedafetch/releases",
+        )
+    else:
+        ir.async_delete_issue(hass, DOMAIN, "frieda_too_old")
 
 
 def _parse_clock(value: Any) -> tuple[int, int] | None:

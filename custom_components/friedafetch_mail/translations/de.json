@@ -129,5 +129,11 @@
         "5": "nur Wichtigkeit 5"
       }
     }
+  },
+  "issues": {
+    "frieda_too_old": {
+      "title": "Frieda ist zu alt für Frieda Postfach",
+      "description": "Frieda Postfach braucht Frieda {required} oder neuer; installiert ist {installed}. Aktualisiere Frieda in HACS und starte Home Assistant neu. Bis dahin zeigt das Panel seine Bereiche untereinander, und einige fehlen."
+    }
   }
 }

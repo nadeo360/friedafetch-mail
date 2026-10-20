@@ -129,5 +129,11 @@
         "5": "only importance 5"
       }
     }
+  },
+  "issues": {
+    "frieda_too_old": {
+      "title": "Frieda is too old for Frieda Postfach",
+      "description": "Frieda Postfach needs Frieda {required} or newer; installed is {installed}. Update Frieda in HACS and restart Home Assistant. Until then the panel shows its parts one below the other and some of them are missing."
+    }
   }
 }
