@@ -115,10 +115,13 @@ die gewählte Mail (auf dem Handy öffnet sich die Mail in einem Blatt über der
   nur, wenn die Mail verschoben wurde. Die Tage sind gruppiert (und lassen sich einklappen), die Liste lädt beim
   Scrollen je 50 Mails nach, die Suche umfasst alle. Sie reicht 30 Tage zurück (höchstens 3.000 Mails).
 - **Gelesen und markiert** so, wie es das Postfach gerade hat: ungelesene Mails fallen mit einem Punkt auf, markierte
-  tragen eine Fahne – liest oder markierst du eine Mail am iPhone, zeigt die Aktivität das. Mit Push sieht Frieda die
-  Änderung binnen Sekunden, sonst schaut sie alle 10 Minuten in den Posteingang. Unterstützt der IMAP-Server CONDSTORE
-  (RFC 7162), fragt Frieda nur, ob sich etwas geändert hat und welche Markierungen seit dem letzten Blick anders
-  sind; ohne CONDSTORE liest sie die Markierungen der neuesten 500 Mails im Posteingang mit einer Anfrage.
+  tragen eine Fahne – liest oder markierst du eine Mail am iPhone, zeigt die Aktivität das. Verlässt eine Mail ihren
+  Ordner (am iPhone archiviert, von einer Regel oder der KI verschoben, gelöscht), findet Frieda sie über ihre
+  Message-ID wieder und verfolgt sie dort weiter. Änderungen im Posteingang sieht Frieda mit Push binnen Sekunden;
+  alle 10 Minuten schaut sie in alle Ordner mit verfolgten Mails. Unterstützt der IMAP-Server CONDSTORE (RFC 7162) –
+  iCloud tut das –, fragt Frieda nur, ob sich in einem Ordner etwas geändert hat und welche Markierungen seit dem
+  letzten Blick anders sind; ohne CONDSTORE liest sie die Markierungen der neuesten 500 Mails mit einer Anfrage je
+  Ordner.
 - **Ansichten:** alle Mails, nach Ergebnis (KI, Regel, Killswitch, keine Aktion) und nach dem Ordner, in den Frieda
   sie abgelegt hat. Das ist, was Frieda getan hat – beim Öffnen einer Mail sieht Frieda nach, wo sie wirklich liegt
   (eine Suche über ihre Message-ID): noch dort, inzwischen verschoben oder nicht mehr gefunden.

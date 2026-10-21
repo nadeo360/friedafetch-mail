@@ -17,7 +17,7 @@ from .activity import TRASH
 
 
 async def async_locate(mail: Any, guard: Any | None, message_id: str, hints: list[str] | None = None) -> dict[str, Any]:
-    """{found, mailbox, trash, checked}: the folder that holds the message, or found=False."""
+    """{found, mailbox, uid, trash, checked}: the folder that holds the message, or found=False."""
     boxes = await mail.async_mailboxes()
     trash = next((b["name"] for b in boxes if b.get("special_use") == "trash"), None)
     wanted = [trash if h == TRASH else h for h in hints or [] if h]
@@ -37,8 +37,8 @@ async def async_locate(mail: Any, guard: Any | None, message_id: str, hints: lis
         except (MailError, MailboxNotFound):
             continue
         if uids:
-            return {"found": True, "mailbox": name, "trash": name == trash, "checked": _now()}
-    return {"found": False, "mailbox": None, "trash": False, "checked": _now()}
+            return {"found": True, "mailbox": name, "uid": uids[-1], "trash": name == trash, "checked": _now()}
+    return {"found": False, "mailbox": None, "uid": None, "trash": False, "checked": _now()}
 
 
 def _now() -> str:

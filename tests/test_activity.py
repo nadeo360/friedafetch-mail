@@ -212,13 +212,13 @@ async def test_locate_searches_the_hint_first_and_the_trash_last() -> None:
         side_effect=lambda n: (_ for _ in ()).throw(ValueError("hidden")) if n == "Private" else None
     )
     res = await async_locate(mail, guard, '<a"b@x>', ["Archive"])
-    assert res["found"] and res["mailbox"] == "Deleted Messages" and res["trash"]
+    assert res["found"] and res["mailbox"] == "Deleted Messages" and res["trash"] and res["uid"] == 5
     assert searched == ["Archive", "INBOX", "Deleted Messages"]  # Private is hidden, the trash comes last
     assert mail.async_search_uids.await_args_list[0].args[1] == ["HEADER", "Message-ID", '"<a\\"b@x>"']
 
     mail.async_search_uids = AsyncMock(return_value=[])
     res = await async_locate(mail, None, "<gone@x>", [TRASH])
-    assert res == {"found": False, "mailbox": None, "trash": False, "checked": res["checked"]}
+    assert res == {"found": False, "mailbox": None, "uid": None, "trash": False, "checked": res["checked"]}
 
 
 async def test_locate_websocket(hass: HomeAssistant, hass_ws_client) -> None:

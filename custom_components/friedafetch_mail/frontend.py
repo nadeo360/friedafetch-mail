@@ -587,7 +587,15 @@ async def ws_mail_locate(hass: HomeAssistant, connection: websocket_api.ActiveCo
     """Where a message is now (searched by Message-ID), for the activity's detail view."""
     link = _entry(hass, msg.get("entry_id")).runtime_data
     mail = link.mail or link.clients.mail
-    connection.send_result(msg["id"], await async_locate(mail, link.clients.guard, msg["message_id"], msg["hints"][:5]))
+    found = await async_locate(mail, link.clients.guard, msg["message_id"], msg["hints"][:5])
+    connection.send_result(msg["id"], found)
+    if link.activity is not None and link.state is not None:
+        # the read / flagged look follows the message there from now on
+        line = link.activity.find({"message_id": msg["message_id"]})
+        if line is not None and link.activity.set_location(
+            line["key"], found["mailbox"], found["uid"], found["checked"]
+        ):
+            hass.async_create_background_task(link.state.async_sync(), "frieda_postfach_mail_state")
 
 
 async def _target_folders(link: Any) -> list[str]:

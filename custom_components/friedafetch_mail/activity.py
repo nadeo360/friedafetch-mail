@@ -126,42 +126,107 @@ class ActivityLog:
                 return item
         return None
 
-    def tracked_uids(self, mailbox: str, limit: int, *, gone: bool = False) -> list[int]:
-        """UIDs of the newest lines in this mailbox as far as Frieda knows (for mailstate.py).
+    def where(self, item: dict[str, Any]) -> tuple[str, int] | None:
+        """Folder and UID of a line's message as last seen, or None while it has to be found (by Message-ID).
 
-        gone: instead the lines the last looks found missing (asked about again, in case that was wrong).
+        Before the first look a message is where Frieda saw it, unless a rule or the AI moved it (then the old UID is
+        no use). Lines of 1.0.25–1.0.27 kept no folder: the same holds for them unless they were taken for gone.
         """
-        uids: list[int] = []
-        newest = sorted(self._items, key=lambda i: (_ts(i.get("time")), i.get("uid") or 0), reverse=True)
-        for item in newest:
-            if len(uids) >= limit:
+        state = item.get("state") or {}
+        if "mailbox" in state:
+            return (state["mailbox"], int(state["uid"])) if state["mailbox"] and state.get("uid") is not None else None
+        if state.get("gone") or item.get("uid") is None:
+            return None
+        box = item.get("mailbox") or "INBOX"
+        return (box, int(item["uid"])) if folder_of(item) == (_folder_name(box) or "INBOX") else None
+
+    def _newest(self) -> list[dict[str, Any]]:
+        return sorted(self._items, key=lambda i: (_ts(i.get("time")), i.get("uid") or 0), reverse=True)
+
+    def tracked(self, limit: int) -> dict[str, list[int]]:
+        """UIDs per folder of the newest lines whose message has a known place (for mailstate.py)."""
+        out: dict[str, list[int]] = {}
+        count = 0
+        for item in self._newest():
+            if count >= limit:
+                break
+            if (place := self.where(item)) is not None:
+                out.setdefault(place[0], []).append(place[1])
+                count += 1
+        return out
+
+    def lost(self, limit: int, retry_after: float) -> list[dict[str, Any]]:
+        """Newest lines whose message has to be found by its Message-ID (moved since, or never looked for).
+
+        A message not found anywhere is looked for again after retry_after seconds (it may come back from the trash).
+        """
+        cutoff = dt_util.now().timestamp() - retry_after
+        out: list[dict[str, Any]] = []
+        for item in self._newest():
+            if len(out) >= limit:
                 break
             state = item.get("state") or {}
-            if (
-                item.get("uid") is not None
-                and (item.get("mailbox") or "INBOX") == mailbox
-                and folder_of(item) == (_folder_name(mailbox) or "INBOX")
-                and bool(state.get("gone")) == gone
-            ):
-                uids.append(int(item["uid"]))
-        return uids
+            if not item.get("message_id") or self.where(item) is not None:
+                continue
+            if state.get("searched") and _ts(state["searched"]) > cutoff:
+                continue
+            hints = [state.get("last_mailbox"), folder_of(item), item.get("mailbox")]
+            out.append({"key": item["key"], "message_id": item["message_id"], "hints": [h for h in hints if h]})
+        return out
+
+    def _state(self, item: dict[str, Any], **changes: Any) -> bool:
+        """Update a line's state; True if what the panel shows changed."""
+        old = item.get("state") or {}
+        new = {
+            "seen": old.get("seen"),
+            "flagged": old.get("flagged"),
+            "gone": bool(old.get("gone")),
+            "mailbox": old.get("mailbox"),
+            "uid": old.get("uid"),
+            "searched": old.get("searched"),
+            **({"last_mailbox": old["last_mailbox"]} if old.get("last_mailbox") else {}),
+            **changes,
+        }
+        item["state"] = new
+        keys = ("seen", "flagged", "gone", "mailbox")
+        return any(old.get(k) != new.get(k) for k in keys)
 
     def set_state(self, mailbox: str, flags: dict[int, list[str]], gone: set[int], time: str) -> int:
-        """The flags the server reported (read, flagged) and the lines no longer in the mailbox; returns the changes."""
+        """The flags a folder reported (read, flagged) and the messages it no longer has; returns the changes."""
         changed = 0
         for item in self._items:
-            uid = item.get("uid")
-            if uid is None or (item.get("mailbox") or "INBOX") != mailbox or (uid not in flags and uid not in gone):
+            place = self.where(item)
+            if place is None or place[0] != mailbox or (place[1] not in flags and place[1] not in gone):
                 continue
-            old = item.get("state") or {}
-            if uid in gone:
-                new = {"seen": old.get("seen"), "flagged": old.get("flagged"), "gone": True}  # as last seen
+            if place[1] in gone:
+                # left the folder: found again by its Message-ID (soon, it has not been looked for yet)
+                changed += self._state(
+                    item, gone=True, mailbox=None, uid=None, searched=None, last_mailbox=mailbox, checked=time
+                )
             else:
-                names = {f.lower() for f in flags[uid]}
-                new = {"seen": "\\seen" in names, "flagged": "\\flagged" in names, "gone": False}
-            if {k: old.get(k) for k in new} != new:
-                changed += 1
-            item["state"] = {**new, "checked": time}
+                names = {f.lower() for f in flags[place[1]]}
+                changed += self._state(
+                    item,
+                    seen="\\seen" in names,
+                    flagged="\\flagged" in names,
+                    gone=False,
+                    mailbox=mailbox,
+                    uid=place[1],
+                    checked=time,
+                )
+        if changed:
+            self._changed()
+        return changed
+
+    def set_location(self, key: str, mailbox: str | None, uid: int | None, time: str) -> bool:
+        """Where a message was found by its Message-ID (or that it was found nowhere)."""
+        item = next((i for i in self._items if i.get("key") == key), None)
+        if item is None:
+            return False
+        if mailbox and uid is not None:
+            changed = self._state(item, gone=False, mailbox=mailbox, uid=int(uid), searched=None, checked=time)
+        else:
+            changed = self._state(item, gone=True, mailbox=None, uid=None, searched=time, checked=time)
         if changed:
             self._changed()
         return changed

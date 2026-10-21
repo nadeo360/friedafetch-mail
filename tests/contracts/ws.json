@@ -81,7 +81,11 @@
      "checked": "str",
      "flagged": "bool|null",
      "gone": "bool",
-     "seen": "bool|null"
+     "?last_mailbox": "str",
+     "mailbox": "null|str",
+     "searched": "null|str",
+     "seen": "bool|null",
+     "uid": "null|num"
     },
     "subject": "str",
     "time": "str",
@@ -282,7 +286,8 @@
   "checked": "str",
   "found": "bool",
   "mailbox": "str",
-  "trash": "bool"
+  "trash": "bool",
+  "uid": "num"
  },
  "friedafetch_mail/mail/timeline": {
   "category": "str",

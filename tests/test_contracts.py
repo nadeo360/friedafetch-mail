@@ -97,8 +97,13 @@ async def test_panel_answers_keep_their_shape(hass: HomeAssistant, hass_ws_clien
     await link.rules.async_record_ai("push", report)
     await sorter.async_correct(sorter.ratings[-1]["id"], sorter.categories[0]["name"])
     # read / flagged as the mailbox has it: 3 read, 4 flagged, 5 moved away meanwhile
-    with patch(f"{MAIL}.async_flags", AsyncMock(return_value={3: ["\\Seen"], 4: ["\\Flagged"]})):
+    with (
+        patch(f"{MAIL}.async_flags", AsyncMock(return_value={3: ["\\Seen"], 4: ["\\Flagged"]})),
+        patch(f"{MAIL}.async_mailboxes", AsyncMock(return_value=BOXES)),
+        patch(f"{MAIL}.async_search_uids", AsyncMock(return_value=[])),  # 5 is nowhere any more
+    ):
         await link.state.async_sync()
+    link.state = None  # no further looks in the background (they would go to a real server)
 
     shapes: dict[str, Any] = {}
     with patch(f"{MAIL}.async_mailboxes", AsyncMock(return_value=BOXES)):

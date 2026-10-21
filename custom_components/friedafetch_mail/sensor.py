@@ -206,6 +206,7 @@ class PushSensor(_StatusSensor):
                 "state_last": state["last"],
                 "state_last_full": state["last_full"],
                 "state_tracked": state["tracked"],
+                "state_folders": state["folders"],
                 "state_gone": state["gone"],
                 "state_error": state["error"],
             }

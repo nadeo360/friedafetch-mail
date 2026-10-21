@@ -184,7 +184,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
 
     state: MailState | None = None
     if core_opts.get(CONF_ENABLE_MAIL, DEFAULT_ENABLE_MAIL) and hasattr(auto_mail, "async_flags"):
-        state = link.state = MailState(auto_mail, activity)  # (Frieda before 2.0.18 cannot read flags)
+        # (Frieda before 2.0.18 cannot read flags); folders hidden from AI clients are not searched
+        state = link.state = MailState(auto_mail, activity, clients.guard)
 
     @callback
     def _sync_state(*_: Any) -> None:

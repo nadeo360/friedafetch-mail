@@ -1,16 +1,18 @@
-"""The state of the mails in the activity as the mailbox has it now: read or unread, flagged, still in the inbox.
+"""The state of the mails in the activity as the mailbox has it now: read or unread, flagged, and in which folder.
 
-You read a mail on the iPhone, flag one on the Mac: the activity shows it, like a mail program. Only lines that are
-in the inbox (as far as Frieda knows) are kept current, the newest MAX_TRACKED of them.
+You read a mail on the iPhone, flag one on the Mac, move one to the archive: the activity shows it, like a mail
+program. Each line remembers where its message is now (folder and UID). The newest MAX_TRACKED of them are kept
+current, folder by folder.
 
-With CONDSTORE (RFC 7162) the server keeps a change counter per mailbox (HIGHESTMODSEQ). Then one STATUS tells
-whether anything changed at all, and if so the server names only the messages whose flags changed since the last
-look. Without CONDSTORE the flags of the tracked messages are read in one FETCH. Every hour (and after a renumbering
-of the mailbox) the full FETCH runs anyway: only it notices messages that left the inbox.
+With CONDSTORE (RFC 7162) the server keeps a change counter per folder (HIGHESTMODSEQ). Then one STATUS tells whether
+anything changed in a folder at all, and if so the server names only the messages whose flags changed since the last
+look. Without CONDSTORE the flags of the tracked messages of a folder are read in one FETCH. Every hour (and after a
+folder was renumbered) the full FETCH runs anyway: only it notices messages that left a folder.
 
-A message counts as gone only when a second question (UID SEARCH) confirms that the inbox no longer has it – a FETCH
-answer that leaves messages out is not enough. Gone lines keep their last state (flags travel with a moved mail) and
-are asked about again in the next full looks, so a line that was wrongly taken for gone comes back by itself.
+A message counts as gone from a folder only when a second question (UID SEARCH) confirms it – a FETCH answer that
+leaves messages out is not enough. A gone message is then looked for by its Message-ID (locate.py: the folders Frieda
+knows of first, the trash last), MAX_LOCATE per look, and followed into its new folder. One found nowhere (deleted
+for good) is looked for again after a day. Lines keep their last state meanwhile: flags travel with a moved mail.
 """
 
 from __future__ import annotations
@@ -23,11 +25,13 @@ from typing import Any
 
 from custom_components.friedafetch.mail import MailboxNotFound, MailError
 
+from .locate import async_locate
+
 _LOGGER = logging.getLogger(__name__)
 
-MAILBOX = "INBOX"
 MAX_TRACKED = 500
-MAX_RECHECK = 100  # gone lines asked about again in a full look
+MAX_LOCATE = 10  # messages looked for by Message-ID per look (each may search several folders)
+SEARCH_AGAIN = 24 * 3600  # seconds until a message found nowhere is looked for again
 FULL_EVERY = 3600  # seconds
 
 
@@ -36,38 +40,45 @@ def _now_iso() -> str:
 
 
 class MailState:
-    """Keeps the read and flagged state of the activity's inbox lines current."""
+    """Keeps the read / flagged state and the folder of the activity's lines current."""
 
-    def __init__(self, mail: Any, activity: Any) -> None:
+    def __init__(self, mail: Any, activity: Any, guard: Any | None = None) -> None:
         self._mail = mail
         self._activity = activity
+        self._guard = guard
         self._lock = asyncio.Lock()
-        self._modseq: int | None = None
-        self._validity: int | None = None
-        self._full_at = 0.0
+        self._boxes: dict[str, dict[str, Any]] = {}  # folder -> modseq, validity, full_at
         self.mode: str | None = None  # condstore | flags (what the last look used)
         self.last: str | None = None
         self.last_full: str | None = None
         self.changed = 0  # lines whose state changed in the last look
+        self.located = 0  # messages found in another folder in the last look
         self.error: str | None = None
-        self.unconfirmed = 0  # messages a FETCH left out although the inbox still has them (kept, not gone)
         self._again = False
 
+    @property
+    def unconfirmed(self) -> int:
+        """Messages the last full FETCH left out although the folder still has them (kept, not taken for gone)."""
+        return sum(m.get("unconfirmed", 0) for m in self._boxes.values())
+
     def status(self) -> dict[str, Any]:
+        tracked = self._activity.tracked(MAX_TRACKED)
         return {
             "condstore": bool(getattr(self._mail, "condstore", False)),
             "mode": self.mode,
             "last": self.last,
             "last_full": self.last_full,
             "changed": self.changed,
-            "tracked": len(self._activity.tracked_uids(MAILBOX, MAX_TRACKED)),
-            "gone": len(self._activity.tracked_uids(MAILBOX, MAX_TRACKED, gone=True)),
+            "tracked": sum(len(uids) for uids in tracked.values()),
+            "folders": len(tracked),
+            "gone": len(self._activity.lost(MAX_TRACKED, 0)),  # not in any folder Frieda knows of (yet)
+            "located": self.located,
             "unconfirmed": self.unconfirmed,
             "error": self.error,
         }
 
     async def async_sync(self, *, full: bool = False) -> None:
-        """One look at the inbox. A request while a look runs is not lost: one more look follows it."""
+        """One look. A request while a look runs is not lost: one more look follows it."""
         if self._lock.locked():
             self._again = True
             return
@@ -81,70 +92,89 @@ class MailState:
             except Exception as err:  # noqa: BLE001 - a background look must never break anything
                 error = str(err) or err.__class__.__name__
                 if error != self.error:  # once per kind of failure, so it shows in the log without flooding it
-                    _LOGGER.warning("Read/flagged look at the inbox failed: %s", error)
+                    _LOGGER.warning("Read/flagged look at the mailbox failed: %s", error)
                 self.error = error
 
     async def _sync(self, full: bool) -> None:
-        uids = self._activity.tracked_uids(MAILBOX, MAX_TRACKED)
-        if not uids:
-            return
+        now = _now_iso()
+        changed = 0
+        modes: set[str] = set()
+        for mailbox, uids in self._activity.tracked(MAX_TRACKED).items():
+            changed += await self._look(mailbox, uids, full, now, modes)
+        # messages that left their folder (or were moved by a rule or the AI): found by Message-ID and followed
+        self.located = 0
+        found: dict[str, list[int]] = {}
+        for line in self._activity.lost(MAX_LOCATE, SEARCH_AGAIN):
+            where = await async_locate(self._mail, self._guard, line["message_id"], line["hints"])
+            mailbox, uid = (where["mailbox"], where.get("uid")) if where["found"] else (None, None)
+            changed += self._activity.set_location(line["key"], mailbox, uid, now)
+            if mailbox and uid is not None:
+                found.setdefault(mailbox, []).append(int(uid))
+                self.located += 1
+        for mailbox, uids in found.items():
+            changed += self._activity.set_state(mailbox, await self._mail.async_flags(mailbox, uids), set(), now)
+        self.mode = "condstore" if "condstore" in modes else ("flags" if modes else self.mode)
+        self.last = now
+        self.changed = changed
+
+    async def _look(self, mailbox: str, uids: list[int], full: bool, now: str, modes: set[str]) -> int:
+        """One folder: only the changes (CONDSTORE), or the flags of all its tracked messages."""
+        memory = self._boxes.setdefault(mailbox, {"modseq": None, "validity": None, "full_at": 0.0})
         condstore = bool(self._mail.condstore)
         status: dict[str, int] = {}
         if condstore:
             try:
-                status = await self._mail.async_status(MAILBOX)
+                status = await self._mail.async_status(mailbox)
             except (MailError, MailboxNotFound) as err:
                 # no counters this time: read all tracked flags instead of only the changes
-                _LOGGER.debug("Mail state: STATUS failed, full look instead: %s", err)
+                _LOGGER.debug("Mail state: STATUS of %s failed, full look instead: %s", mailbox, err)
                 condstore = False
-        modseq = status.get("highestmodseq")
-        validity = status.get("uidvalidity")
+        modseq, validity = status.get("highestmodseq"), status.get("uidvalidity")
         incremental = (
             condstore
             and not full
             and modseq is not None
-            and self._modseq is not None
-            and validity == self._validity
-            and time.monotonic() - self._full_at < FULL_EVERY
+            and memory["modseq"] is not None
+            and validity == memory["validity"]
+            and time.monotonic() - memory["full_at"] < FULL_EVERY
         )
         gone: set[int] = set()
         if incremental:
-            if modseq == self._modseq:
-                flags: dict[int, list[str]] = {}  # nothing changed in the whole mailbox
+            if modseq == memory["modseq"]:
+                flags: dict[int, list[str]] = {}  # nothing changed in the whole folder
             else:
-                changed = await self._mail.async_flags(MAILBOX, changed_since=self._modseq)
                 wanted = set(uids)
-                flags = {uid: f for uid, f in changed.items() if uid in wanted}
+                changes = await self._mail.async_flags(mailbox, changed_since=memory["modseq"])
+                flags = {uid: f for uid, f in changes.items() if uid in wanted}
         else:
-            recheck = self._activity.tracked_uids(MAILBOX, MAX_RECHECK, gone=True)
-            asked = list(dict.fromkeys([*uids, *recheck]))
-            flags = await self._mail.async_flags(MAILBOX, asked)
+            flags = await self._mail.async_flags(mailbox, uids)
             missing = set(uids) - set(flags)
+            memory["unconfirmed"] = 0
             if missing:
-                # confirmed by a second question: only what the inbox really lacks is gone
-                still = set(await self._mail.async_search_uids(MAILBOX, ["UID", ",".join(map(str, sorted(missing)))]))
+                # confirmed by a second question: only what the folder really lacks is gone
+                still = set(await self._mail.async_search_uids(mailbox, ["UID", ",".join(map(str, sorted(missing)))]))
                 gone = missing - still
-                self.unconfirmed = len(missing & still)
-                if self.unconfirmed:
+                memory["unconfirmed"] = len(missing & still)
+                if memory["unconfirmed"]:
                     _LOGGER.warning(
-                        "Mail state: FETCH left out %s of %s messages that the inbox still has (kept)",
-                        self.unconfirmed,
-                        len(asked),
+                        "Mail state: FETCH left out %s of %s messages that %s still has (kept)",
+                        memory["unconfirmed"],
+                        len(uids),
+                        mailbox,
                     )
-            else:
-                self.unconfirmed = 0
-            self._full_at = time.monotonic()
-            self.last_full = _now_iso()
-        self._modseq, self._validity = modseq, validity
-        self.mode = "condstore" if condstore else "flags"
-        self.last = _now_iso()
-        self.changed = self._activity.set_state(MAILBOX, flags, gone, self.last)
+            memory["full_at"] = time.monotonic()
+            self.last_full = now
+        memory.update(modseq=modseq, validity=validity)
+        modes.add("condstore" if condstore else "flags")
+        changed = self._activity.set_state(mailbox, flags, gone, now)
         _LOGGER.debug(
-            "Mail state (%s, %s): %s tracked, %s answered, %s changed, %s gone",
-            self.mode,
+            "Mail state %s (%s, %s): %s tracked, %s answered, %s changed, %s gone",
+            mailbox,
+            "condstore" if condstore else "flags",
             "changes" if incremental else "full",
             len(uids),
             len(flags),
-            self.changed,
+            changed,
             len(gone),
         )
+        return changed

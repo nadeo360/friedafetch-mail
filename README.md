@@ -112,10 +112,12 @@ mail on the right (on phones the mail opens in a sheet over the list that you sw
   Days are grouped (and can be folded), the list loads 50 mails at a time while you scroll, the search covers all of
   them. It keeps the last 30 days (at most 3,000 mails).
 - **Read and flagged** as the mailbox has it now: unread mails stand out with a dot, flagged ones carry a flag – read
-  or flag a mail on the iPhone and the activity shows it. Push notices the change within seconds, otherwise the
-  inbox is looked at every 10 minutes. Where the IMAP server supports CONDSTORE (RFC 7162), Frieda only asks
-  whether anything changed and which flags changed since the last look; without it the flags of the newest 500 inbox
-  mails are read in one request.
+  or flag a mail on the iPhone and the activity shows it. A mail that leaves its folder (archived on the iPhone,
+  moved by a rule or the AI, deleted) is found again by its Message-ID and followed there. Push notices changes in
+  the inbox within seconds; every 10 minutes Frieda looks at all folders with tracked mails. Where the IMAP server
+  supports CONDSTORE (RFC 7162) – iCloud does – Frieda only asks whether anything changed in a folder and which
+  flags changed since the last look; without it the flags of the newest 500 mails are read with one request per
+  folder.
 - **Views:** all mails, by result (AI, rule, kill switch, no action) and by the folder Frieda put them in. That is
   what Frieda did – opening a mail looks up where it really is now (one search by its Message-ID): still there, moved
   elsewhere since, or no longer found.
