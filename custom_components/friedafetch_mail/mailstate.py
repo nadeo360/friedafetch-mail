@@ -59,6 +59,19 @@ class MailState:
         # async (line key, folder) -> None: a message found in another folder (a silent correction of the AI)
         self.on_moved: Any | None = None
 
+    def note_validity(self, mailbox: str) -> None:
+        """A message was found in a folder by its Message-ID: remember the folder's numbering (UIDVALIDITY) it has.
+
+        Without it, a folder looked at for the first time after it was created again would answer for other messages
+        under the UIDs found before.
+        """
+        known = getattr(self._mail, "uidvalidity", None)
+        validity = known(mailbox) if callable(known) else None
+        memory = self._activity.sync_memory.setdefault(mailbox, {"modseq": None, "validity": None, "full_at": 0.0})
+        if memory["validity"] is None and validity is not None:
+            memory["validity"] = validity
+            self._activity.save_sync()
+
     def request(self) -> None:
         """A look soon, in the background (after an action from the panel)."""
         if self.on_request is not None:
@@ -126,6 +139,7 @@ class MailState:
                     except Exception as err:  # noqa: BLE001 - learning from it must never stop the look
                         _LOGGER.debug("Mail state: learning from a moved message failed: %s", err)
         for mailbox, uids in found.items():
+            self.note_validity(mailbox)
             changed += self._activity.set_state(mailbox, await self._mail.async_flags(mailbox, uids), set(), now)
         self.mode = next((m for m in ("qresync", "condstore", "flags") if m in modes), self.mode)
         self.last = now

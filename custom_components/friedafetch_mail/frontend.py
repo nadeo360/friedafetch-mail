@@ -645,6 +645,8 @@ async def ws_mail_locate(hass: HomeAssistant, connection: websocket_api.ActiveCo
     if link.activity is not None and link.state is not None:
         # the read / flagged look follows the message there from now on
         line = link.activity.find({"message_id": msg["message_id"]})
+        if found["found"]:
+            link.state.note_validity(found["mailbox"])
         if line is not None and link.activity.set_location(
             line["key"], found["mailbox"], found["uid"], found["checked"]
         ):
