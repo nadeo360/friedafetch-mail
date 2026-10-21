@@ -63,5 +63,19 @@ MAX_EVENTS_PER_RUN = 25  # a large run must not flood the event bus
 DEFAULT_IMPORTANT_FROM = 4  # threshold for "important" when no notification threshold is set
 SIGNAL_UPDATED = "friedafetch_mail_updated_{}"  # dispatcher signal per Frieda account: rules/AI state changed
 
-# Frieda that Frieda Postfach needs for everything (the tabs of Frieda UI 5, the IMAP state of 2.0.18); older ones get a repair
-MIN_FRIEDA_VERSION = "2.0.18"
+# Frieda that Frieda Postfach needs for everything (the tabs of Frieda UI 5, the IMAP fixes of 2.0.23); older ones get a repair
+MIN_FRIEDA_VERSION = "2.0.23"
+
+# For you (insights.py): important senders, appointments from mails, waiting for a reply, the weekly review
+CONF_VIP_GROUPS = "vip_groups"  # contact groups whose members are important senders ("*" = every contact)
+CONF_VIP_SENDERS = "vip_senders"  # further addresses and domains, one per line
+CONF_VIP_NOTIFY = "vip_notify"  # announce their mail right away
+CONF_AI_EVENTS = "ai_events"  # the AI names dates it reads in a mail: proposals for the calendar
+CONF_EVENTS_CALENDAR = "events_calendar"  # calendar for entries from the notification (empty = the first)
+CONF_FOLLOWUP_DAYS = "followup_days"  # sent mail without an answer after these days (0 = off)
+CONF_WEEKLY_DAY = "weekly_day"  # weekly review on this day (mon … sun, empty = off)
+VIP_ALL_CONTACTS = "*"
+DEFAULT_VIP_NOTIFY = True
+DEFAULT_AI_EVENTS = True
+DEFAULT_FOLLOWUP_DAYS = 3
+MAX_FOLLOWUP_DAYS = 30

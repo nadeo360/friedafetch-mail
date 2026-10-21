@@ -55,3 +55,4 @@ class AccountLink:
     mail: Any | None = None  # background IMAP connection of rules and AI sorting
     activity: Any | None = None  # activity.ActivityLog: one line per checked message
     state: Any | None = None  # mailstate.MailState: read/flagged as the mailbox has it now
+    insights: Any | None = None  # insights.Insights: the tab "For you"

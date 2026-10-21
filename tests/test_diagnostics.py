@@ -49,6 +49,7 @@ async def test_diagnostics_without_mail_content(hass: HomeAssistant, hass_storag
     assert diag["ai"]["ratings"] == 1 and diag["ai"]["status"]["block_terms"] == 1
     assert diag["activity"]["mails"] == 1
     assert diag["mail_state"]["condstore"] is False and diag["mail_state"]["tracked"] == 1
+    assert diag["for_you"]["proposals_open"] == 0 and diag["for_you"]["followups"] == 0
 
 
 async def test_repair_while_frieda_is_too_old(hass: HomeAssistant) -> None:

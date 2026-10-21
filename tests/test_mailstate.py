@@ -32,6 +32,7 @@ class FakeImap:
         self.status_error: Exception | None = None
         self.fetch_error: Exception | None = None
         self.gate: asyncio.Event | None = None
+        self.validity: dict[str, int] = {}  # UIDVALIDITY per folder (1 unless renumbered)
 
     def put(self, box: str, uid: int, mid: str, flags: list[str] | None = None) -> None:
         self.boxes[box][uid] = (mid, list(flags or []))
@@ -53,7 +54,7 @@ class FakeImap:
         self.calls.append(("status", box))
         if self.status_error:
             raise self.status_error
-        return {"uidvalidity": 1, "highestmodseq": self.modseq[box]}
+        return {"uidvalidity": self.uidvalidity(box), "highestmodseq": self.modseq[box]}
 
     async def async_flags(self, box: str, uids: list[int] | None = None, *, changed_since: int | None = None):
         self.calls.append(("flags", box, tuple(uids or ()), changed_since))
@@ -65,6 +66,9 @@ class FakeImap:
             assert self.condstore
             return {u: f for u, (_, f) in self.boxes[box].items() if self.changed_at[(box, u)] > changed_since}
         return {u: self.boxes[box][u][1] for u in uids or [] if u in self.boxes[box] and u not in self.drop_from_fetch}
+
+    def uidvalidity(self, box: str) -> int:
+        return self.validity.get(box, 1)
 
     async def async_search_uids(self, box: str, criteria: list[str]) -> list[int]:
         self.calls.append(("search", box, criteria[0]))
@@ -259,3 +263,20 @@ async def test_opening_a_mail_teaches_the_look_where_it_is(hass: HomeAssistant, 
     assert msg["result"]["mailbox"] == "Archive" and msg["result"]["uid"] == 50
     await hass.async_block_till_done()
     assert _states(log)[1]["mailbox"] == "Archive" and _states(log)[1]["uid"] == 50
+
+
+@pytest.mark.real_mail_state
+@pytest.mark.parametrize("condstore", [False, True], ids=["flags", "condstore"])
+async def test_a_renumbered_folder_is_searched_again(hass: HomeAssistant, condstore: bool) -> None:
+    """Regression (random walk): a folder created again keeps its mails under new UIDs, an old UID is another mail."""
+    entry, log, imap, state = await _setup(hass, condstore=condstore)
+    await state.async_sync()
+    await state.async_sync()  # found in the archive, then looked at there
+    assert _states(log)[4]["uid"] == 40
+    imap.boxes["Archive"] = {}
+    imap.put("Archive", 1, "<other@example.com>", [SEEN])
+    imap.put("Archive", 40, "<another@example.com>", [FLAGGED])  # the old UID now answers for another mail
+    imap.put("Archive", 2, "<4@example.com>", [FLAGGED])
+    imap.validity["Archive"] = 2
+    await state.async_sync()
+    assert _states(log)[4] == {"seen": False, "flagged": True, "gone": False, "mailbox": "Archive", "uid": 2}

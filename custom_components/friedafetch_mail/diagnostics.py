@@ -102,4 +102,20 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: Any) ->
             "kinds": kinds,
             "oldest": min((i.get("time") or "" for i in activity.items), default=None),
         }
+    insights = getattr(link, "insights", None)
+    if insights is not None:
+        # For you: only counts and switches (no addresses, subjects or dates)
+        await insights.async_load()
+        out["for_you"] = {
+            "vip_groups": len(insights.opts.get("vip_groups") or []),
+            "vip_known": len(insights._vips),  # noqa: SLF001
+            "proposals_open": len(insights.open_proposals()),
+            "proposals_added": sum(1 for p in insights.proposals if p.get("status") == "added"),
+            "followups": len(insights.followups),
+            "followups_checked": insights.followups_checked,
+            "subscriptions": len(insights.subscriptions),
+            "dismissed": {k: len(v) for k, v in insights.dismissed.items()},
+            "weekly_day": insights.opts.get("weekly_day") or None,
+            "error": bool(insights.error),
+        }
     return out

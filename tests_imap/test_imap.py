@@ -184,3 +184,46 @@ async def test_actions_from_the_panel(hass: HomeAssistant, account: dict[str, An
     assert (await async_locate(mail, None, keys[1], []))["mailbox"] == "Deleted Messages"
     steps = [e["action"] for e in next(i for i in log.items if i["key"] == keys[0])["events"] if e["kind"] == "acted"]
     assert steps == ["seen", "flag", "archive", "inbox"]
+
+
+async def test_for_you_against_the_server(hass: HomeAssistant, account: dict[str, Any], mail: Any) -> None:
+    """Waiting for a reply (threaded or not), newsletters and their unsubscribe header, with real SEARCH commands."""
+    from types import SimpleNamespace  # noqa: PLC0415
+
+    from custom_components.friedafetch.mail import list_unsubscribe  # noqa: PLC0415
+    from custom_components.friedafetch_mail.insights import Insights  # noqa: PLC0415
+
+    device = account["device"]
+    device.create("Sent Messages")
+    me = account["user"]
+    device.append("Sent Messages", "<s1@icloud.com>", "Angebot?", sender=me, to="Bob <bob@example.com>", days_ago=5)
+    device.append("Sent Messages", "<s2@icloud.com>", "Samstag?", sender=me, to="erika@example.com", days_ago=5)
+    device.append("Sent Messages", "<s3@icloud.com>", "Frage", sender=me, to="anna@example.com", days_ago=6)
+    device.append(
+        "INBOX",
+        "<r2@example.com>",
+        "Re: Samstag?",
+        sender="erika@example.com",
+        headers="In-Reply-To: <s2@icloud.com>\r\n",
+    )
+    device.append("Archive", "<r3@example.com>", "Antwort", sender="Anna <anna@example.com>")  # no threading headers
+    unsubscribe = (
+        "List-Unsubscribe: <https://moebel.example/u>\r\nList-Unsubscribe-Post: List-Unsubscribe=One-Click\r\n"
+    )
+    for n in range(2):
+        device.append(
+            "INBOX", f"<n{n}@moebel.example>", "Angebote", sender="Möbelhaus <news@moebel.example>", headers=unsubscribe
+        )
+    log = ActivityLog(hass, "fy-imap")
+    await log.async_load()
+    clients = SimpleNamespace(guard=None, audit=None, mail=mail)
+    insights = Insights(hass, "fy-imap", clients, mail, log, {}, language="de")
+
+    [waiting] = await insights.async_followups(force=True)
+    assert waiting["message_id"] == "<s1@icloud.com>" and waiting["to"][0]["email"] == "bob@example.com"
+    assert set(insights.replied) == {"<s2@icloud.com>", "<s3@icloud.com>"} and waiting["days"] == 5
+
+    [sub] = await insights.async_subscriptions(force=True)
+    assert (sub["sender"], sub["count"], sub["unread"]) == ("news@moebel.example", 2, 2)
+    _, msg = await mail.async_fetch_raw(sub["mailbox"], sub["uid"])
+    assert list_unsubscribe(msg)["one_click"]

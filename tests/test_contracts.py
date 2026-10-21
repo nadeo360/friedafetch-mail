@@ -6,6 +6,7 @@ After an intended change: UPDATE_CONTRACTS=1 pytest tests/test_contracts.py, the
 
 from __future__ import annotations
 
+from datetime import date, timedelta
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -21,6 +22,7 @@ from .contract import assert_contract
 AI_ENTITY = "ai_task.test_ai"
 MAIL = "custom_components.friedafetch.mail.ICloudMail"
 GENERATE = "custom_components.friedafetch_mail.ai._generate"
+CALDAV = "custom_components.friedafetch.caldav_client.ICloudCalDav"
 BOXES = [
     {"name": "INBOX", "special_use": None},
     {"name": "Archive", "special_use": "archive"},
@@ -78,8 +80,18 @@ async def test_panel_answers_keep_their_shape(hass: HomeAssistant, hass_ws_clien
         _summary(4, "Treffen morgen?"),
         _summary(5, "Befund: Diagnose", "praxis@example.com"),
     ]
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
     answer = SimpleNamespace(
-        data={"category": sorter.categories[1]["name"], "importance": 3, "confidence": "low", "reason": "invoice"}
+        data={
+            "category": sorter.categories[1]["name"],
+            "importance": 3,
+            "confidence": "low",
+            "reason": "invoice",
+            "event_kind": "appointment",
+            "event_title": "Treffen",
+            "event_start": f"{tomorrow}T15:00",
+            "event_end": f"{tomorrow}T16:00",
+        }
     )
     with (
         patch(f"{MAIL}.async_search_uids", AsyncMock(side_effect=[[1, 2], [1, 2, 3, 4, 5]])),
@@ -179,6 +191,41 @@ async def test_panel_answers_keep_their_shape(hass: HomeAssistant, hass_ws_clien
         patch(f"{MAIL}.async_summaries", AsyncMock(return_value=[_summary(8, "CI failed")])),
     ):
         shapes["friedafetch_mail/rules/run"] = await call("friedafetch_mail/rules/run", scope="all", dry_run=True)
+
+    # For you: a sent mail without an answer, a newsletter, the calendars, a proposal put into the calendar
+    sent = _summary(9, "Angebot für Samstag?", "me@icloud.com") | {
+        "to": [{"name": "Bob", "email": "bob@example.com"}],
+        "cc": [],
+        "date": (date.today() - timedelta(days=5)).isoformat() + "T10:00:00+02:00",
+    }
+    news = _summary(10, "Unsere Angebote", "news@shop.example") | {"newsletter": True, "seen": False}
+
+    async def search(box: str, criteria: list[str]) -> list[int]:
+        if criteria[0] != "SINCE":
+            return []  # no answer anywhere
+        return [9] if box == "Sent Messages" else [10] if box == "INBOX" else []
+
+    with (
+        patch(
+            f"{MAIL}.async_special_mailbox",
+            AsyncMock(side_effect=lambda kind: {"sent": "Sent Messages", "archive": "Archive"}.get(kind)),
+        ),
+        patch(f"{MAIL}.async_search_uids", AsyncMock(side_effect=search)),
+        patch(
+            f"{MAIL}.async_summaries",
+            AsyncMock(side_effect=lambda box, uids: [sent] if box == "Sent Messages" else [news]),
+        ),
+    ):
+        await link.insights.async_followups(force=True)
+        await link.insights.async_subscriptions(force=True)
+    shapes["friedafetch_mail/insights"] = await call("friedafetch_mail/insights")
+    calendar = SimpleNamespace(id="home", name="Zuhause", color="#34c759", supports_events=True)
+    with patch(f"{CALDAV}.async_calendars", AsyncMock(return_value=[calendar])):
+        shapes["friedafetch_mail/insights/calendars"] = await call("friedafetch_mail/insights/calendars")
+        with patch(f"{CALDAV}.async_create_event", AsyncMock(return_value={"uid": "EV1"})):
+            shapes["friedafetch_mail/insights/event"] = await call(
+                "friedafetch_mail/insights/event", proposal_id=link.insights.open_proposals()[0]["id"]
+            )
 
     for command, result in shapes.items():
         assert_contract(command, result)

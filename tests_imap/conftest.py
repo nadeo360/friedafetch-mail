@@ -9,6 +9,7 @@ import email.utils
 import imaplib
 import os
 import re
+import time
 import uuid
 from collections.abc import Generator
 from typing import Any
@@ -74,10 +75,22 @@ class Device:
         self.imap = imaplib.IMAP4(server.host, server.port)
         self.imap.login(user, PASSWORD)
 
-    def append(self, mailbox: str, message_id: str, subject: str = "Hallo", flags: str = "") -> int:
+    def append(
+        self,
+        mailbox: str,
+        message_id: str,
+        subject: str = "Hallo",
+        flags: str = "",
+        *,
+        sender: str = "Anna <anna@example.com>",
+        to: str = "me@example.com",
+        days_ago: float = 0,
+        headers: str = "",
+    ) -> int:
+        when = email.utils.formatdate(time.time() - days_ago * 86400, localtime=True)
         msg = (
-            f"From: Anna <anna@example.com>\r\nTo: me@example.com\r\nSubject: {subject}\r\n"
-            f"Message-ID: {message_id}\r\nDate: {email.utils.formatdate()}\r\n\r\nHallo Welt\r\n"
+            f"From: {sender}\r\nTo: {to}\r\nSubject: {subject}\r\n{headers}"
+            f"Message-ID: {message_id}\r\nDate: {when}\r\n\r\nHallo Welt\r\n"
         ).encode()
         typ, data = self.imap.append(f'"{mailbox}"', f"({flags})" if flags else None, None, msg)
         assert typ == "OK", data

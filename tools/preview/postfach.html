@@ -70,6 +70,7 @@ if (scene === "rule") await click('button[data-action="expand"][data-id="r1"]');
 if (scene === "rowmenu") { root.querySelector('tr[data-rule-id="r2"] details.rowmenu').open = true; }
 if (scene === "edit") await click('tr[data-rule-id="r2"] .menu-list [data-action="edit"]');
 // AI sorting and its log (tab=ai, tab=aiu)
+if (scene === "event") await click('[data-action="fy-event-edit"][data-id="p1"]', 400);
 if (scene === "catedit") await click('[data-action="ai-cat-edit"][data-index="2"]', 300);
 if (scene === "confirm") await click('[data-action="aiu-clear"]');
 if (scene === "aiopen") await click('button[data-action="aiu-open"][data-i="1"]');

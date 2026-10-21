@@ -38,6 +38,8 @@ _TEXT = {
         "birthdays": "Geburtstage: {items}",
         "today": "heute",
         "in_days": "in {n} T.",
+        "waiting": "Warten auf Antwort: {n}",
+        "proposals": "Terminvorschläge aus Mails: {n}",
     },
     "en": {
         "title": "Frieda – daily overview",
@@ -49,6 +51,8 @@ _TEXT = {
         "birthdays": "Birthdays: {items}",
         "today": "today",
         "in_days": "in {n} d",
+        "waiting": "Waiting for a reply: {n}",
+        "proposals": "Calendar proposals from e-mails: {n}",
     },
 }
 
@@ -146,6 +150,19 @@ def render_text(data: dict[str, Any], lang: str = "de") -> tuple[str, str]:
     return t["title"], "\n".join(lines)
 
 
+def _insight_lines(insights: Any | None, lang: str) -> list[str]:
+    """What waits on the tab "For you" (counts only, nothing of it goes to an AI)."""
+    if insights is None:
+        return []
+    t = _TEXT[lang]
+    lines = []
+    if insights.followups:
+        lines.append(t["waiting"].format(n=len(insights.followups)))
+    if proposals := insights.open_proposals():
+        lines.append(t["proposals"].format(n=len(proposals)))
+    return lines
+
+
 def ai_payload(data: dict[str, Any], settings: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """The part of the overview an AI may see: kill-switch matches removed, sender addresses dropped."""
     held: list[dict[str, Any]] = []
@@ -233,11 +250,13 @@ async def async_send_digest(
     rules: Any | None = None,
     account: str = "",
     ledger: Any | None = None,
+    insights: Any | None = None,
 ) -> dict[str, Any]:
     """Collect, phrase and deliver the overview (notify service or persistent notification)."""
     lang = _lang(hass)
     data = await async_collect(hass, clients, rules)
     title, message = render_text(data, lang)
+    extra = _insight_lines(insights, lang)
     ai_entity = opts.get(CONF_DIGEST_AI_TASK) or ""
     used_ai = False
     if ai_entity:
@@ -259,6 +278,8 @@ async def async_send_digest(
             await ledger.async_save_usage()
         if ai_text:
             message, used_ai = ai_text, True
+    if extra:
+        message = f"{message}\n" + "\n".join(extra) if message else "\n".join(extra)
     if account:
         title = f"{title} ({account})"
     service = str(opts.get(CONF_DIGEST_NOTIFY) or "").removeprefix("notify.")

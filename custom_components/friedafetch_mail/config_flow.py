@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
@@ -11,6 +12,7 @@ from homeassistant.helpers.selector import (
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
+    SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
     SelectSelectorMode,
@@ -25,6 +27,7 @@ from .const import (
     CONF_AI_BODY,
     CONF_AI_ENABLED,
     CONF_AI_ENTITY,
+    CONF_AI_EVENTS,
     CONF_AI_EXCLUDE,
     CONF_AI_LIMIT,
     CONF_AI_MODE,
@@ -33,25 +36,39 @@ from .const import (
     CONF_DIGEST_AI_TASK,
     CONF_DIGEST_NOTIFY,
     CONF_DIGEST_TIME,
+    CONF_EVENTS_CALENDAR,
+    CONF_FOLLOWUP_DAYS,
     CONF_RULES_AUTO,
     CONF_RULES_INTERVAL,
     CONF_RULES_PUSH,
+    CONF_VIP_GROUPS,
+    CONF_VIP_NOTIFY,
+    CONF_VIP_SENDERS,
+    CONF_WEEKLY_DAY,
     CORE_DOMAIN,
     DEFAULT_AI_BODY,
     DEFAULT_AI_ENABLED,
+    DEFAULT_AI_EVENTS,
     DEFAULT_AI_LIMIT,
     DEFAULT_AI_MODE,
     DEFAULT_AI_NOTIFY,
     DEFAULT_BIRTHDAY_SENSOR,
+    DEFAULT_FOLLOWUP_DAYS,
     DEFAULT_RULES_AUTO,
     DEFAULT_RULES_INTERVAL,
     DEFAULT_RULES_PUSH,
+    DEFAULT_VIP_NOTIFY,
     DOMAIN,
     LEGACY_OPTIONS,
     MAX_AI_LIMIT,
+    MAX_FOLLOWUP_DAYS,
     MAX_RULES_INTERVAL,
     MIN_RULES_INTERVAL,
+    VIP_ALL_CONTACTS,
 )
+
+_LOGGER = logging.getLogger(__name__)
+WEEKLY_DAYS = ["off", "mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 
 
 def _vol():
@@ -120,7 +137,68 @@ class FriedaPostfachOptionsFlow(OptionsFlow):
     """
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        return self.async_show_menu(step_id="init", menu_options=["automation", "ai"])
+        return self.async_show_menu(step_id="init", menu_options=["automation", "ai", "foryou"])
+
+    async def async_step_foryou(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """For you: important senders, calendar proposals, waiting for a reply, the weekly review."""
+        if user_input is not None:
+            user_input[CONF_VIP_GROUPS] = [str(g) for g in user_input.get(CONF_VIP_GROUPS) or [] if str(g).strip()]
+            user_input[CONF_VIP_SENDERS] = str(user_input.get(CONF_VIP_SENDERS) or "").strip()
+            user_input[CONF_EVENTS_CALENDAR] = str(user_input.get(CONF_EVENTS_CALENDAR) or "")
+            user_input[CONF_FOLLOWUP_DAYS] = int(user_input.get(CONF_FOLLOWUP_DAYS, DEFAULT_FOLLOWUP_DAYS) or 0)
+            return self.async_create_entry(data={**self.config_entry.options, **user_input})
+        vol = _vol()
+        opts = dict(self.config_entry.options)
+        de = (self.hass.config.language or "en").startswith("de")
+        groups: list[str] = []
+        calendars: list[dict[str, Any]] = []
+        insights = getattr(getattr(self.config_entry, "runtime_data", None), "insights", None)
+        if insights is not None:
+            try:
+                groups = await insights.async_groups()
+            except Exception as err:  # noqa: BLE001 - contacts off or unreachable: typed names still work
+                _LOGGER.debug("Options: the contact groups could not be read: %s", err)
+            try:
+                calendars = await insights.async_calendars()
+            except Exception as err:  # noqa: BLE001 - calendar off or unreachable
+                _LOGGER.debug("Options: the calendars could not be read: %s", err)
+        chosen = list(opts.get(CONF_VIP_GROUPS) or [])
+        names = dict.fromkeys([*groups, *(c for c in chosen if c != VIP_ALL_CONTACTS)])
+        group_options = [SelectOptionDict(value=VIP_ALL_CONTACTS, label="Alle Kontakte" if de else "All contacts")]
+        group_options += [SelectOptionDict(value=g, label=g) for g in names]
+        current_cal = str(opts.get(CONF_EVENTS_CALENDAR) or "")
+        cal_options = [SelectOptionDict(value="", label="–")]
+        cal_options += [SelectOptionDict(value=c["id"], label=c["name"]) for c in calendars]
+        if current_cal and current_cal not in {c["id"] for c in calendars}:
+            cal_options.append(SelectOptionDict(value=current_cal, label=current_cal))
+        schema = vol.Schema(
+            {
+                vol.Optional(CONF_VIP_GROUPS, description={"suggested_value": chosen}): SelectSelector(
+                    SelectSelectorConfig(
+                        options=group_options, multiple=True, custom_value=True, mode=SelectSelectorMode.DROPDOWN
+                    )
+                ),
+                vol.Optional(
+                    CONF_VIP_SENDERS, description={"suggested_value": opts.get(CONF_VIP_SENDERS) or ""}
+                ): TextSelector(TextSelectorConfig(multiline=True)),
+                vol.Required(CONF_VIP_NOTIFY, default=opts.get(CONF_VIP_NOTIFY, DEFAULT_VIP_NOTIFY)): BooleanSelector(),
+                vol.Required(CONF_AI_EVENTS, default=opts.get(CONF_AI_EVENTS, DEFAULT_AI_EVENTS)): BooleanSelector(),
+                vol.Optional(CONF_EVENTS_CALENDAR, description={"suggested_value": current_cal}): SelectSelector(
+                    SelectSelectorConfig(options=cal_options, mode=SelectSelectorMode.DROPDOWN)
+                ),
+                vol.Required(
+                    CONF_FOLLOWUP_DAYS, default=opts.get(CONF_FOLLOWUP_DAYS, DEFAULT_FOLLOWUP_DAYS)
+                ): NumberSelector(
+                    NumberSelectorConfig(min=0, max=MAX_FOLLOWUP_DAYS, step=1, mode=NumberSelectorMode.BOX)
+                ),
+                vol.Required(CONF_WEEKLY_DAY, default=opts.get(CONF_WEEKLY_DAY) or "off"): SelectSelector(
+                    SelectSelectorConfig(
+                        options=WEEKLY_DAYS, translation_key="weekly_day", mode=SelectSelectorMode.DROPDOWN
+                    )
+                ),
+            }
+        )
+        return self.async_show_form(step_id="foryou", data_schema=schema)
 
     async def async_step_ai(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """AI sorting: off by default; needs the switch AND a chosen ai_task entity."""

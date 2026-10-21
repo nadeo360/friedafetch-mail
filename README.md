@@ -52,8 +52,8 @@ with stored rules, and no rules run.
 
 ## Options
 
-The options have two parts: **Automation and daily overview** (below) and **AI sorting** (see
-[AI sorting](#ai-sorting)).
+The options have three parts: **Automation and daily overview** (below), **AI sorting** (see
+[AI sorting](#ai-sorting)) and **For you** (see [For you](#for-you)).
 
 | Option | Effect |
 |--------|--------|
@@ -264,6 +264,42 @@ activity of the last 24 hours, today's events and birthdays in the next 7 days a
 `notify` service. With an `ai_task` entity the overview is phrased as a short text; mail subjects are passed as data
 with the instruction not to follow anything inside them. The action `friedafetch_mail.send_digest` sends it on
 demand (optionally for one `account`) and returns the text.
+
+## For you
+
+The tab **For you** in the panel collects what Frieda notices for you. Everything is worked out in Home Assistant from
+the mailbox, the activity and the contacts; nothing of it goes to an AI, and nothing happens without your click.
+
+- **Your week** – what arrived (compared with the week before), what rules handled, how often the AI was right (rated
+  minus corrected), what is still unread. With *Weekly review on* it also comes as a notification on that day.
+- **Dates from e-mails** – needs the AI sorting: the AI names an appointment or deadline it reads in a mail it rates
+  anyway (same data, no extra request). You check title and time and add it to a calendar with one click; the
+  notification of an important mail gets a button *Add to calendar* (the calendar of the options). Calendars Frieda
+  protects are never offered.
+- **Waiting for a reply** – mails you sent to people (not to no-reply addresses or yourself) that got no answer after
+  *Waiting for a reply after* days (default 3, 0 = off). An answer counts when it refers to your mail (In-Reply-To /
+  References) or comes from that person since then, in the inbox, the archive or a folder of your rules and categories.
+- **Rule suggestions** – a sender whose mails you moved to the same folder (or deleted) at least three times and in
+  80 % of the cases over 30 days, and that no rule handles yet. *Create rule* opens the editor with it filled in.
+- **Subscriptions** – newsletters of the last 30 days, the least read first. *Unsubscribe* works like Frieda's
+  `icloud_unsubscribe`: one-click link, else the unsubscribe e-mail (needs *Allow sending e-mails*), else the page
+  opens for you.
+- **Important senders** – contact groups (or every contact) and addresses or domains you name. Their mail is never lost
+  among the rest: the AI rates it at least as important, and it is announced right away also without AI sorting.
+  The activity marks them with a star.
+
+Moving an AI-sorted mail into the folder of another category teaches the AI too: Frieda takes it as a correction
+(shown in the mail's timeline as *Corrected by you (moved)*), just like a correction in the panel.
+
+| Option (For you) | Effect |
+|------------------|--------|
+| Important senders: contact groups | groups of your iCloud contacts, or *All contacts* |
+| Important senders: addresses and domains | one per line |
+| Announce their mail right away | with the notification service of the daily overview (default: on) |
+| Propose calendar entries from e-mails | the AI names dates it reads (default: on; needs AI sorting) |
+| Calendar for entries from the notification | empty = the first calendar Frieda may write to |
+| Waiting for a reply after (days) | default 3, 0 = off |
+| Weekly review on | a weekday or off, at the time of the daily overview (else 18:00) |
 
 ## Security
 

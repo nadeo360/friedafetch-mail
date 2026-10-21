@@ -39,8 +39,11 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
-NOTIFY_ACTION = "FRIEDA_POSTFACH_"  # prefix of the notification buttons: FRIEDA_POSTFACH_<seen|archive>_<rating id>
+# prefix of the notification buttons: FRIEDA_POSTFACH_<seen|archive>_<rating id>, FRIEDA_POSTFACH_event_<proposal id>
+NOTIFY_ACTION = "FRIEDA_POSTFACH_"
 STATE_INTERVAL = timedelta(minutes=10)  # read/flagged of the activity's inbox mails, besides pushes
+INSIGHTS_INTERVAL = timedelta(hours=3)  # waiting for a reply, subscriptions (the tab "For you")
+WEEKLY_AT = (18, 0)  # the weekly review, unless the daily overview has a time
 
 PLATFORMS = [Platform.SENSOR]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
@@ -93,6 +96,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                 link.rules,
                 link.label if len(entries) > 1 else "",
                 ledger=getattr(link, "ai", None),
+                insights=getattr(link, "insights", None),
             )
             results.append({"account": link.label, "sent_to": result["sent_to"], "message": result["message"]})
         if not results:
@@ -116,9 +120,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
         CONF_ALLOW_DELETE,
         CONF_APP_PASSWORD,
         CONF_APPLE_ID,
+        CONF_ENABLE_CALENDAR,
         CONF_ENABLE_MAIL,
         CONF_READ_ONLY,
         DEFAULT_ALLOW_DELETE,
+        DEFAULT_ENABLE_CALENDAR,
         DEFAULT_ENABLE_MAIL,
         DEFAULT_READ_ONLY,
         IMAP_HOST,
@@ -132,7 +138,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
     from .digest import async_send_digest  # noqa: PLC0415
     from .frontend import async_setup_frontend  # noqa: PLC0415
     from .idle import MailWatcher  # noqa: PLC0415
+    from .insights import Insights  # noqa: PLC0415
     from .link import AccountLink, MailExtension  # noqa: PLC0415
+    from .live import async_notify  # noqa: PLC0415
     from .rules import RuleEngine  # noqa: PLC0415
 
     await _check_frieda_version(hass)
@@ -200,30 +208,38 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
         entry.async_on_unload(async_call_later(hass, 20, _sync_state))
     clients.extensions[EXTENSION_NAME] = extension
 
-    async def _notify_important(rating: dict[str, Any]) -> None:
-        title = f"Frieda Postfach: {rating['category']} ({rating['importance']}/5)"
-        message = f"{rating.get('from') or ''}: {rating.get('subject') or ''}\n{rating.get('reason') or ''}".strip()
+    de = (hass.config.language or "en").startswith("de")
+
+    async def _send(
+        title: str, message: str, *, actions: list[tuple[str, str]] | None = None, tag: str | None = None
+    ) -> None:
+        """A notification with the service of the options (buttons in the Companion app), else in Home Assistant."""
         service = str(opts.get(CONF_DIGEST_NOTIFY) or "").removeprefix("notify.")
         if service and hass.services.has_service("notify", service):
             data: dict[str, Any] = {"title": title, "message": message}
-            if service.startswith("mobile_app_") and rating.get("id") and rating.get("message_id"):
-                # buttons in the Companion app: the same actions as in the panel (mobile_app_notification_action)
-                de = (hass.config.language or "en").startswith("de")
-                data["data"] = {
-                    "tag": f"frieda_postfach_{rating['id']}",
-                    "actions": [
-                        {"action": f"{NOTIFY_ACTION}seen_{rating['id']}", "title": "Gelesen" if de else "Read"},
-                        {
-                            "action": f"{NOTIFY_ACTION}archive_{rating['id']}",
-                            "title": "Archivieren" if de else "Archive",
-                        },
-                    ],
-                }
+            extra: dict[str, Any] = {"tag": tag} if tag else {}
+            if service.startswith("mobile_app_") and actions:
+                # the same actions as in the panel (mobile_app_notification_action)
+                extra["actions"] = [{"action": f"{NOTIFY_ACTION}{a}", "title": t} for a, t in actions]
+            if extra:
+                data["data"] = extra
             await hass.services.async_call("notify", service, data, blocking=True)
         else:
             await hass.services.async_call(
                 "persistent_notification", "create", {"title": title, "message": message}, blocking=True
             )
+
+    async def _notify_important(rating: dict[str, Any]) -> None:
+        title = f"Frieda Postfach: {rating['category']} ({rating['importance']}/5)"
+        message = f"{rating.get('from') or ''}: {rating.get('subject') or ''}\n{rating.get('reason') or ''}".strip()
+        actions: list[tuple[str, str]] = []
+        if rating.get("id") and rating.get("message_id"):
+            actions = [(f"seen_{rating['id']}", "Gelesen" if de else "Read")]
+            proposal = next((p for p in for_you.open_proposals() if p.get("message_id") == rating["message_id"]), None)
+            if proposal is not None:  # a date in the mail: into the calendar with one tap
+                actions.append((f"event_{proposal['id']}", "In Kalender" if de else "Add to calendar"))
+            actions.append((f"archive_{rating['id']}", "Archivieren" if de else "Archive"))
+        await _send(title, message, actions=actions, tag=f"frieda_postfach_{rating.get('id')}")
 
     # AI sorting exists only when it was switched on deliberately and an AI entity is chosen
     sorter = AiSorter(
@@ -243,6 +259,75 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
     # the steps of each message came with 1.0.24: once, the older lines get theirs from what is still kept
     activity.fill_events(rules.history(limit=10_000), list(sorter.ratings), list(sorter.usage_log))
     sorter.activity = activity
+
+    # For you: important senders, appointments from mails, waiting for a reply, rule suggestions, the week
+    for_you = Insights(
+        hass,
+        core.entry_id,
+        clients,
+        auto_mail,
+        activity,
+        dict(opts),
+        notify=_send,
+        language=hass.config.language or "en",
+    )
+    await for_you.async_load()
+    for_you.sorter, for_you.rules = sorter, rules
+    link.insights = for_you
+    sorter.is_vip = for_you.vip_now
+    sorter.on_event = for_you.add_proposal
+
+    async def _moved(key: str, mailbox: str) -> None:
+        """The user moved an AI-sorted mail into the folder of another category: that is a correction."""
+        line = next((i for i in activity.items if i.get("key") == key), None)
+        if line is None or not line.get("message_id") or mailbox == line.get("move_to"):  # a rule moved it
+            return
+        rating = next((r for r in reversed(sorter.ratings) if r.get("message_id") == line["message_id"]), None)
+        if rating is None:
+            return
+        targets = [c["name"] for c in sorter.categories if c.get("move_to") == mailbox]
+        current = rating.get("corrected") or rating.get("category")
+        if len(targets) == 1 and targets[0] != current:
+            await sorter.async_correct(rating["id"], targets[0], by="move")
+
+    if state is not None:
+        state.on_moved = _moved
+
+    @callback
+    def _after_pass() -> None:
+        """New mail from important senders, in the background."""
+        entry.async_create_background_task(hass, _new_mail_insights(), "frieda_postfach_insights")
+
+    async def _new_mail_insights() -> None:
+        try:
+            await for_you.async_new_mail()
+        except Exception as err:  # noqa: BLE001 - never break the automation
+            _LOGGER.debug("Important senders: the look at new mail failed: %s", err)
+
+    @callback
+    def _refresh_insights(*_: Any) -> None:
+        async def run() -> None:
+            try:
+                await for_you.async_vips(force=True)
+                await for_you.async_followups(force=True)
+                await for_you.async_subscriptions(force=True)
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.debug("For you: the regular look failed: %s", err)
+            async_notify(hass, core.entry_id, "insights")
+
+        entry.async_create_background_task(hass, run(), "frieda_postfach_insights_refresh")
+
+    entry.async_on_unload(async_track_time_interval(hass, _refresh_insights, INSIGHTS_INTERVAL))
+    entry.async_on_unload(async_call_later(hass, 60, _refresh_insights))
+    weekly = _parse_clock(opts.get(CONF_DIGEST_TIME)) or WEEKLY_AT
+
+    async def _weekly(now: datetime) -> None:
+        try:
+            await for_you.async_weekly(now)
+        except Exception as err:  # noqa: BLE001 - keep the schedule alive
+            _LOGGER.warning("Weekly review failed: %s", err)
+
+    entry.async_on_unload(async_track_time_change(hass, _weekly, hour=weekly[0], minute=weekly[1], second=30))
 
     async def _rerated(report: dict[str, Any]) -> None:
         await rules.async_record_ai("rerate", report)  # the re-rating shows up under Runs as well
@@ -272,6 +357,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
         if not name.startswith(NOTIFY_ACTION):
             return
         verb, _, rating_id = name.removeprefix(NOTIFY_ACTION).partition("_")
+        if verb == "event":
+            try:
+                await for_you.async_add_event(
+                    rating_id,
+                    read_only=bool(core_opts.get(CONF_READ_ONLY, DEFAULT_READ_ONLY)),
+                    calendar_on=bool(core_opts.get(CONF_ENABLE_CALENDAR, DEFAULT_ENABLE_CALENDAR)),
+                    client="Frieda Postfach (notification)",
+                )
+            except Exception as err:  # noqa: BLE001 - a tap must not raise in the event bus
+                _LOGGER.warning("Calendar entry from the notification failed: %s", err)
+            return
         rating = next((r for r in sorter.ratings if r.get("id") == rating_id), None)
         line = activity.find({"message_id": rating.get("message_id")}) if rating else None
         if line is None or verb not in ("seen", "archive"):
@@ -306,6 +402,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
             if not rules.has_enabled_rules:
                 rules.note_check("no_enabled_rules", next_run)
                 await rules.async_record_ai("auto", await _ai_after_rules("auto"))
+                _after_pass()
                 return
             try:
                 # one history entry per pass: rules first, then the AI sorting (recorded together below)
@@ -317,6 +414,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
             rules.note_check("error" if report["errors"] else "ran", next_run)
             await rules.async_record(report, await _ai_after_rules("auto"))
             _sync_state()
+            _after_pass()
             if report["matched"]:
                 _LOGGER.info("Inbox rules: %s messages checked, %s matched", report["checked"], report["matched"])
 
@@ -340,6 +438,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
                 finally:
                     rules.end_pass()
                     _sync_state()
+                    _after_pass()
 
             async def _on_change() -> None:
                 # a mail read, flagged or moved on another device
@@ -369,7 +468,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
             several = len(hass.config_entries.async_loaded_entries(DOMAIN)) > 1
             try:
                 await async_send_digest(
-                    hass, clients, dict(entry.options), rules, link.label if several else "", ledger=link.ai
+                    hass,
+                    clients,
+                    dict(entry.options),
+                    rules,
+                    link.label if several else "",
+                    ledger=link.ai,
+                    insights=for_you,
                 )
             except Exception as err:  # noqa: BLE001 - keep the schedule alive
                 _LOGGER.warning("Daily overview failed: %s", err)

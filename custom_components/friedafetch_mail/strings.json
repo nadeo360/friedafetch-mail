@@ -20,7 +20,8 @@
         "title": "Frieda Postfach",
         "menu_options": {
           "automation": "Automation and daily overview",
-          "ai": "AI sorting (optional)"
+          "ai": "AI sorting (optional)",
+          "foryou": "For you: important senders, calendar, replies, weekly review"
         }
       },
       "automation": {
@@ -63,6 +64,28 @@
           "ai_block_terms": "Mail containing these terms is never sent to an AI, one per line. Checked locally in subject, sender and text before anything is sent, also for the AI daily overview. Example: diagnosis, salary, password",
           "ai_include_body": "The first 1,000 characters of the text.",
           "ai_notify_importance": "Only in act mode."
+        }
+      },
+      "foryou": {
+        "title": "For you",
+        "description": "What Frieda notices for you. Everything is worked out in Home Assistant from your mailbox and contacts; nothing of it goes to an AI. Dates from e-mails need the AI sorting: the AI names a date it reads in a mail it rates anyway, and you add it to the calendar with one click.",
+        "data": {
+          "vip_groups": "Important senders: contact groups",
+          "vip_senders": "Important senders: addresses and domains",
+          "vip_notify": "Announce their mail right away",
+          "ai_events": "Propose calendar entries from e-mails",
+          "events_calendar": "Calendar for entries from the notification",
+          "followup_days": "Waiting for a reply after (days)",
+          "weekly_day": "Weekly review on"
+        },
+        "data_description": {
+          "vip_groups": "Mail from these people is never lost among the rest: the AI rates it as important, and it is announced also without the AI.",
+          "vip_senders": "One per line, e.g. anna@example.com or example.com.",
+          "vip_notify": "With the notification service of the daily overview.",
+          "ai_events": "Appointments and deadlines the AI reads in a mail it rates. Nothing is entered without your click.",
+          "events_calendar": "Empty = the first calendar Frieda may write to. In the panel you choose each time.",
+          "followup_days": "Mail you sent to people that got no answer after this many days. 0 = off.",
+          "weekly_day": "At the time of the daily overview, else at 18:00."
         }
       }
     },
@@ -127,6 +150,18 @@
         "3": "from importance 3",
         "4": "from importance 4",
         "5": "only importance 5"
+      }
+    },
+    "weekly_day": {
+      "options": {
+        "off": "off",
+        "mon": "Monday",
+        "tue": "Tuesday",
+        "wed": "Wednesday",
+        "thu": "Thursday",
+        "fri": "Friday",
+        "sat": "Saturday",
+        "sun": "Sunday"
       }
     }
   },

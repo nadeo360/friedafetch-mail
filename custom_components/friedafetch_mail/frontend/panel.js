@@ -219,6 +219,7 @@ class FriedaPostfachPanel extends HTMLElement {
     if (topics.has("rules") || topics.has("accounts")) jobs.push(this._loadAccounts());
     if (topics.has("ai")) jobs.push(this._ws({ type: "friedafetch_mail/ai", entry_id: this._s.entryId }).then((ai) => (this._s.ai = ai)));
     if (topics.has("activity") || topics.has("ai")) jobs.push(this._loadActivity());
+    if (topics.has("insights") || topics.has("ai") || topics.has("activity")) jobs.push(this._loadInsights());
     if (this._s.sheet && (topics.has("rules") || topics.has("ai") || topics.has("activity"))) jobs.push(this._loadTimeline());
     await Promise.all(jobs.map((j) => j.catch(() => null)));
     this._render();
@@ -325,6 +326,7 @@ class FriedaPostfachPanel extends HTMLElement {
         .then((ai) => (this._s.ai = ai))
         .catch(() => (this._s.ai = null)), // older backend or AI sorting unavailable
       this._loadActivity().catch(() => {}),
+      this._loadInsights(),
     ]);
     this._s.rules = list.rules;
     this._s.lastRun = list.last_run;
@@ -1241,10 +1243,28 @@ class FriedaPostfachPanel extends HTMLElement {
       title = t[`tlActed_${e.action}`] || e.action;
       sub = e.mailbox && ["archive", "inbox", "trash"].includes(e.action) ? this._folderName(e.mailbox) : "";
     } else if (e.kind === "corrected") {
-      icon = "pencil-outline";
+      icon = e.by === "move" ? "folder-move-outline" : "pencil-outline";
       tone = "you";
-      title = t.tlCorrected;
+      title = e.by === "move" ? t.tlCorrectedByMove : t.tlCorrected;
       sub = fmt(t.tlCorrectedSub, cat(e.before), cat(e.after));
+    } else if (e.kind === "event_proposed") {
+      icon = "calendar-clock";
+      tone = "ai";
+      title = t.tlEventProposed;
+      sub = [e.title, e.start ? this._fyWhen({ start: e.start, all_day: String(e.start).length <= 10 }) : ""].filter(Boolean).join(" · ");
+    } else if (e.kind === "event_added") {
+      icon = "calendar-check";
+      tone = "you";
+      title = fmt(t.tlEventAdded, e.calendar || "");
+      sub = [e.title, e.start ? this._fyWhen({ start: e.start, all_day: String(e.start).length <= 10 }) : ""].filter(Boolean).join(" · ");
+    } else if (e.kind === "event_dismissed") {
+      icon = "calendar-remove-outline";
+      tone = "you";
+      title = t.tlEventDismissed;
+    } else if (e.kind === "vip_notified") {
+      icon = "star-outline";
+      tone = "ai";
+      title = t.tlVipNotified;
     }
     return `<li class="t-${tone} ${last ? "now" : ""}">
         <span class="dot">${ico(icon)}</span>
@@ -1800,7 +1820,7 @@ class FriedaPostfachPanel extends HTMLElement {
       none: [t.actNone, "minus-circle-outline", ""],
     }[item.kind] || ["–", "circle-small", ""];
     const moved = item.folder !== "INBOX";
-    const unsure = item.unsure ? `<span class="uns">${esc(t.actUnsureMark)}</span>` : "";
+    const unsure = `${item.vip ? `<span class="vip" role="img" aria-label="${esc(t.actVip)}">${ico("star")}</span>` : ""}${item.unsure ? `<span class="uns">${esc(t.actUnsureMark)}</span>` : ""}`;
     const where = full || moved ? `<span class="mv">${ico(full ? this._folderIcon(item.folder) : "arrow-right")}${esc(this._folderName(item.folder))}</span>` : "";
     return `<span class="meta ${cls}">${ico(icon)}<span class="rl">${esc(label)}</span></span>${unsure}${where}`;
   }
@@ -2318,10 +2338,240 @@ class FriedaPostfachPanel extends HTMLElement {
   }
 
   // Tabs: the activity (a mail program), the rules, the AI sorting and its log.
+  // ------------------------------------------------------------------ For you
+  async _loadInsights() {
+    try {
+      this._s.insights = await this._ws({ type: "friedafetch_mail/insights", entry_id: this._s.entryId });
+    } catch (err) {
+      this._s.insights = null; // older backend
+    }
+  }
+
+  async _fyCall(msg, after) {
+    await this._call(async () => {
+      const res = await this._ws({ entry_id: this._s.entryId, ...msg });
+      if (res && res.week) this._s.insights = res;
+      else await this._loadInsights();
+      if (after) after(res);
+    });
+  }
+
+  _fyWhen(p) {
+    const lang = this._lang();
+    const d = parseTime(p.start);
+    if (!d || isNaN(d)) return p.start;
+    const day = d.toLocaleDateString(lang, { weekday: "short", day: "numeric", month: "short" });
+    if (p.all_day) return day;
+    const end = p.end ? parseTime(p.end) : null;
+    const clock = (x) => x.toLocaleTimeString(lang, { hour: "2-digit", minute: "2-digit" });
+    return `${day}, ${clock(d)}${end && !isNaN(end) ? `–${clock(end)}` : ""}`;
+  }
+
+  _renderForYou() {
+    const t = this.t;
+    const s = this._s;
+    const fy = s.insights;
+    if (!fy) return `<section class="widget w-full"><div class="card"><p class="muted">${esc(t.loading)}</p></div></section>`;
+    const w = fy.week || {};
+    const trend = w.mails_before ? Math.round(((w.mails - w.mails_before) / w.mails_before) * 100) : null;
+    const tile = (icon, value, label, sub = "", action = "") =>
+      `<${action ? `button class="fy-tile" data-action="${action}"` : `div class="fy-tile"`}>${ico(icon)}<span class="fy-v">${esc(value)}</span><span class="fy-l">${esc(label)}</span>${sub ? `<span class="fy-s">${esc(sub)}</span>` : ""}</${action ? "button" : "div"}>`;
+    const tiles = [
+      tile("email-multiple-outline", w.mails ?? 0, t.fyMails, trend == null ? "" : fmt(trend >= 0 ? t.fyMore : t.fyLess, Math.abs(trend))),
+      w.by_rules ? tile("filter-check-outline", w.by_rules, t.fyByRules) : "",
+      w.rated ? tile("creation", w.accuracy == null ? "–" : `${w.accuracy} %`, t.fyAccuracy, fmt(t.fyRated, w.rated, w.corrected)) : "",
+      tile("email-mark-as-unread", w.unread ?? 0, t.fyUnread),
+      fy.followup_days ? tile("reply-outline", w.waiting ?? 0, t.fyWaiting) : "",
+      w.proposals ? tile("calendar-plus", w.proposals, t.fyProposals) : "",
+      w.never_opened ? tile("email-off-outline", w.never_opened, t.fyNeverOpened) : "",
+    ].join("");
+    const vip = fy.vip || {};
+    const vipText = vip.groups?.length || vip.senders
+      ? fmt(t.fyVipOn, [...(vip.groups || []).map((g) => (g === "*" ? t.fyAllContacts : g)), vip.senders ? fmt(vip.senders === 1 ? t.fyVipSender : t.fyVipSenders, vip.senders) : ""].filter(Boolean).join(", "))
+      : t.fyVipOff;
+    const checked = fy.followups_checked ? fmt(t.fyChecked, fmtDateTime(fy.followups_checked)) : t.fyNotChecked;
+    const week = `<div class="card">
+        <div class="chead"><h2>${esc(t.fyWeek)}</h2><span class="grow"></span>
+          <button class="pill" data-action="fy-refresh" ${s.busy ? "disabled" : ""}>${ico("refresh")}${esc(t.fyRefresh)}</button></div>
+        <div class="fy-tiles">${tiles}</div>
+        <p class="muted fy-foot">${ico("star-outline")}<span>${esc(vipText)} · ${esc(checked)}${fy.weekly_day ? ` · ${esc(fmt(t.fyWeekly, t.fyDays[fy.weekly_day] || fy.weekly_day))}` : ""}</span></p>
+        ${fy.error ? `<p class="muted">${esc(fmt(t.fyError, fy.error))}</p>` : ""}
+      </div>`;
+    return [
+      `<section class="widget w-full" data-widget="fy-week">${week}</section>`,
+      `<section class="widget w-full" data-widget="fy-events">${this._fyEvents(fy)}</section>`,
+      `<section class="widget w-full" data-widget="fy-replies">${this._fyReplies(fy)}</section>`,
+      `<section class="widget w-full" data-widget="fy-rules">${this._fySuggestions(fy)}</section>`,
+      `<section class="widget w-full" data-widget="fy-subs">${this._fySubs(fy)}</section>`,
+    ].join("");
+  }
+
+  _fyEvents(fy) {
+    const t = this.t;
+    const s = this._s;
+    const list = fy.proposals || [];
+    const edit = s.fyEdit;
+    const aiOn = !!s.ai?.status?.active;
+    const cals = s.fyCals || [];
+    const editor = (p) => {
+      const local = (iso) => (p.all_day ? String(iso || "").slice(0, 10) : String(iso || "").slice(0, 16));
+      const type = p.all_day ? "date" : "datetime-local";
+      return `<div class="fy-edit" id="fy-editor">
+          <div class="row"><label for="fy-title">${esc(t.fyTitle)}</label><input type="text" id="fy-title" class="grow" maxlength="120" value="${esc(p.title)}"></div>
+          <div class="row"><label for="fy-start">${esc(t.fyStart)}</label><input type="${type}" id="fy-start" value="${esc(local(p.start))}"></div>
+          <div class="row"><label for="fy-end">${esc(t.fyEnd)}</label><input type="${type}" id="fy-end" value="${esc(local(p.end))}"></div>
+          <div class="row"><label for="fy-cal">${esc(t.fyCalendar)}</label><select id="fy-cal">${
+            cals.length
+              ? cals.map((c) => `<option value="${esc(c.id)}" ${c.id === (s.fyCalDefault || cals[0].id) ? "selected" : ""}>${esc(c.name)}</option>`).join("")
+              : `<option value="">${esc(t.loading)}</option>`
+          }</select></div>
+          <div class="actionsbar"><button class="ib" data-action="fy-event-save" data-id="${esc(p.id)}" ${s.busy || !cals.length ? "disabled" : ""}>${ico("calendar-check")}${esc(t.fyAdd)}</button>
+            <button class="secondary" data-action="fy-event-cancel">${esc(t.cancel)}</button></div>
+        </div>`;
+    };
+    const rows = list
+      .map((p) =>
+        edit === p.id
+          ? editor(p)
+          : `<div class="ai-cat fy-row"><span class="fy-ic ${p.kind === "deadline" ? "warn" : ""}">${ico(p.kind === "deadline" ? "calendar-alert" : "calendar-clock")}</span>
+          <span class="tx"><strong>${esc(p.title)}</strong><span>${esc(this._fyWhen(p))}${p.kind === "deadline" ? ` · ${esc(t.fyDeadline)}` : ""}${p.location ? ` · ${esc(p.location)}` : ""}</span>
+            <span class="muted">${esc(fmt(t.fyFromMail, p.from || "?", p.subject || "–"))}</span></span>
+          <button class="secondary small ib" data-action="fy-event-edit" data-id="${esc(p.id)}" ${edit || s.busy ? "disabled" : ""}>${ico("calendar-plus")}${esc(t.fyAddShort)}</button>
+          <button class="icon" data-action="fy-dismiss" data-kind="proposal" data-id="${esc(p.id)}" title="${esc(t.fyDismiss)}" aria-label="${esc(t.fyDismiss)}: ${esc(p.title)}">${ico("close")}</button></div>`
+      )
+      .join("");
+    const empty = !aiOn ? t.fyEventsNeedAi : s.ai?.status?.events === false ? t.fyEventsOff : t.fyEventsNone;
+    return `<div class="card"><div class="chead"><h2>${esc(t.fyEvents)}</h2>${list.length ? `<span class="badge">${list.length}</span>` : ""}</div>
+      <p class="muted" style="margin:-4px 0 10px">${esc(t.fyEventsHint)}</p>
+      <div class="ai-cats">${rows || `<p class="muted">${esc(empty)}</p>`}</div></div>`;
+  }
+
+  _fyReplies(fy) {
+    const t = this.t;
+    const list = fy.followups || [];
+    const rows = list
+      .map(
+        (f) => `<div class="ai-cat fy-row"><span class="fy-ic">${ico("reply-outline")}</span>
+          <span class="tx"><strong>${esc(f.subject || "–")}</strong><span class="muted">${esc(fmt(t.fyTo, f.to.map((p) => p.name || p.email).join(", ") + (f.more ? ` +${f.more}` : "")))} · ${esc(fmt(t.fyDaysAgo, f.days))}</span></span>
+          <button class="secondary small ib" data-action="fy-dismiss" data-kind="followup" data-id="${esc(f.id)}">${ico("check")}${esc(t.fyDone)}</button></div>`
+      )
+      .join("");
+    const empty = !fy.followup_days ? t.fyRepliesOff : fy.followups_checked ? t.fyRepliesNone : t.fyNotChecked;
+    const restore = fy.dismissed?.followup ? `<button class="link" data-action="fy-restore" data-kind="followup">${esc(fmt(t.fyRestore, fy.dismissed.followup))}</button>` : "";
+    return `<div class="card"><div class="chead"><h2>${esc(t.fyReplies)}</h2>${list.length ? `<span class="badge">${list.length}</span>` : ""}</div>
+      <p class="muted" style="margin:-4px 0 10px">${esc(fy.followup_days ? fmt(t.fyRepliesHint, fy.followup_days) : t.fyRepliesOff)}</p>
+      <div class="ai-cats">${rows || `<p class="muted">${esc(empty)}</p>`}</div>${restore ? `<div class="subbar">${restore}</div>` : ""}</div>`;
+  }
+
+  _fySuggestions(fy) {
+    const t = this.t;
+    const s = this._s;
+    const list = fy.suggestions || [];
+    const where = (g) => (g.folder === "trash" ? t.fyToTrash : fmt(t.fyToFolder, this._folderName(g.folder)));
+    const rows = list
+      .map(
+        (g) => `<div class="ai-cat fy-row"><span class="fy-ic">${ico(g.folder === "trash" ? "delete-outline" : "folder-move-outline")}</span>
+          <span class="tx"><strong>${esc(fmt(t.fySuggest, g.name || g.sender, where(g)))}</strong><span class="muted">${esc(fmt(t.fySuggestCount, g.count, g.total))} · ${esc(g.sender)}</span>
+            ${g.subjects?.length ? `<span class="muted fy-subj">${esc(g.subjects.join(" · "))}</span>` : ""}</span>
+          <button class="secondary small ib" data-action="fy-rule" data-id="${esc(g.id)}" ${s.editing ? "disabled" : ""}>${ico("filter-plus-outline")}${esc(t.fyMakeRule)}</button>
+          <button class="icon" data-action="fy-dismiss" data-kind="rule" data-id="${esc(g.id)}" title="${esc(t.fyNoSuggest)}" aria-label="${esc(t.fyNoSuggest)}">${ico("close")}</button></div>`
+      )
+      .join("");
+    const restore = fy.dismissed?.rule ? `<button class="link" data-action="fy-restore" data-kind="rule">${esc(fmt(t.fyRestore, fy.dismissed.rule))}</button>` : "";
+    return `<div class="card"><div class="chead"><h2>${esc(t.fySuggestions)}</h2>${list.length ? `<span class="badge">${list.length}</span>` : ""}</div>
+      <p class="muted" style="margin:-4px 0 10px">${esc(t.fySuggestionsHint)}</p>
+      <div class="ai-cats">${rows || `<p class="muted">${esc(t.fySuggestionsNone)}</p>`}</div>${restore ? `<div class="subbar">${restore}</div>` : ""}</div>`;
+  }
+
+  _fySubs(fy) {
+    const t = this.t;
+    const s = this._s;
+    const acc = this._account();
+    const list = fy.subscriptions || [];
+    const rows = list
+      .map(
+        (n) => `<div class="ai-cat fy-row"><span class="fy-ic ${n.never_opened ? "warn" : ""}">${ico(n.never_opened ? "email-off-outline" : "newspaper-variant-outline")}</span>
+          <span class="tx"><strong>${esc(n.name || n.sender)}</strong><span class="muted">${esc(fmt(t.fySubCount, n.count, n.unread))} · ${esc(n.sender)}</span></span>
+          ${n.never_opened ? `<span class="chip hot">${esc(t.fyNeverOpenedChip)}</span>` : ""}
+          ${
+            n.unsubscribed
+              ? `<span class="chip">${esc(fmt(t.fyUnsubscribed, fmtShort(n.unsubscribed)))}</span>`
+              : `<button class="secondary small ib" data-action="fy-unsub" data-sender="${esc(n.sender)}" data-name="${esc(n.name || n.sender)}" ${s.busy || acc?.read_only ? "disabled" : ""}>${ico("email-remove-outline")}${esc(t.fyUnsub)}</button>`
+          }
+          <button class="icon" data-action="fy-dismiss" data-kind="subscription" data-id="${esc(n.id)}" title="${esc(t.fyHide)}" aria-label="${esc(t.fyHide)}: ${esc(n.name || n.sender)}">${ico("eye-off-outline")}</button></div>`
+      )
+      .join("");
+    const empty = fy.subscriptions_checked ? t.fySubsNone : t.fyNotChecked;
+    const restore = fy.dismissed?.subscription ? `<button class="link" data-action="fy-restore" data-kind="subscription">${esc(fmt(t.fyRestore, fy.dismissed.subscription))}</button>` : "";
+    return `<div class="card"><div class="chead"><h2>${esc(t.fySubs)}</h2>${list.length ? `<span class="badge">${list.length}</span>` : ""}</div>
+      <p class="muted" style="margin:-4px 0 10px">${esc(t.fySubsHint)}</p>
+      <div class="ai-cats">${rows || `<p class="muted">${esc(empty)}</p>`}</div>${restore ? `<div class="subbar">${restore}</div>` : ""}</div>`;
+  }
+
+  async _fyOpenEditor(id) {
+    this._s.fyEdit = id;
+    this._render();
+    if (!this._s.fyCals) {
+      try {
+        const res = await this._ws({ type: "friedafetch_mail/insights/calendars", entry_id: this._s.entryId });
+        this._s.fyCals = res.calendars;
+        this._s.fyCalDefault = res.default;
+      } catch (err) {
+        this._s.error = err.message || String(err);
+      }
+      this._render();
+    }
+    this.shadowRoot.querySelector("#fy-title")?.focus({ preventScroll: true });
+  }
+
+  async _fySaveEvent(id) {
+    const root = this.shadowRoot;
+    const p = (this._s.insights?.proposals || []).find((x) => x.id === id);
+    const val = (sel) => root.querySelector(sel)?.value?.trim() || "";
+    const msg = { type: "friedafetch_mail/insights/event", proposal_id: id, calendar_id: val("#fy-cal") };
+    const title = val("#fy-title");
+    const start = val("#fy-start");
+    const end = val("#fy-end");
+    if (title) msg.title = title;
+    if (start) msg.start = start;
+    if (end) msg.end = end;
+    await this._fyCall(msg, (res) => {
+      this._s.fyEdit = null;
+      this._s.notice = fmt(this.t.fyAdded, res?.proposal?.title || p?.title || "", res?.proposal?.calendar || "");
+    });
+  }
+
+  _fyRule(id) {
+    const g = (this._s.insights?.suggestions || []).find((x) => x.id === id);
+    if (!g) return;
+    const rule = this._blankRule();
+    rule.name = fmt(this.t.ruleFromMailName, g.name || g.sender);
+    rule.conditions = [{ field: "from", op: "contains", value: g.sender }];
+    const trash = (this._s.mailboxes || []).find((b) => /^(deleted messages|trash|papierkorb)$/i.test(b));
+    rule.actions.move_to = g.folder === "trash" ? trash || "Deleted Messages" : g.folder;
+    this._s.editing = rule;
+    this._s.focusEditor = true;
+    this._setTab("rules");
+  }
+
+  async _fyUnsub(sender, name) {
+    const t = this.t;
+    if (!(await this._confirm({ title: fmt(t.fyUnsubTitle, name), text: t.fyUnsubText, ok: t.fyUnsub, irreversible: true, icon: "email-remove-outline" }))) return;
+    await this._call(async () => {
+      const res = await this._ws({ type: "friedafetch_mail/insights/unsubscribe", entry_id: this._s.entryId, sender });
+      if (res.method === "manual") {
+        this._s.notice = fmt(t.fyUnsubManual, name);
+        window.open(res.url, "_blank", "noopener,noreferrer");
+      } else this._s.notice = fmt(t.fyUnsubDone, name);
+      await this._loadInsights();
+    });
+  }
+
   _tabs() {
     const t = this.t;
     return [
       { id: "activity", label: t.tabActivity, icon: "email-outline" },
+      this._s.insights && { id: "foryou", label: t.tabForYou, icon: "star-four-points-outline" },
       { id: "rules", label: t.tabRules, icon: "filter-outline" },
       this._s.ai && { id: "ai", label: t.tabAi, icon: "creation" },
       this._renderAiUsage() && { id: "aiu", label: t.tabAiu, icon: "shield-lock-outline" },
@@ -2404,6 +2654,7 @@ class FriedaPostfachPanel extends HTMLElement {
     const content = {
       activity: () => this._renderActivityTab(),
       rules: () => `${this._renderReport()}${single("rules", rulesHtml)}`,
+      foryou: () => this._renderForYou(),
       ai: () => single("ai", this._renderAi()),
       aiu: () => single("aiu", this._renderAiUsage()),
     };
@@ -2502,6 +2753,18 @@ class FriedaPostfachPanel extends HTMLElement {
     root.querySelectorAll("[data-action]").forEach((el) => {
       const action = el.dataset.action;
       const handler = {
+        "fy-refresh": () => this._fyCall({ type: "friedafetch_mail/insights/refresh" }),
+        "fy-dismiss": () => this._fyCall({ type: "friedafetch_mail/insights/dismiss", kind: el.dataset.kind, item_id: el.dataset.id }),
+        "fy-restore": () => this._fyCall({ type: "friedafetch_mail/insights/restore", kind: el.dataset.kind }),
+        "fy-event-edit": () => this._fyOpenEditor(el.dataset.id),
+        "fy-event-cancel": () => {
+          this._s.fyEdit = null;
+          this._render();
+        },
+        "fy-event-save": () => this._fySaveEvent(el.dataset.id),
+        "fy-rule": () => this._fyRule(el.dataset.id),
+        "fy-unsub": () => this._fyUnsub(el.dataset.sender, el.dataset.name),
+        "fy-tab": () => this._setTab(el.dataset.v),
         // a new rule for mails like this one: the sender as its condition, to be changed in the editor
         "rule-from-mail": () => {
           const rule = this._blankRule();

@@ -13,8 +13,8 @@ from .const import DOMAIN
 
 SIGNAL_PANEL = f"{DOMAIN}_panel_changed"
 
-# topics: rules (rules, runs, automation status), ai (AI sorting, ratings, transmissions)
-TOPICS = ("rules", "ai")
+# topics: rules (rules, runs, automation status), ai (AI sorting, ratings, transmissions), insights (For you)
+TOPICS = ("rules", "ai", "insights")
 
 
 @callback

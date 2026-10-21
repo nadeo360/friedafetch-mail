@@ -15,9 +15,13 @@ from homeassistant.util.hass_dict import HassKey
 
 from custom_components.friedafetch.const import (
     CONF_ALLOW_DELETE,
+    CONF_ALLOW_SEND_MAIL,
+    CONF_ENABLE_CALENDAR,
     CONF_ENABLE_MAIL,
     CONF_READ_ONLY,
     DEFAULT_ALLOW_DELETE,
+    DEFAULT_ALLOW_SEND_MAIL,
+    DEFAULT_ENABLE_CALENDAR,
     DEFAULT_ENABLE_MAIL,
     DEFAULT_READ_ONLY,
 )
@@ -91,6 +95,13 @@ async def async_setup_frontend(hass: HomeAssistant, version: str) -> None:
         ws_mail_act,
         ws_mail_text,
         ws_ai_apply,
+        ws_insights_get,
+        ws_insights_refresh,
+        ws_insights_dismiss,
+        ws_insights_restore,
+        ws_insights_calendars,
+        ws_insights_event,
+        ws_insights_unsubscribe,
     ):
         websocket_api.async_register_command(hass, command)
     await panel_custom.async_register_panel(
@@ -544,7 +555,11 @@ async def _activity_rows(link: Any) -> list[dict[str, Any]]:
     if sorter is not None:
         await sorter.async_load()
         ratings = list(sorter.ratings)
-    return link.activity.view(ratings, ai_active=bool(sorter is not None and sorter.settings["active"]))
+    rows = link.activity.view(ratings, ai_active=bool(sorter is not None and sorter.settings["active"]))
+    insights = getattr(link, "insights", None)
+    for row in rows:
+        row["vip"] = bool(insights is not None and insights.vip_now(row.get("from")))  # important sender
+    return rows
 
 
 VIEW = vol.All(str, vol.Match(r"^(all|k:(ai|rule|held|none)|f:.{1,200})$"))
@@ -787,3 +802,164 @@ async def ws_ai_check(hass: HomeAssistant, connection: websocket_api.ActiveConne
     """Accuracy check with the mails you corrected, optionally with another AI entity (nothing is stored)."""
     sorter = _sorter(hass, msg.get("entry_id"))
     connection.send_result(msg["id"], await sorter.async_check(msg.get("entity") or None))
+
+
+# ---------------------------------------------------------------- For you
+def _insights(hass: HomeAssistant, entry_id: str | None) -> Any:
+    link = _entry(hass, entry_id).runtime_data
+    if getattr(link, "insights", None) is None:
+        raise RuleError("Not ready yet")
+    return link.insights
+
+
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/insights", vol.Optional("entry_id"): str})
+@websocket_api.require_admin
+@websocket_api.async_response
+@_ws_errors
+async def ws_insights_get(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """The tab "For you" as it is known now (the looks at the mailbox run every few hours, or on refresh)."""
+    connection.send_result(msg["id"], await _insights(hass, msg.get("entry_id")).async_get())
+
+
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/insights/refresh", vol.Optional("entry_id"): str})
+@websocket_api.require_admin
+@websocket_api.async_response
+@_ws_errors
+async def ws_insights_refresh(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Look again now: sent mail without an answer, newsletters, the important senders of the contacts."""
+    insights = _insights(hass, msg.get("entry_id"))
+    await insights.async_vips(force=True)
+    await insights.async_followups(force=True)
+    await insights.async_subscriptions(force=True)
+    connection.send_result(msg["id"], await insights.async_get())
+
+
+INSIGHT_KINDS = ("rule", "followup", "subscription", "proposal")
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/insights/dismiss",
+        vol.Optional("entry_id"): str,
+        vol.Required("kind"): vol.In(INSIGHT_KINDS),
+        vol.Required("item_id"): vol.All(str, vol.Length(min=1, max=40)),
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+@_ws_errors
+async def ws_insights_dismiss(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Not shown again: a rule suggestion, a reply that is not expected, a newsletter, a calendar proposal."""
+    insights = _insights(hass, msg.get("entry_id"))
+    await insights.async_dismiss(msg["kind"], msg["item_id"])
+    connection.send_result(msg["id"], await insights.async_get())
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/insights/restore",
+        vol.Optional("entry_id"): str,
+        vol.Required("kind"): vol.In(INSIGHT_KINDS[:3]),
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+@_ws_errors
+async def ws_insights_restore(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Show the dismissed ones of a kind again."""
+    insights = _insights(hass, msg.get("entry_id"))
+    await insights.async_restore(msg["kind"])
+    connection.send_result(msg["id"], await insights.async_get())
+
+
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/insights/calendars", vol.Optional("entry_id"): str})
+@websocket_api.require_admin
+@websocket_api.async_response
+@_ws_errors
+async def ws_insights_calendars(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Calendars a proposal may go to (not the ones Frieda protects)."""
+    insights = _insights(hass, msg.get("entry_id"))
+    try:
+        calendars = await insights.async_calendars()
+    except Exception as err:  # noqa: BLE001 - CalendarError lives in Frieda's caldav_client.py
+        raise RuleError(f"The calendars could not be read: {err}") from err
+    connection.send_result(msg["id"], {"calendars": calendars, "default": insights.opts.get("events_calendar") or None})
+
+
+WHEN = vol.All(str, vol.Match(r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?)?$"))
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/insights/event",
+        vol.Optional("entry_id"): str,
+        vol.Required("proposal_id"): vol.All(str, vol.Length(min=1, max=40)),
+        vol.Optional("calendar_id"): vol.All(str, vol.Length(max=300)),
+        vol.Optional("title"): vol.All(str, vol.Length(min=1, max=120)),
+        vol.Optional("start"): WHEN,
+        vol.Optional("end"): WHEN,
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+@_ws_errors
+async def ws_insights_event(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Put a calendar proposal into the calendar (title and times as the user left them in the panel)."""
+    link = _entry(hass, msg.get("entry_id")).runtime_data
+    options = link.clients.options
+    insights = _insights(hass, msg.get("entry_id"))
+    try:
+        proposal = await insights.async_add_event(
+            msg["proposal_id"],
+            calendar_id=msg.get("calendar_id"),
+            title=msg.get("title"),
+            start=msg.get("start"),
+            end=msg.get("end"),
+            read_only=bool(options.get(CONF_READ_ONLY, DEFAULT_READ_ONLY)),
+            calendar_on=bool(options.get(CONF_ENABLE_CALENDAR, DEFAULT_ENABLE_CALENDAR)),
+        )
+    except (ActionError, PolicyError):
+        raise
+    except Exception as err:  # noqa: BLE001 - CalendarError lives in Frieda's caldav_client.py
+        raise RuleError(f"The calendar entry failed: {err}") from err
+    connection.send_result(msg["id"], {"proposal": proposal})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/insights/unsubscribe",
+        vol.Optional("entry_id"): str,
+        vol.Required("sender"): vol.All(str, vol.Length(min=3, max=300)),
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+@_ws_errors
+async def ws_insights_unsubscribe(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Unsubscribe from a newsletter (one-click link, else an e-mail, else the page to open)."""
+    link = _entry(hass, msg.get("entry_id")).runtime_data
+    options = link.clients.options
+    insights = _insights(hass, msg.get("entry_id"))
+    try:
+        result = await insights.async_unsubscribe(
+            msg["sender"],
+            read_only=bool(options.get(CONF_READ_ONLY, DEFAULT_READ_ONLY)),
+            allow_send=bool(options.get(CONF_ALLOW_SEND_MAIL, DEFAULT_ALLOW_SEND_MAIL)),
+        )
+    except (ActionError, PolicyError, MailError):
+        raise
+    except Exception as err:  # noqa: BLE001 - UnsubscribeError lives in Frieda's unsubscribe.py
+        raise RuleError(f"Unsubscribing failed: {err}") from err
+    connection.send_result(msg["id"], result)

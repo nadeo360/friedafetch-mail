@@ -56,6 +56,8 @@ class MailState:
         self.error: str | None = None
         self._again = False
         self.on_request: Any | None = None  # () -> None: schedules a look in the background (set up in __init__)
+        # async (line key, folder) -> None: a message found in another folder (a silent correction of the AI)
+        self.on_moved: Any | None = None
 
     def request(self) -> None:
         """A look soon, in the background (after an action from the panel)."""
@@ -118,6 +120,11 @@ class MailState:
             if mailbox and uid is not None:
                 found.setdefault(mailbox, []).append(int(uid))
                 self.located += 1
+                if self.on_moved is not None:
+                    try:
+                        await self.on_moved(line["key"], mailbox)
+                    except Exception as err:  # noqa: BLE001 - learning from it must never stop the look
+                        _LOGGER.debug("Mail state: learning from a moved message failed: %s", err)
         for mailbox, uids in found.items():
             changed += self._activity.set_state(mailbox, await self._mail.async_flags(mailbox, uids), set(), now)
         self.mode = next((m for m in ("qresync", "condstore", "flags") if m in modes), self.mode)
@@ -161,6 +168,13 @@ class MailState:
             flags = await self._mail.async_flags(mailbox, uids)
             missing = set(uids) - set(flags)
             memory["unconfirmed"] = 0
+            known = getattr(self._mail, "uidvalidity", None)
+            validity = validity or (known(mailbox) if callable(known) else None)  # known once the folder is open
+            if memory["validity"] is not None and validity is not None and validity != memory["validity"]:
+                # renumbered (the folder was created again): its UIDs belong to other messages now, so every
+                # message is found again by its Message-ID
+                _LOGGER.info("Mail state: %s was renumbered (UIDVALIDITY), its messages are looked for again", mailbox)
+                flags, missing, gone = {}, set(), set(uids)
             if missing:
                 # confirmed by a second question: only what the folder really lacks is gone
                 still = set(await self._mail.async_search_uids(mailbox, ["UID", ",".join(map(str, sorted(missing)))]))

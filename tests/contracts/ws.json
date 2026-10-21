@@ -95,7 +95,8 @@
     "trigger": "str",
     "uid": "num",
     "unsure": "bool",
-    "updated": "str"
+    "updated": "str",
+    "vip": "bool"
    }
   ],
   "selectable": "num",
@@ -131,6 +132,7 @@
     "confidence": "str",
     "corrected": "null|str",
     "?corrected_at": "str",
+    "?corrected_by": "null",
     "date": "str",
     "from": "str",
     "from_domain": "str",
@@ -153,6 +155,7 @@
    "enabled": "bool",
    "entity": "str",
    "entity_ok": "bool",
+   "events": "bool",
    "excluded": "num",
    "include_body": "bool",
    "last_error": "null",
@@ -285,6 +288,121 @@
   ],
   "tested": "num"
  },
+ "friedafetch_mail/insights": {
+  "dismissed": {},
+  "error": "null",
+  "events_calendar": "null",
+  "followup_days": "num",
+  "followups": [
+   {
+    "days": "num",
+    "id": "str",
+    "message_id": "str",
+    "more": "num",
+    "sent": "str",
+    "subject": "str",
+    "to": [
+     {
+      "email": "str",
+      "name": "str"
+     }
+    ]
+   }
+  ],
+  "followups_checked": "str",
+  "proposals": [
+   {
+    "all_day": "bool",
+    "created": "str",
+    "end": "str",
+    "from": "str",
+    "id": "str",
+    "kind": "str",
+    "location": "null",
+    "message_id": "str",
+    "rating_id": "str",
+    "start": "str",
+    "status": "str",
+    "subject": "str",
+    "title": "str"
+   }
+  ],
+  "subscriptions": [
+   {
+    "count": "num",
+    "id": "str",
+    "last": "str",
+    "mailbox": "str",
+    "name": "str",
+    "never_opened": "bool",
+    "sender": "str",
+    "subject": "str",
+    "uid": "num",
+    "unread": "num",
+    "unsubscribed": "null"
+   }
+  ],
+  "subscriptions_checked": "str",
+  "suggestions": [],
+  "vip": {
+   "groups": [],
+   "known": "num",
+   "notify": "bool",
+   "senders": "num"
+  },
+  "week": {
+   "accuracy": "num",
+   "by_ai": "num",
+   "by_rules": "num",
+   "corrected": "num",
+   "from": "str",
+   "mails": "num",
+   "mails_before": "num",
+   "never_opened": "num",
+   "proposals": "num",
+   "rated": "num",
+   "to": "str",
+   "top_senders": [
+    {
+     "count": "num",
+     "sender": "str"
+    }
+   ],
+   "unread": "num",
+   "waiting": "num"
+  },
+  "weekly_day": "null"
+ },
+ "friedafetch_mail/insights/calendars": {
+  "calendars": [
+   {
+    "color": "str",
+    "id": "str",
+    "name": "str"
+   }
+  ],
+  "default": "null"
+ },
+ "friedafetch_mail/insights/event": {
+  "proposal": {
+   "added": "str",
+   "all_day": "bool",
+   "calendar": "str",
+   "created": "str",
+   "end": "str",
+   "event_uid": "str",
+   "from": "str",
+   "id": "str",
+   "kind": "str",
+   "location": "null",
+   "message_id": "str",
+   "rating_id": "str",
+   "start": "str",
+   "status": "str",
+   "subject": "str",
+   "title": "str"
+  }
+ },
  "friedafetch_mail/mail/act": {
   "action": "str",
   "done": "num",
@@ -338,8 +456,10 @@
     "?reason": "str",
     "?rules": [],
     "?seen": "null",
+    "?start": "str",
     "?suspicious": "bool",
     "time": "str",
+    "?title": "str",
     "?trigger": "str"
    }
   ],

@@ -69,6 +69,7 @@ function makeRows(volume) {
     const moved = (row.ai?.applied || []).find((a) => a.startsWith("moved:"));
     row.folder = row.delete ? TRASH : moved ? (moved.slice(6) === "Deleted Messages" ? TRASH : moved.slice(6)) : "INBOX";
     row.selectable = !!row.message_id && row.kind !== "rule";
+    row.vip = x.from === "erika@example.com"; // a contact of the group "Familie"
     row.unsure = row.kind === "ai" && row.ai.confidence === "low" && !row.corrected;
     // read / flagged as the mailbox has it (mailstate.py): the newest ones still unread, flagged personal mails
     // (one was moved to the archive on another device: followed there by its Message-ID)
@@ -183,6 +184,47 @@ function derive(data, rows) {
   history.runs = runs.slice(0, 200);
   history.total = history.runs.length;
   history.current = history.current ?? null;
+  data["friedafetch_mail/insights"] = insights(data, rows);
+}
+
+// For you: the week, dates the AI read, sent mail without an answer, rule suggestions, newsletters
+function insights(data, rows) {
+  const ai = data["friedafetch_mail/ai"];
+  const day = (n, time) => {
+    const d = new Date(Date.now() + n * 86400000);
+    const date = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    return time ? `${date}T${time}:00+02:00` : date;
+  };
+  const ago = (days) => new Date(Date.now() - days * 86400000).toISOString();
+  const rated = ai.ratings.length;
+  const corrected = ai.ratings.filter((r) => r.corrected).length;
+  data["friedafetch_mail/ai"].status.events = true;
+  return {
+    week: { from: ago(7), to: new Date().toISOString(), mails: rows.length, mails_before: Math.max(1, rows.length - 3), by_rules: rows.filter((r) => r.kind === "rule").length, by_ai: rows.filter((r) => r.kind === "ai").length, rated, corrected, accuracy: rated ? Math.round((100 * (rated - corrected)) / rated) : null, unread: rows.filter((r) => r.state?.seen === false).length, top_senders: [{ sender: "news@gartenmarkt.example", count: 3 }], waiting: 2, proposals: 2, never_opened: 1 },
+    proposals: [
+      { id: "p1", status: "open", created: ago(0.1), rating_id: "r0", message_id: "<test-frieda@example>", subject: "Kurze Frage zu Samstag", from: "Erika Mustermann", kind: "appointment", title: "Grillen bei Erika", start: day(3, "18:00"), end: day(3, "22:00"), all_day: false, location: "Gartenweg 5" },
+      { id: "p2", status: "open", created: ago(0.5), rating_id: "r5", message_id: "<ratenkredit@example>", subject: "Ihr Ratenkredit - letzte Rate im November", from: "Kundenservice Bank", kind: "deadline", title: "Letzte Rate überweisen", start: day(12), end: null, all_day: true, location: null },
+    ],
+    followups: [
+      { id: "f1", message_id: "<angebot@example>", subject: "Angebot für die Küche", to: [{ name: "Tischlerei Holz", email: "info@tischlerei.example" }], more: 0, sent: ago(6), days: 6 },
+      { id: "f2", message_id: "<termin@example>", subject: "Termin nächste Woche?", to: [{ name: "Anna Beispiel", email: "anna@example.com" }], more: 1, sent: ago(4), days: 4 },
+    ],
+    followups_checked: ago(0.05),
+    followup_days: 3,
+    suggestions: [
+      { id: "s1", sender: "versand@shop.example", name: "Shop Versand", folder: "Archive", count: 5, total: 5, subjects: ["Ihre Bestellung ist unterwegs", "Zustellung heute zwischen 10 und 14 Uhr", "Rechnung zu Ihrer Bestellung"] },
+    ],
+    subscriptions: [
+      { id: "n1", sender: "newsletter@moebel.example", name: "Möbelhaus", count: 9, unread: 9, last: ago(1), mailbox: "INBOX", uid: 911, subject: "Sofa-Wochen", never_opened: true, unsubscribed: null },
+      { id: "n2", sender: "news@gartenmarkt.example", name: "Gartenmarkt", count: 6, unread: 2, last: ago(0.2), mailbox: "INBOX", uid: 912, subject: "Ihr Wochenangebot", never_opened: false, unsubscribed: null },
+    ],
+    subscriptions_checked: ago(0.05),
+    vip: { groups: ["Familie"], senders: 1, known: 4, notify: true },
+    weekly_day: "sun",
+    events_calendar: null,
+    dismissed: {},
+    error: null,
+  };
 }
 
 function usageWindows(log) {
@@ -416,6 +458,41 @@ export function install({ data, q }) {
     if (m.type === "friedafetch_mail/rules/history/clear") {
       data["friedafetch_mail/rules/history"].runs = [];
       return { cleared: true };
+    }
+    const fy = data["friedafetch_mail/insights"];
+    if (m.type === "friedafetch_mail/insights/refresh") {
+      await wait(500);
+      fy.followups_checked = fy.subscriptions_checked = new Date().toISOString();
+      return fy;
+    }
+    if (m.type === "friedafetch_mail/insights/dismiss") {
+      const list = { rule: "suggestions", followup: "followups", subscription: "subscriptions", proposal: "proposals" }[m.kind];
+      fy[list] = fy[list].filter((x) => x.id !== m.item_id);
+      if (m.kind !== "proposal") fy.dismissed[m.kind] = (fy.dismissed[m.kind] || 0) + 1;
+      fy.week.waiting = fy.followups.length;
+      fy.week.proposals = fy.proposals.length;
+      return fy;
+    }
+    if (m.type === "friedafetch_mail/insights/restore") {
+      delete fy.dismissed[m.kind];
+      return fy;
+    }
+    if (m.type === "friedafetch_mail/insights/calendars") {
+      return { calendars: [{ id: "home", name: "Zuhause", color: "#34c759" }, { id: "work", name: "Arbeit", color: "#007aff" }], default: null };
+    }
+    if (m.type === "friedafetch_mail/insights/event") {
+      await wait(400);
+      const p = fy.proposals.find((x) => x.id === (m.proposal_id || "p1")) || fy.proposals[0] || { id: "p1" };
+      fy.proposals = fy.proposals.filter((x) => x !== p);
+      fy.week.proposals = fy.proposals.length;
+      const cal = m.calendar_id === "work" ? "Arbeit" : "Zuhause";
+      return { proposal: { ...p, title: m.title || p.title, start: m.start || p.start, end: m.end || p.end, status: "added", calendar: cal, added: new Date().toISOString(), event_uid: "EV1" } };
+    }
+    if (m.type === "friedafetch_mail/insights/unsubscribe") {
+      await wait(500);
+      const n = fy.subscriptions.find((x) => x.sender === m.sender);
+      if (n) n.unsubscribed = new Date().toISOString();
+      return { sender: m.sender, method: "one_click", status: 200 };
     }
     if (m.type === "friedafetch_mail/rules/run") {
       // the example mails the enabled rules hit (all of them in a dry run, nothing changes here)

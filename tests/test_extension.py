@@ -47,7 +47,7 @@ async def test_options_flow(hass: HomeAssistant) -> None:
     core = await setup_core(hass)
     entry = await setup_postfach(hass, core)
     result = await hass.config_entries.options.async_init(entry.entry_id)
-    assert result["type"] is FlowResultType.MENU and result["menu_options"] == ["automation", "ai"]
+    assert result["type"] is FlowResultType.MENU and result["menu_options"] == ["automation", "ai", "foryou"]
     result = await hass.config_entries.options.async_configure(result["flow_id"], {"next_step_id": "automation"})
     form = {
         "rules_auto": True,

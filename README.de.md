@@ -52,8 +52,8 @@ Regeln eine Reparaturmeldung, und es laufen keine Regeln.
 
 ## Optionen
 
-Die Optionen haben zwei Bereiche: **Automatik und Tagesüberblick** (unten) und **KI-Sortierung** (siehe
-[KI-Sortierung](#ki-sortierung)).
+Die Optionen haben drei Bereiche: **Automatik und Tagesüberblick** (unten), **KI-Sortierung** (siehe
+[KI-Sortierung](#ki-sortierung)) und **Für dich** (siehe [Für dich](#für-dich)).
 
 | Option | Wirkung |
 |--------|---------|
@@ -278,6 +278,46 @@ Regelaktivität der letzten 24 Stunden, die heutigen Termine und Geburtstage der
 den gewählten `notify`-Dienst. Mit einer `ai_task`-Entität wird daraus ein kurzer Text; Betreffzeilen gehen dabei als
 Daten mit der Anweisung hinein, darin enthaltenen Aufforderungen nicht zu folgen. Die Aktion
 `friedafetch_mail.send_digest` sendet den Überblick auf Abruf (optional für ein `account`) und liefert den Text zurück.
+
+## Für dich
+
+Der Tab **Für dich** im Panel sammelt, was Frieda dir abnimmt. Alles wird in Home Assistant aus dem Postfach, der
+Aktivität und den Kontakten ermittelt; davon geht nichts an eine KI, und ohne deinen Klick passiert nichts.
+
+- **Deine Woche** – was angekommen ist (im Vergleich zur Woche davor), was Regeln erledigt haben, wie oft die KI richtig
+  lag (bewertet minus korrigiert), was noch ungelesen ist. Mit *Wochenrückblick am* kommt das an dem Tag auch als
+  Benachrichtigung.
+- **Termine aus Mails** – braucht die KI-Sortierung: Die KI nennt einen Termin oder eine Frist, die sie in einer Mail
+  liest, die sie ohnehin bewertet (dieselben Daten, keine zusätzliche Anfrage). Du prüfst Titel und Zeit und trägst
+  ihn mit einem Klick in einen Kalender ein; die Benachrichtigung zu einer wichtigen Mail bekommt den Knopf *In
+  Kalender* (der Kalender aus den Optionen). Kalender, die Frieda schützt, werden nie angeboten.
+- **Wartet auf Antwort** – Mails von dir an Menschen (nicht an No-Reply-Adressen oder dich selbst), auf die nach
+  *Wartet auf Antwort nach* Tagen keine Antwort kam (Standard 3, 0 = aus). Als Antwort zählt eine Mail, die sich auf
+  deine bezieht (In-Reply-To / References) oder seitdem von dieser Person kam – im Posteingang, im Archiv oder in einem
+  Ordner deiner Regeln und Kategorien.
+- **Regelvorschläge** – ein Absender, dessen Mails du mindestens dreimal und in 80 % der Fälle innerhalb von 30 Tagen
+  in denselben Ordner verschoben (oder gelöscht) hast und den noch keine Regel erledigt. *Regel anlegen* öffnet den
+  Editor damit ausgefüllt.
+- **Abos** – Newsletter der letzten 30 Tage, die am seltensten gelesenen zuerst. *Abmelden* arbeitet wie Friedas
+  `icloud_unsubscribe`: Ein-Klick-Link, sonst die Abmelde-Mail (braucht *E-Mails senden erlauben*), sonst öffnet sich
+  die Seite für dich.
+- **Wichtige Absender** – Kontaktgruppen (oder alle Kontakte) und Adressen oder Domains, die du nennst. Ihre Mails gehen
+  nie unter: Die KI stuft sie mindestens als wichtig ein, und sie werden sofort gemeldet, auch ohne KI-Sortierung.
+  In der Aktivität tragen sie einen Stern.
+
+Verschiebst du eine von der KI einsortierte Mail in den Ordner einer anderen Kategorie, lernt die KI auch daraus:
+Frieda nimmt das als Korrektur (in der Zeitleiste der Mail als *Von dir korrigiert (verschoben)*), genau wie eine
+Korrektur im Panel.
+
+| Option (Für dich) | Wirkung |
+|-------------------|---------|
+| Wichtige Absender: Kontaktgruppen | Gruppen deiner iCloud-Kontakte, oder *Alle Kontakte* |
+| Wichtige Absender: Adressen und Domains | eine pro Zeile |
+| Ihre Mails sofort melden | mit dem Benachrichtigungsdienst des Tagesüberblicks (Standard: an) |
+| Kalendereinträge aus Mails vorschlagen | die KI nennt Daten, die sie liest (Standard: an; braucht die KI-Sortierung) |
+| Kalender für Einträge aus der Benachrichtigung | leer = der erste Kalender, in den Frieda schreiben darf |
+| Wartet auf Antwort nach (Tagen) | Standard 3, 0 = aus |
+| Wochenrückblick am | ein Wochentag oder aus, zur Uhrzeit des Tagesüberblicks (sonst 18:00) |
 
 ## Sicherheit
 

@@ -20,7 +20,8 @@
         "title": "Frieda Postfach",
         "menu_options": {
           "automation": "Automatik und Tagesüberblick",
-          "ai": "KI-Sortierung (optional)"
+          "ai": "KI-Sortierung (optional)",
+          "foryou": "Für dich: wichtige Absender, Kalender, Antworten, Wochenrückblick"
         }
       },
       "automation": {
@@ -63,6 +64,28 @@
           "ai_block_terms": "Mails mit diesen Begriffen nie an eine KI senden, einer pro Zeile. Wird lokal in Betreff, Absender und Text geprüft, bevor etwas gesendet wird – auch für den KI-Tagesüberblick. Beispiel: Diagnose, Gehalt, Passwort",
           "ai_include_body": "Die ersten 1.000 Zeichen des Textes.",
           "ai_notify_importance": "Nur im Modus „Aktionen ausführen“."
+        }
+      },
+      "foryou": {
+        "title": "Für dich",
+        "description": "Was Frieda dir abnimmt. Alles wird in Home Assistant aus deinem Postfach und deinen Kontakten ermittelt; davon geht nichts an eine KI. Termine aus Mails brauchen die KI-Sortierung: Die KI nennt ein Datum, das sie in einer Mail liest, die sie ohnehin bewertet, und du trägst es mit einem Klick in den Kalender ein.",
+        "data": {
+          "vip_groups": "Wichtige Absender: Kontaktgruppen",
+          "vip_senders": "Wichtige Absender: Adressen und Domains",
+          "vip_notify": "Ihre Mails sofort melden",
+          "ai_events": "Kalendereinträge aus Mails vorschlagen",
+          "events_calendar": "Kalender für Einträge aus der Benachrichtigung",
+          "followup_days": "Wartet auf Antwort nach (Tagen)",
+          "weekly_day": "Wochenrückblick am"
+        },
+        "data_description": {
+          "vip_groups": "Mails dieser Menschen gehen nie unter: Die KI stuft sie als wichtig ein, und sie werden auch ohne KI gemeldet.",
+          "vip_senders": "Eine pro Zeile, z. B. anna@example.com oder example.com.",
+          "vip_notify": "Mit dem Benachrichtigungsdienst des Tagesüberblicks.",
+          "ai_events": "Termine und Fristen, die die KI in einer Mail liest, die sie bewertet. Ohne deinen Klick wird nichts eingetragen.",
+          "events_calendar": "Leer = der erste Kalender, in den Frieda schreiben darf. Im Panel wählst du jedes Mal.",
+          "followup_days": "Mails von dir an Menschen, auf die nach so vielen Tagen keine Antwort kam. 0 = aus.",
+          "weekly_day": "Zur Uhrzeit des Tagesüberblicks, sonst um 18:00."
         }
       }
     },
@@ -127,6 +150,18 @@
         "3": "ab Wichtigkeit 3",
         "4": "ab Wichtigkeit 4",
         "5": "nur Wichtigkeit 5"
+      }
+    },
+    "weekly_day": {
+      "options": {
+        "off": "aus",
+        "mon": "Montag",
+        "tue": "Dienstag",
+        "wed": "Mittwoch",
+        "thu": "Donnerstag",
+        "fri": "Freitag",
+        "sat": "Samstag",
+        "sun": "Sonntag"
       }
     }
   },

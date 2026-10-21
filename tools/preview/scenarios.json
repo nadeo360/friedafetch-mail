@@ -44,6 +44,14 @@
   "Link aus dem Änderungsprotokoll"
  ],
  [
+  "tab=foryou",
+  "Für dich"
+ ],
+ [
+  "tab=foryou&scene=event",
+  "Für dich: Termin eintragen"
+ ],
+ [
   "tab=rules",
   "Regeln"
  ],
