@@ -131,6 +131,14 @@ die gewählte Mail (auf dem Handy öffnet sich die Mail in einem Blatt über der
   wenn der Laufverlauf schon weiter ist; bei älteren Mails werden die Schritte über die Message-ID (sie bleibt beim
   Verschieben erhalten) oder über Betreff und Absender zugeordnet. Auch das Änderungsprotokoll von Frieda verlinkt
   dorthin.
+- **Mit Mails arbeiten** wie im Mailprogramm: in der geöffneten Mail (oder für die ausgewählten) *gelesen /
+  ungelesen*, *markieren*, *archivieren* (zurück *in den Posteingang*) und *Papierkorb* – mit Friedas Leitplanken:
+  nichts im Nur-Lesen-Modus, geschützte und verborgene Ordner bleiben unberührt, das Stundenlimit für
+  Mail-Änderungen gilt, der Papierkorb nur, wenn Löschen erlaubt ist, und endgültig gelöscht wird nie. Jede Aktion
+  steht in Friedas Änderungsprotokoll und im Verlauf der Mail. **Text anzeigen** lädt den Text der Mail (bereinigt,
+  ohne sie als gelesen zu markieren). **Regel erstellen** öffnet den Regel-Editor mit dem Absender als Bedingung.
+  Mit Tastatur: j/k nächste/vorige Mail, u gelesen, s markieren, e archivieren, # Papierkorb.
+- **Ansichten** *Ungelesen* und *Markiert* (unter *Im Postfach*) zeigen, was das Postfach gerade so hat.
 - **Auswählen** (oder ⌘/Strg-Klick, ⇧-Klick für einen Bereich) wählt Mails für **Neu bewerten**: alle einer Ansicht,
   einen ganzen Tag (Heute, Gestern, …) oder einzelne; Mails, die eine Regel erledigt hat, sind nicht für die KI.
   Während des Laufs zeigt jede Mail, ob sie wartet, gerade bewertet wird oder fertig ist.
@@ -181,6 +189,12 @@ So funktioniert es:
 Im Panel korrigierst du eine Bewertung, indem du die richtige Kategorie wählst; bis zu 30 Korrekturen gehen als
 Beispiele an die KI. Ein Stundenlimit (Standard 30) begrenzt die KI-Aufrufe; jede Mail wird automatisch höchstens
 einmal bewertet.
+
+**Korrigieren mit Aktion:** Verschiebt, markiert oder kennzeichnet die gewählte Kategorie Mails, fragt die Mail,
+ob das jetzt passieren soll; von selbst macht Frieda das nur bei neuen Mails.
+
+**Knöpfe in Benachrichtigungen:** Ist die Companion-App der Benachrichtigungsdienst, trägt die Benachrichtigung
+einer wichtigen Mail *Gelesen* und *Archivieren*; ein Tippen erledigt das wie im Panel.
 
 **Neu bewerten:** Nach geänderten Kategorien wählst du unter *Aktivität* Mails aus (einzelne, einen ganzen Tag
 oder alles, was eine Ansicht zeigt) oder öffnest eine einzelne Mail und wählst **Neu bewerten**. Die Mails gehen mit
@@ -292,6 +306,11 @@ git clone --depth 1 https://github.com/nadeo360/friedafetch /tmp/frieda
 ln -s /tmp/frieda/custom_components/friedafetch custom_components/friedafetch
 pytest && ruff check . && ruff format --check .
 ```
+
+`tests_imap/` prüft Friedas IMAP-Client und den Blick auf gelesen/markiert gegen einen echten IMAP-Server: Dovecot
+als Prozess deines Benutzers (`brew install dovecot` oder `apt install dovecot-imapd`; ohne ihn übersprungen, die CI
+hat einen eigenen Job). Die Typprüfung ist `basedpyright` (requirements/types.txt); Befunde von vor ihrer Einführung
+stehen in `.basedpyright/baseline.json`.
 
 ### Releases
 

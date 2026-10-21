@@ -4,7 +4,7 @@
 # requirements/*.in file.
 set -e
 OPTS="--generate-hashes --python-version 3.14.2 --python-platform x86_64-unknown-linux-gnu --quiet"
-for name in lint bandit; do
+for name in lint bandit types; do
   uv pip compile "requirements/$name.in" $OPTS --custom-compile-command "scripts/lock_requirements.sh" -o "requirements/$name.txt"
 done
 uv pip compile requirements_dev.txt $OPTS --custom-compile-command "scripts/lock_requirements.sh" -o requirements/test.txt

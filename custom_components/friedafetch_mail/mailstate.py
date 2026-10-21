@@ -33,6 +33,7 @@ MAX_TRACKED = 500
 MAX_LOCATE = 10  # messages looked for by Message-ID per look (each may search several folders)
 SEARCH_AGAIN = 24 * 3600  # seconds until a message found nowhere is looked for again
 FULL_EVERY = 3600  # seconds
+FULL_EVERY_QRESYNC = 6 * 3600  # with QRESYNC the server names the messages that left a folder itself
 
 
 def _now_iso() -> str:
@@ -47,24 +48,30 @@ class MailState:
         self._activity = activity
         self._guard = guard
         self._lock = asyncio.Lock()
-        self._boxes: dict[str, dict[str, Any]] = {}  # folder -> modseq, validity, full_at
-        self.mode: str | None = None  # condstore | flags (what the last look used)
+        self.mode: str | None = None  # qresync | condstore | flags (what the last look used)
         self.last: str | None = None
         self.last_full: str | None = None
         self.changed = 0  # lines whose state changed in the last look
         self.located = 0  # messages found in another folder in the last look
         self.error: str | None = None
         self._again = False
+        self.on_request: Any | None = None  # () -> None: schedules a look in the background (set up in __init__)
+
+    def request(self) -> None:
+        """A look soon, in the background (after an action from the panel)."""
+        if self.on_request is not None:
+            self.on_request()
 
     @property
     def unconfirmed(self) -> int:
         """Messages the last full FETCH left out although the folder still has them (kept, not taken for gone)."""
-        return sum(m.get("unconfirmed", 0) for m in self._boxes.values())
+        return sum(m.get("unconfirmed", 0) for m in self._activity.sync_memory.values())
 
     def status(self) -> dict[str, Any]:
         tracked = self._activity.tracked(MAX_TRACKED)
         return {
             "condstore": bool(getattr(self._mail, "condstore", False)),
+            "qresync": bool(getattr(self._mail, "qresync", False)),
             "mode": self.mode,
             "last": self.last,
             "last_full": self.last_full,
@@ -113,13 +120,13 @@ class MailState:
                 self.located += 1
         for mailbox, uids in found.items():
             changed += self._activity.set_state(mailbox, await self._mail.async_flags(mailbox, uids), set(), now)
-        self.mode = "condstore" if "condstore" in modes else ("flags" if modes else self.mode)
+        self.mode = next((m for m in ("qresync", "condstore", "flags") if m in modes), self.mode)
         self.last = now
         self.changed = changed
 
     async def _look(self, mailbox: str, uids: list[int], full: bool, now: str, modes: set[str]) -> int:
         """One folder: only the changes (CONDSTORE), or the flags of all its tracked messages."""
-        memory = self._boxes.setdefault(mailbox, {"modseq": None, "validity": None, "full_at": 0.0})
+        memory = self._activity.sync_memory.setdefault(mailbox, {"modseq": None, "validity": None, "full_at": 0.0})
         condstore = bool(self._mail.condstore)
         status: dict[str, int] = {}
         if condstore:
@@ -130,20 +137,24 @@ class MailState:
                 _LOGGER.debug("Mail state: STATUS of %s failed, full look instead: %s", mailbox, err)
                 condstore = False
         modseq, validity = status.get("highestmodseq"), status.get("uidvalidity")
+        qresync = condstore and bool(getattr(self._mail, "qresync", False))  # known once connected
         incremental = (
             condstore
             and not full
             and modseq is not None
             and memory["modseq"] is not None
             and validity == memory["validity"]
-            and time.monotonic() - memory["full_at"] < FULL_EVERY
+            and time.time() - memory["full_at"] < (FULL_EVERY_QRESYNC if qresync else FULL_EVERY)
         )
         gone: set[int] = set()
         if incremental:
+            wanted = set(uids)
             if modseq == memory["modseq"]:
                 flags: dict[int, list[str]] = {}  # nothing changed in the whole folder
+            elif qresync:
+                changes, gone = await self._mail.async_changes(mailbox, memory["modseq"], uids)
+                flags = {uid: f for uid, f in changes.items() if uid in wanted}
             else:
-                wanted = set(uids)
                 changes = await self._mail.async_flags(mailbox, changed_since=memory["modseq"])
                 flags = {uid: f for uid, f in changes.items() if uid in wanted}
         else:
@@ -162,10 +173,11 @@ class MailState:
                         len(uids),
                         mailbox,
                     )
-            memory["full_at"] = time.monotonic()
+            memory["full_at"] = time.time()
             self.last_full = now
         memory.update(modseq=modseq, validity=validity)
-        modes.add("condstore" if condstore else "flags")
+        self._activity.save_sync()
+        modes.add("qresync" if qresync else "condstore" if condstore else "flags")
         changed = self._activity.set_state(mailbox, flags, gone, now)
         _LOGGER.debug(
             "Mail state %s (%s, %s): %s tracked, %s answered, %s changed, %s gone",

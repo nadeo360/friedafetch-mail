@@ -92,6 +92,7 @@ class ActivityLog:
         self._loaded = False
         self._backfilled = False  # the list was filled once from what was kept before it existed
         self._events_filled = False  # the lines of 1.0.23 and older got their steps from what was kept
+        self._sync: dict[str, dict[str, Any]] = {}  # mailstate.py: per folder its modseq, validity, last full look
         self._pending: dict[str, list[dict[str, Any]]] = {}
 
     async def async_load(self) -> None:
@@ -101,10 +102,16 @@ class ActivityLog:
         self._items = list(data.get("items") or [])[-MAX_ENTRIES:]
         self._backfilled = bool(data.get("backfilled"))
         self._events_filled = bool(data.get("events_filled"))
+        self._sync = dict(data.get("sync") or {})
         self._loaded = True
 
     def _data(self) -> dict[str, Any]:
-        return {"items": self._items, "backfilled": self._backfilled, "events_filled": self._events_filled}
+        return {
+            "items": self._items,
+            "backfilled": self._backfilled,
+            "events_filled": self._events_filled,
+            "sync": self._sync,
+        }
 
     def _changed(self) -> None:
         self._store.async_delay_save(self._data, 2)
@@ -113,6 +120,14 @@ class ActivityLog:
     @property
     def items(self) -> list[dict[str, Any]]:
         return self._items
+
+    @property
+    def sync_memory(self) -> dict[str, dict[str, Any]]:
+        """What the read/flagged look keeps per folder; kept over restarts (save_sync)."""
+        return self._sync
+
+    def save_sync(self) -> None:
+        self._store.async_delay_save(self._data, 10)  # no panel refresh: nothing it shows changed
 
     # ------------------------------------------------------------ writing
     def find(self, mail: dict[str, Any]) -> dict[str, Any] | None:
@@ -217,6 +232,13 @@ class ActivityLog:
         if changed:
             self._changed()
         return changed
+
+    def moved(self, key: str, target: str, time: str) -> None:
+        """Moved by Frieda (an action from the panel): its UID there is found in the next look, starting there."""
+        item = next((i for i in self._items if i.get("key") == key), None)
+        if item is not None:
+            self._state(item, gone=True, mailbox=None, uid=None, searched=None, last_mailbox=target, checked=time)
+            self._changed()
 
     def set_location(self, key: str, mailbox: str | None, uid: int | None, time: str) -> bool:
         """Where a message was found by its Message-ID (or that it was found nowhere)."""
@@ -481,8 +503,13 @@ def _append(item: dict[str, Any], event: dict[str, Any]) -> None:
 
 
 def matches(row: dict[str, Any], view: str, query: str) -> bool:
-    """view: all | unsure | k:<kind> | f:<folder>; query: words in subject, sender, category or rule."""
+    """view: all | unsure | unread | flagged | k:<kind> | f:<folder>; query: words in subject, sender, category, rule."""
     if view == "unsure" and not row.get("unsure"):
+        return False
+    state = row.get("state") or {}
+    if view == "unread" and state.get("seen") is not False:
+        return False
+    if view == "flagged" and not state.get("flagged"):
         return False
     if view.startswith("k:") and row["kind"] != view[2:]:
         return False
@@ -519,6 +546,8 @@ def summarize(rows: list[dict[str, Any]], view: str, query: str, offset: int, li
         "counts": {
             "all": len(rows),
             "unsure": sum(1 for r in rows if r.get("unsure")),
+            "unread": sum(1 for r in rows if (r.get("state") or {}).get("seen") is False),
+            "flagged": sum(1 for r in rows if (r.get("state") or {}).get("flagged")),
             "kinds": kinds,
             "folders": folders,
         },

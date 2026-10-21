@@ -393,6 +393,18 @@ export const STYLE = `
   .meta.held ha-icon { color: var(--frieda-text-ok); }
   .meta .catsel + .rl { flex: none; overflow: visible; }
   .uns { flex: none; font-size: 12px; color: var(--frieda-text-warn); }
+  .macts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .rtop { flex-wrap: wrap; row-gap: 6px; }
+  .macts .mact .lb { display: none; }
+  .macts .mact { padding-inline: 8px; }
+  .rtop .macts { gap: 4px; }
+  .askline { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; padding: 8px 10px; border-radius: 10px; background: var(--secondary-background-color); font-size: 13.5px; --mdc-icon-size: 18px; }
+  .askline > span { flex: 1; min-width: 12em; }
+  .mtextwrap { margin: 10px 0 16px; }
+  .mtext .body { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.55; max-height: 45vh; overflow: auto; padding: 12px 14px; border-radius: 10px; background: var(--secondary-background-color); }
+  .mtext .warnline, .mtext .files { display: flex; gap: 6px; align-items: center; --mdc-icon-size: 16px; }
+  .mtext .warnline { color: var(--frieda-text-warn); font-size: 13px; }
+  .rfoot .keys { display: block; margin-top: 4px; opacity: .8; }
   .check-h { margin: 18px 0 4px; }
   .check-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 4px 0 8px; }
   .check-row .fsel { max-width: 100%; }

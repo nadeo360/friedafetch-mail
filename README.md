@@ -125,6 +125,13 @@ mail on the right (on phones the mail opens in a sheet over the list that you sw
   switch, rating, action, every correction. The category is the place to correct it. Each mail of the activity keeps
   its steps as they happen, so the timeline stays complete when the run history has moved on; for older mails the
   steps are linked by the Message-ID (it survives moves) or by subject and sender. Frieda's change log links here too.
+- **Act on mails** like in a mail program: in the open mail (or for the picked ones) *read / unread*, *flag*,
+  *archive* (back *to the inbox*) and *trash* – with Frieda's guard rails: nothing in read-only mode, protected and
+  hidden folders stay untouched, the hourly limit of mail changes applies, the trash only when deleting is allowed,
+  and nothing is ever deleted for good. Each action is in Frieda's change log and in the mail's timeline. **Show
+  text** loads the mail's text (cleaned, without marking it read). **Create rule** opens the rule editor with the
+  sender as condition. On a keyboard: j/k next/previous mail, u read, s flag, e archive, # trash.
+- **Views** *Unread* and *Flagged* (under *In the mailbox*) list what the mailbox has like that now.
 - **Select** (or Cmd/Ctrl-click, Shift-click for a range) picks mails for **Rate again**: all of a view, a whole day
   (Today, Yesterday, …) or single ones; mails handled by a rule are not for the AI. While the batch runs, every mail
   shows whether it waits, is being rated or is done.
@@ -172,6 +179,12 @@ How it works:
 In the panel you correct a rating by choosing the right category; up to 30 corrections are passed to the AI as
 examples. An hourly limit (default 30) caps the number of AI calls; every mail is rated at most once
 automatically.
+
+**Correct with action:** if the category you choose moves, marks or flags mails, the mail asks whether to do that
+now; Frieda otherwise only does it for new mail.
+
+**Buttons in notifications:** with the Companion app as notify service, the notification of an important mail
+carries *Read* and *Archive*; a tap does that like the panel would.
 
 **Rate again:** after changing the categories you select mails under *Activity* (single ones, a whole day or
 everything a view shows) or open one mail, and choose **Rate again**. The messages go to the AI once more with the
@@ -278,6 +291,10 @@ git clone --depth 1 https://github.com/nadeo360/friedafetch /tmp/frieda
 ln -s /tmp/frieda/custom_components/friedafetch custom_components/friedafetch
 pytest && ruff check . && ruff format --check .
 ```
+
+`tests_imap/` runs Frieda's IMAP client and the read/flagged look against a real IMAP server: Dovecot as a process of
+your user (`brew install dovecot` or `apt install dovecot-imapd`; skipped without it, CI has its own job). The type
+check is `basedpyright` (requirements/types.txt); findings from before it came are in `.basedpyright/baseline.json`.
 
 ### Releases
 

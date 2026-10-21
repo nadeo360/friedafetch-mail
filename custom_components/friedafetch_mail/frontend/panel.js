@@ -121,6 +121,8 @@ class FriedaPostfachPanel extends HTMLElement {
       loc: new Map(), // Message-ID -> where the mail really is (looked up when it is opened)
       assist: null, // the category assistant, while it is open
       check: null, // the accuracy check: { busy, entity, result, err }
+      texts: new Map(), // Message-ID -> the mail's text, loaded on request: { busy, data, err }
+      applyAsk: null, // after a correction: { ratingId, category } – run the new category's actions?
       expanded: new Set(),
       focusEditor: false,
       scrollTo: null,
@@ -151,12 +153,15 @@ class FriedaPostfachPanel extends HTMLElement {
     document.addEventListener("click", this._onDocClick);
     // live updates arrive through the subscription; the slow timer keeps relative times fresh and is the fallback
     this._timer = setInterval(() => this._autoRefresh(), 60000);
+    this._onKey = (ev) => this._shortcut(ev);
+    this.addEventListener("keydown", this._onKey);
     this._subscribe();
     this._openLinked(); // the panel may come back from Home Assistant's cache with a new link
   }
 
   disconnectedCallback() {
     clearInterval(this._timer);
+    this.removeEventListener("keydown", this._onKey);
     clearTimeout(this._liveTimer);
     document.removeEventListener("visibilitychange", this._onVisible);
     document.removeEventListener("click", this._onDocClick);
@@ -359,11 +364,119 @@ class FriedaPostfachPanel extends HTMLElement {
   }
 
   async _aiCorrect(ratingId, category) {
+    const cat = (this._s.ai?.categories || []).find((c) => c.name === category);
+    const acc = this._account();
+    // the new category moves, marks or flags: ask whether to do that now (Frieda would only do it for new mail)
+    this._s.applyAsk = cat && (cat.move_to || cat.mark_seen || cat.flag) && !acc?.read_only ? { ratingId, category } : null;
     await this._call(async () => {
       await this._ws({ type: "friedafetch_mail/ai/correct", entry_id: this._s.entryId, rating_id: ratingId, category });
       this._s.ai = await this._ws({ type: "friedafetch_mail/ai", entry_id: this._s.entryId });
       await Promise.all([this._loadActivity().catch(() => {}), this._s.sheet ? this._loadTimeline() : null]);
     });
+  }
+
+  async _applyCategory(run) {
+    const ask = this._s.applyAsk;
+    this._s.applyAsk = null;
+    if (!run || !ask) return this._render();
+    await this._call(async () => {
+      await this._ws({ type: "friedafetch_mail/ai/apply", entry_id: this._s.entryId, rating_id: ask.ratingId });
+      this._s.ai = await this._ws({ type: "friedafetch_mail/ai", entry_id: this._s.entryId });
+      await Promise.all([this._loadActivity().catch(() => {}), this._s.sheet ? this._loadTimeline() : null]);
+    });
+  }
+
+  // ------------------------------------------------------------ acting on mails (like a mail program)
+  async _mailAct(keys, action) {
+    const t = this.t;
+    if (!keys.length) return;
+    let res = null;
+    await this._call(async () => {
+      res = await this._ws({ type: "friedafetch_mail/mail/act", entry_id: this._s.entryId, keys, action });
+      await Promise.all([this._loadActivity().catch(() => {}), this._s.sheet ? this._loadTimeline() : null]);
+    });
+    if (res) W.announce(this.shadowRoot, res.failed?.length ? fmt(t.mactFailed, res.failed.length) : fmt(t[`mactDone_${action}`], res.done), 0);
+  }
+
+  // The actions for one mail (reading pane) or the picked ones (action bar), as fits their state now
+  _mailActions(items) {
+    const t = this.t;
+    const acc = this._account();
+    if (acc?.read_only || !items.length) return "";
+    const one = items.length === 1;
+    const st = one ? items[0].state || {} : {};
+    const where = one ? st.mailbox || (items[0].folder === "INBOX" ? "INBOX" : null) : null;
+    const btn = (action, icon, label) =>
+      `<button class="secondary small ib mact" data-action="mail-act" data-v="${action}" aria-label="${esc(label)}" ${this._s.busy ? "disabled" : ""}>${ico(icon)}<span class="lb">${esc(label)}</span></button>`;
+    return [
+      one && st.seen === true ? btn("unseen", "email-outline", t.mactUnseen) : btn("seen", "email-open-outline", t.mactSeen),
+      one && st.flagged ? btn("unflag", "flag-off-outline", t.mactUnflag) : btn("flag", "flag-outline", t.mactFlag),
+      where && where !== "INBOX" ? btn("inbox", "inbox-arrow-down", t.mactInbox) : btn("archive", "archive-arrow-down-outline", t.mactArchive),
+      acc?.allow_delete && !(st.mailbox && st.mailbox === "Deleted Messages") ? btn("trash", "delete-outline", t.mactTrash) : "",
+    ].join("");
+  }
+
+  // Keyboard like a mail program (activity, nothing typed into a field): j/k next/previous mail, u read,
+  // s flag, e archive, # or Delete trash
+  _shortcut(ev) {
+    if (ev.ctrlKey || ev.metaKey || ev.altKey || this._s.confirm || this._s.assist) return;
+    const target = ev.composedPath()[0];
+    if (target?.closest?.("input, select, textarea, [contenteditable]")) return;
+    if (this._tab(this._tabs()) !== "activity" || this._s.act.runs) return;
+    const a = this._s.act;
+    if (ev.key === "j" || ev.key === "k") {
+      const i = a.items.findIndex((x) => x.key === a.open);
+      const next = a.items[Math.max(0, Math.min(a.items.length - 1, i + (ev.key === "j" ? 1 : -1)))];
+      if (next && next.key !== a.open) {
+        ev.preventDefault();
+        this._actOpen(next.key);
+      }
+      return;
+    }
+    const keys = a.picking ? [...a.sel.keys()] : a.open ? [a.open] : [];
+    const acc = this._account();
+    if (!keys.length || acc?.read_only) return;
+    const item = keys.length === 1 ? this._actItem(keys[0]) : null;
+    const action = {
+      u: item?.state?.seen ? "unseen" : "seen",
+      s: item?.state?.flagged ? "unflag" : "flag",
+      e: "archive",
+      "#": "trash",
+      Delete: "trash",
+    }[ev.key];
+    if (!action || (action === "trash" && !acc?.allow_delete)) return;
+    ev.preventDefault();
+    this._mailAct(keys, action);
+  }
+
+  // The text of the mail, on request (cleaned, plain; reading it does not mark the mail read)
+  async _loadText(mid) {
+    const texts = this._s.texts;
+    texts.set(mid, { busy: true });
+    this._render();
+    try {
+      texts.set(mid, { busy: false, data: await this._ws({ type: "friedafetch_mail/mail/text", entry_id: this._s.entryId, message_id: mid }) });
+    } catch (err) {
+      texts.set(mid, { busy: false, err: err.message || String(err) });
+    }
+    this._renderWhenFree();
+  }
+
+  _textHtml(mid) {
+    const t = this.t;
+    const x = this._s.texts.get(mid);
+    if (!x) return `<button class="link small ib" data-action="mail-text" data-id="${esc(mid)}">${ico("text-box-outline")}${esc(t.textShow)}</button>`;
+    if (x.busy) return `<p class="working"><span class="spinner" aria-hidden="true"></span>${esc(t.textLoading)}</p>`;
+    if (x.err) return `<div class="error">${esc(x.err)}</div>`;
+    const d = x.data || {};
+    if (!d.found) return `<p class="muted">${esc(t.textGone)}</p>`;
+    const files = (d.attachments || []).filter(Boolean);
+    return `<div class="mtext">
+        ${d.suspicious ? `<p class="warnline">${ico("alert-outline")}<span>${esc(t.textSuspicious)}</span></p>` : ""}
+        <div class="body">${esc(d.text || t.textEmpty)}</div>
+        ${d.truncated ? `<p class="muted">${esc(t.textTruncated)}</p>` : ""}
+        ${files.length ? `<p class="muted files">${ico("paperclip")}<span>${esc(files.join(", "))}</span></p>` : ""}
+      </div>`;
   }
 
   async _aiClear() {
@@ -1122,6 +1235,11 @@ class FriedaPostfachPanel extends HTMLElement {
         .filter((a) => !String(a).startsWith("moved:") && a !== "quota")
         .map((a) => t[`aiApplied_${a}`] || a)
         .join(", ") || t.tlAppliedSub;
+    } else if (e.kind === "acted") {
+      icon = { seen: "email-open-outline", unseen: "email-outline", flag: "flag-outline", unflag: "flag-off-outline", archive: "archive-arrow-down-outline", inbox: "inbox-arrow-down", trash: "delete-outline" }[e.action] || "gesture-tap";
+      tone = "you";
+      title = t[`tlActed_${e.action}`] || e.action;
+      sub = e.mailbox && ["archive", "inbox", "trash"].includes(e.action) ? this._folderName(e.mailbox) : "";
     } else if (e.kind === "corrected") {
       icon = "pencil-outline";
       tone = "you";
@@ -1699,10 +1817,15 @@ class FriedaPostfachPanel extends HTMLElement {
       ["k:held", t.actKindHeld, "shield-check-outline", kinds.held || 0],
       ["k:none", t.actKindNone, "minus-circle-outline", kinds.none || 0],
     ].filter(([id, , , n]) => id === "all" || n);
+    // as the mailbox has it now (read / flagged, kept current in the background)
+    const stateViews = [
+      ["unread", t.actUnread, "email-outline", c.unread || 0],
+      ["flagged", t.actFlagged, "flag-outline", c.flagged || 0],
+    ].filter(([, , , n]) => n);
     const folders = Object.entries(c.folders || {})
       .sort(([a], [b]) => (a === "INBOX" ? -1 : b === "INBOX" ? 1 : this._folderName(a).localeCompare(this._folderName(b))))
       .map(([f, n]) => [`f:${f}`, this._folderName(f), this._folderIcon(f), n]);
-    return { kindViews, folders };
+    return { kindViews, stateViews, folders };
   }
 
   _actStatus() {
@@ -1727,23 +1850,24 @@ class FriedaPostfachPanel extends HTMLElement {
           <button class="secondary small ib" data-action="act-runs-back">${ico("chevron-left")}${esc(t.actRunsBack)}</button><span class="muted">${esc(t.actRunsHint)}</span></div></div></section>
         <section class="widget w-full" data-widget="history">${this._renderHistory()}</section>`;
     }
-    const { kindViews, folders } = this._actViews();
+    const { kindViews, stateViews, folders } = this._actViews();
     const box = ([id, label, icon, n]) =>
       `<button class="box" data-action="act-view" data-v="${esc(id)}" aria-current="${a.view === id}">${ico(icon)}<span class="lbl">${esc(label)}</span><span class="n">${esc(n)}</span></button>`;
     const rail = `<nav class="rail" aria-label="${esc(t.actViews)}">
         <h3>${esc(t.actGroupResult)}</h3>${kindViews.map(box).join("")}
+        ${stateViews.length ? `<h3>${esc(t.actGroupState)}</h3>${stateViews.map(box).join("")}` : ""}
         ${folders.length ? `<h3>${esc(t.actGroupFolder)}</h3>${folders.map(box).join("")}` : ""}
         <h3>${esc(t.actGroupTech)}</h3><button class="box" data-action="act-runs">${ico("format-list-numbered")}<span class="lbl">${esc(t.actRuns)}</span></button>
         <span class="grow"></span><div class="status">${this._actStatus()}</div>
       </nav>`;
-    return `<section class="widget w-full" data-widget="activity"><div class="mcwrap"><div class="mc">${rail}${this._actList(kindViews, folders)}${this._actReader()}</div></div></section>`;
+    return `<section class="widget w-full" data-widget="activity"><div class="mcwrap"><div class="mc">${rail}${this._actList(kindViews, folders, stateViews)}${this._actReader()}</div></div></section>`;
   }
 
-  _actList(kindViews, folders) {
+  _actList(kindViews, folders, stateViews = []) {
     const t = this.t;
     const s = this._s;
     const a = s.act;
-    const views = [...kindViews, ...folders];
+    const views = [...kindViews, ...stateViews, ...folders];
     const label = (views.find(([id]) => id === a.view) || [null, t.actAll])[1];
     const days = new Map((a.days || []).map((d) => [d.day, d]));
     const selectable = (a.days || []).reduce((n, d) => n + d.selectable, 0);
@@ -1806,7 +1930,7 @@ class FriedaPostfachPanel extends HTMLElement {
           return `<button class="seg ${on ? "on" : ""}" data-action="act-day" data-v="${esc(d.day)}" aria-pressed="${on}" ${d.selectable ? "" : "disabled"}>${esc(this._dayLabel(d.day))}<span class="n">${esc(d.selectable)}</span></button>`;
         }).join("")}</div>` : ""}`
       : `<div class="lrow">
-          <select class="fsel boxsel" data-action="act-viewsel" aria-label="${esc(t.actViews)}">${opts(t.actGroupResult, kindViews)}${folders.length ? opts(t.actGroupFolder, folders) : ""}<optgroup label="${esc(t.actGroupTech)}"><option value="runs">${esc(t.actRuns)}</option></optgroup></select>
+          <select class="fsel boxsel" data-action="act-viewsel" aria-label="${esc(t.actViews)}">${opts(t.actGroupResult, kindViews)}${stateViews.length ? opts(t.actGroupState, stateViews) : ""}${folders.length ? opts(t.actGroupFolder, folders) : ""}<optgroup label="${esc(t.actGroupTech)}"><option value="runs">${esc(t.actRuns)}</option></optgroup></select>
           <label class="search">${ico("magnify")}<input type="search" id="act-q" value="${esc(a.query)}" placeholder="${esc(t.actSearch)}" aria-label="${esc(t.actSearchLabel)}"></label>
           ${s.ai?.status?.active ? `<button class="secondary small ib pickbtn" data-action="act-pick" ${selectable ? "" : "disabled"}>${ico("checkbox-multiple-marked-outline")}<span>${esc(t.actPick)}</span></button>` : ""}
           <span class="narrow-menu">${menu}</span>
@@ -1817,7 +1941,7 @@ class FriedaPostfachPanel extends HTMLElement {
       : "";
     const batch = s.ai?.batch ? this._renderBatch(s.ai) : "";
     const actbar = a.picking
-      ? `<div class="actbar"><span>${esc(fmt(t.selected, a.sel.size))}</span><span class="grow"></span><button class="pill" data-action="act-rerate" ${a.sel.size && !this._batchBusy() && !s.busy ? "" : "disabled"}>${ico("refresh")}${esc(t.rerate)}</button></div>`
+      ? `<div class="actbar"><span>${esc(fmt(t.selected, a.sel.size))}</span><span class="grow"></span>${a.sel.size ? `<span class="macts">${this._mailActions([...a.sel.keys()].map((k) => this._actItem(k)).filter(Boolean))}</span>` : ""}<button class="pill" data-action="act-rerate" ${a.sel.size && !this._batchBusy() && !s.busy ? "" : "disabled"}>${ico("refresh")}${esc(t.rerate)}</button></div>`
       : "";
     const empty = !a.loaded ? `<p class="lempty">${esc(t.loading)}</p>` : `<p class="lempty">${esc(a.counts?.all ? t.actEmptyView : t.actEmpty)}</p>`;
     return `<div class="listpane ${a.picking ? "picking" : ""}">
@@ -1888,7 +2012,17 @@ class FriedaPostfachPanel extends HTMLElement {
       ? `<button class="secondary small ib" data-action="tl-rerate" ${s.busy || this._batchBusy() ? "disabled" : ""}>${ico("refresh")}${esc(t.rerate)}</button>`
       : "";
     const who = name && address && name !== address ? `<strong>${esc(name)}</strong><small>${esc(address)}</small>` : `<strong>${esc(name || address || "–")}</strong>`;
-    return `<div class="rtop"><span class="grow"></span>${rerate}</div>
+    const ruleBtn = address.includes("@")
+      ? `<button class="secondary small ib" data-action="rule-from-mail" data-from="${esc(address)}" data-name="${esc(name)}">${ico("filter-plus-outline")}${esc(t.ruleFromMail)}</button>`
+      : "";
+    const ask = this._s.applyAsk && this._s.applyAsk.ratingId === d.rating_id ? this._s.applyAsk : null;
+    const askCat = ask ? (s.ai?.categories || []).find((c) => c.name === ask.category) : null;
+    const askHtml = askCat
+      ? `<div class="askline" role="status">${ico("help-circle-outline")}<span>${esc(fmt(t.applyAsk, cat(askCat.name), [askCat.move_to ? `→ ${askCat.move_to}` : "", askCat.mark_seen ? t.aSeen : "", askCat.flag ? t.aFlag : ""].filter(Boolean).join(", ")))}</span>
+          <button class="small" data-action="apply-yes">${esc(t.applyYes)}</button><button class="secondary small" data-action="apply-no">${esc(t.applyNo)}</button></div>`
+      : "";
+    const acts = item && mid ? `<div class="macts">${this._mailActions([item])}</div>` : "";
+    return `<div class="rtop">${acts}<span class="grow"></span>${ruleBtn}${rerate}</div>
       <div class="rbody">
         <div class="rhead">
           <h2 tabindex="-1" id="r-title">${esc(subject)}</h2>
@@ -1897,11 +2031,13 @@ class FriedaPostfachPanel extends HTMLElement {
           <span class="date">${esc(d.date ? fmtDateTime(d.date) : item ? fmtDateTime(item.time) : "")}</span>
           <div class="chips">${meta}${this._stateChips(item)}${this._actRowBatch(item ? item.key : mid)}</div>
           ${mid ? this._locHtml(mid, item?.folder || d.location || d.mailbox) : ""}
+          ${askHtml}
         </div>
+        ${mid ? `<div class="mtextwrap">${this._textHtml(mid)}</div>` : ""}
         <h3 class="sect">${esc(t.actHistory)}</h3>
         ${body}
       </div>
-      <div class="rfoot">${esc(mid ? t.tlFoot : t.tlFootOld)}</div>`;
+      <div class="rfoot">${esc(mid ? t.tlFoot : t.tlFootOld)}${!this._actNarrow() && item && !this._account()?.read_only ? `<span class="keys">${esc(t.keysHint)}</span>` : ""}</div>`;
   }
 
   // Read / flagged as the mailbox has it now (for a mail that left the inbox: as last seen there)
@@ -2366,6 +2502,16 @@ class FriedaPostfachPanel extends HTMLElement {
     root.querySelectorAll("[data-action]").forEach((el) => {
       const action = el.dataset.action;
       const handler = {
+        // a new rule for mails like this one: the sender as its condition, to be changed in the editor
+        "rule-from-mail": () => {
+          const rule = this._blankRule();
+          rule.name = fmt(this.t.ruleFromMailName, el.dataset.name || el.dataset.from);
+          rule.conditions = [{ field: "from", op: "contains", value: el.dataset.from }];
+          this._s.editing = rule;
+          this._s.focusEditor = true;
+          this._s.sheet = null;
+          this._setTab("rules");
+        },
         new: () => {
           this._s.editing = this._blankRule();
           this._s.focusEditor = true;
@@ -2541,6 +2687,14 @@ class FriedaPostfachPanel extends HTMLElement {
         },
         "assist-test": () => this._assistTest(),
         "ai-check": () => this._check(),
+        "mail-act": () => {
+          const a = this._s.act;
+          const keys = el.closest(".actbar") ? [...a.sel.keys()] : a.open ? [a.open] : [];
+          this._mailAct(keys, el.dataset.v);
+        },
+        "mail-text": () => this._loadText(el.dataset.id),
+        "apply-yes": () => this._applyCategory(true),
+        "apply-no": () => this._applyCategory(false),
         "assist-apply": () => this._assistApply(),
         "tl-rerate": () => {
           // one way for every opened mail (activity, AI log, runs, a link): the mail and the list show the progress

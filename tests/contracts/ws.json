@@ -2,6 +2,7 @@
  "friedafetch_mail/accounts": {
   "accounts": [
    {
+    "allow_delete": "bool",
     "apple_id": "str",
     "attachments": "bool",
     "automation": {
@@ -34,12 +35,14 @@
  "friedafetch_mail/activity/list": {
   "counts": {
    "all": "num",
+   "flagged": "num",
    "folders": {
     "*": "num"
    },
    "kinds": {
     "*": "num"
    },
+   "unread": "num",
    "unsure": "num"
   },
   "days": [
@@ -282,12 +285,28 @@
   ],
   "tested": "num"
  },
+ "friedafetch_mail/mail/act": {
+  "action": "str",
+  "done": "num",
+  "failed": [],
+  "skipped": "num"
+ },
  "friedafetch_mail/mail/locate": {
   "checked": "str",
   "found": "bool",
   "mailbox": "str",
   "trash": "bool",
   "uid": "num"
+ },
+ "friedafetch_mail/mail/text": {
+  "attachments": [
+   "str"
+  ],
+  "found": "bool",
+  "mailbox": "str",
+  "suspicious": "bool",
+  "text": "str",
+  "truncated": "bool"
  },
  "friedafetch_mail/mail/timeline": {
   "category": "str",

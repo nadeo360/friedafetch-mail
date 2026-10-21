@@ -202,6 +202,7 @@ class PushSensor(_StatusSensor):
             state = self._link.state.status()
             out |= {
                 "state_condstore": state["condstore"],
+                "state_qresync": state["qresync"],
                 "state_mode": state["mode"],
                 "state_last": state["last"],
                 "state_last_full": state["last_full"],

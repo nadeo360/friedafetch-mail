@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock, patch
 
 from homeassistant.core import HomeAssistant
 
-from custom_components.friedafetch_mail import mailstate
 from custom_components.friedafetch_mail.activity import ActivityLog
 from custom_components.friedafetch_mail.idle import MailWatcher
 from custom_components.friedafetch_mail.locate import async_locate
@@ -81,14 +80,22 @@ async def test_read_flagged_and_moved_on_another_device(
 
     device.flags("INBOX", uids[0], add="\\Seen")  # read on the iPhone
     device.flags("INBOX", uids[1], add="\\Flagged")
-    await state.async_sync()  # CONDSTORE: only the changes
-    assert state.mode == "condstore"
+    await state.async_sync()  # QRESYNC (CONDSTORE): only the changes
+    assert state.mode == "qresync" and mail.qresync
     assert states()["<m0@example.com>"]["seen"] is True and states()["<m1@example.com>"]["flagged"] is True
 
     archived = device.move("INBOX", uids[0], "Archive")  # archived on the iPhone
     device.delete("INBOX", uids[2])  # deleted for good
-    with patch.object(mailstate, "FULL_EVERY", -1):
-        await state.async_sync()
+    calls: list[str] = []
+    real_flags = mail.async_flags
+
+    async def counted(*args: Any, **kwargs: Any) -> Any:
+        calls.append(args[0])
+        return await real_flags(*args, **kwargs)
+
+    with patch.object(mail, "async_flags", counted):
+        await state.async_sync()  # QRESYNC names both as vanished: no full look of the inbox needed
+    assert "INBOX" not in calls
     moved = states()["<m0@example.com>"]
     assert moved["mailbox"] == "Archive" and moved["uid"] == archived and moved["seen"] is True
     assert states()["<m2@example.com>"]["gone"] is True and states()["<m2@example.com>"]["mailbox"] is None
@@ -133,3 +140,47 @@ async def _until(check: Any, seconds: float = 10) -> None:
             return
         await asyncio.sleep(0.1)
     raise AssertionError("the server did not report it in time")
+
+
+async def test_actions_from_the_panel(hass: HomeAssistant, account: dict[str, Any], mail: Any) -> None:
+    """Read, flag, archive, back, trash – on the server, in the activity, in the timeline; nothing deleted for good."""
+    from types import SimpleNamespace  # noqa: PLC0415
+
+    from custom_components.friedafetch_mail.actions import async_act  # noqa: PLC0415
+
+    device = account["device"]
+    uids = [device.append("INBOX", f"<a{i}@example.com>") for i in range(2)]
+    log = ActivityLog(hass, "act")
+    await log.async_load()
+    log.add_pass("push", "2026-10-21T09:00:00+02:00", [_line(u, f"<a{i}@example.com>") for i, u in enumerate(uids)])
+    link = SimpleNamespace(
+        activity=log, mail=mail, clients=SimpleNamespace(guard=None, audit=None, mail=mail), state=None
+    )
+    keys = ["<a0@example.com>", "<a1@example.com>"]
+
+    async def act(action: str, which: list[str]) -> dict[str, Any]:
+        return await async_act(link, which, action, read_only=False, allow_delete=True)
+
+    assert (await act("seen", keys))["done"] == 2
+    assert (await act("flag", keys[:1]))["done"] == 1
+    flags = await mail.async_flags("INBOX", uids)
+    assert all(SEEN in f for f in flags.values()) and FLAGGED in flags[uids[0]] and FLAGGED not in flags[uids[1]]
+    assert log.items[0]["state"]["seen"] is True
+
+    await act("archive", keys[:1])
+    state = MailState(mail, log)
+    await state.async_sync()  # finds it in the archive
+    archived = next(i for i in log.items if i["key"] == keys[0])["state"]
+    assert archived["mailbox"] == "Archive" and archived["flagged"] is True
+    await act("inbox", keys[:1])
+    await state.async_sync()
+    assert next(i for i in log.items if i["key"] == keys[0])["state"]["mailbox"] == "INBOX"
+
+    await act("trash", keys[1:])
+    await state.async_sync()
+    assert next(i for i in log.items if i["key"] == keys[1])["state"]["mailbox"] == "Deleted Messages"
+    again = await act("trash", keys[1:])  # already in the trash: stays there, nothing is deleted for good
+    assert again["done"] == 0 and again["skipped"] == 1
+    assert (await async_locate(mail, None, keys[1], []))["mailbox"] == "Deleted Messages"
+    steps = [e["action"] for e in next(i for i in log.items if i["key"] == keys[0])["events"] if e["kind"] == "acted"]
+    assert steps == ["seen", "flag", "archive", "inbox"]

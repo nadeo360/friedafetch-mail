@@ -114,6 +114,18 @@ async def test_panel_answers_keep_their_shape(hass: HomeAssistant, hass_ws_clien
     shapes["friedafetch_mail/ai"] = await call("friedafetch_mail/ai")
     shapes["friedafetch_mail/activity/list"] = await call("friedafetch_mail/activity/list")
     shapes["friedafetch_mail/activity/select"] = await call("friedafetch_mail/activity/select")
+    with (
+        patch(f"{MAIL}.async_special_mailbox", AsyncMock(return_value="Deleted Messages")),
+        patch(f"{MAIL}.async_set_flags", AsyncMock()),
+    ):
+        shapes["friedafetch_mail/mail/act"] = await call(
+            "friedafetch_mail/mail/act", keys=["<3@example.com>"], action="flag"
+        )
+    with patch(
+        f"{MAIL}.async_get_message",
+        AsyncMock(return_value={"body": "Hallo", "body_truncated": False, "attachments": [{"filename": "a.pdf"}]}),
+    ):
+        shapes["friedafetch_mail/mail/text"] = await call("friedafetch_mail/mail/text", message_id="<3@example.com>")
     shapes["friedafetch_mail/mail/timeline"] = await call(
         "friedafetch_mail/mail/timeline", message_id="<4@example.com>"
     )

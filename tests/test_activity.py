@@ -468,3 +468,70 @@ async def test_steps_wait_for_their_line_and_merge_quiet_passes(hass: HomeAssist
     events = log.items[0]["events"]
     assert [(e["kind"], e.get("count")) for e in events] == [("ai_sent", None), ("checked", 2), ("checked", 1)]
     assert events[2]["rules"] == ["Bank"]
+
+
+async def test_actions_follow_the_options_and_the_guard(hass: HomeAssistant, hass_ws_client) -> None:
+    from custom_components.friedafetch.guard import PolicyError  # noqa: PLC0415
+
+    entry = await _setup(hass)
+    link = entry.runtime_data
+    link.activity.add_pass("push", dt_now_iso(), [_mail(1)])
+    ws = await hass_ws_client(hass)
+    msg_id = 0
+
+    async def act(action: str) -> dict[str, Any]:
+        nonlocal msg_id
+        msg_id += 1
+        await ws.send_json(
+            {
+                "id": msg_id,
+                "type": "friedafetch_mail/mail/act",
+                "entry_id": entry.entry_id,
+                "keys": ["<1@example.com>"],
+                "action": action,
+            }
+        )
+        return await ws.receive_json()
+
+    with (
+        patch(f"{MAIL}.async_special_mailbox", AsyncMock(side_effect=lambda s: {"trash": "Deleted Messages"}.get(s))),
+        patch(f"{MAIL}.async_set_flags", AsyncMock()) as flags,
+        patch(f"{MAIL}.async_delete", AsyncMock()) as delete,
+    ):
+        msg = await act("seen")
+        assert msg["success"] and msg["result"]["done"] == 1, msg
+        flags.assert_awaited_once_with("INBOX", [1], seen=True)
+        link.clients.options["allow_delete"] = False
+        msg = await act("trash")
+        assert not msg["success"] and "switched off" in msg["error"]["message"]
+        delete.assert_not_awaited()
+        link.clients.options["read_only"] = True
+        msg = await act("flag")
+        assert not msg["success"] and "read-only" in msg["error"]["message"]
+        link.clients.options["read_only"] = False
+        with patch.object(link.clients.guard, "check_quota", side_effect=PolicyError("Hourly limit reached")):
+            msg = await act("flag")
+        assert not msg["success"] and "Hourly limit" in msg["error"]["message"]
+        assert flags.await_count == 1
+
+
+async def test_the_text_of_a_mail_on_request(hass: HomeAssistant, hass_ws_client) -> None:
+    entry = await _setup(hass)
+    link = entry.runtime_data
+    link.activity.add_pass("push", dt_now_iso(), [_mail(1)])
+    ws = await hass_ws_client(hass)
+    message = {"body": "Hallo Welt", "body_truncated": False, "attachments": [{"filename": "a.pdf"}]}
+    with patch(f"{MAIL}.async_get_message", AsyncMock(return_value=message)) as get:
+        await ws.send_json(
+            {"id": 1, "type": "friedafetch_mail/mail/text", "entry_id": entry.entry_id, "message_id": "<1@example.com>"}
+        )
+        msg = await ws.receive_json()
+    assert msg["result"] == {
+        "found": True,
+        "mailbox": "INBOX",
+        "text": "Hallo Welt",
+        "truncated": False,
+        "attachments": ["a.pdf"],
+        "suspicious": False,
+    }
+    get.assert_awaited_once_with("INBOX", 1, max_chars=4000)

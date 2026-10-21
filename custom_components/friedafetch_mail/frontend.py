@@ -13,10 +13,19 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.util.hass_dict import HassKey
 
-from custom_components.friedafetch.const import CONF_ENABLE_MAIL, CONF_READ_ONLY, DEFAULT_ENABLE_MAIL, DEFAULT_READ_ONLY
+from custom_components.friedafetch.const import (
+    CONF_ALLOW_DELETE,
+    CONF_ENABLE_MAIL,
+    CONF_READ_ONLY,
+    DEFAULT_ALLOW_DELETE,
+    DEFAULT_ENABLE_MAIL,
+    DEFAULT_READ_ONLY,
+)
+from custom_components.friedafetch.guard import PolicyError
 from custom_components.friedafetch.mail import MailError
 from custom_components.friedafetch.schema import vol
 
+from .actions import ACTIONS, ActionError, async_act
 from .activity import summarize
 from .ai import AiSortError
 from .const import (
@@ -37,6 +46,7 @@ from .timeline import build_timeline
 _LOGGER = logging.getLogger(__name__)
 
 PANEL_URL_PATH = "frieda-postfach"
+TEXT_CHARS = 4000  # of a mail's text in the reading pane
 STATIC_URL = f"/{DOMAIN}_static"
 WEBCOMPONENT = "friedafetch-mail-panel"
 DATA_FRONTEND: HassKey[bool] = HassKey(f"{DOMAIN}_frontend")
@@ -78,6 +88,9 @@ async def async_setup_frontend(hass: HomeAssistant, version: str) -> None:
         ws_activity_select,
         ws_activity_clear,
         ws_mail_locate,
+        ws_mail_act,
+        ws_mail_text,
+        ws_ai_apply,
     ):
         websocket_api.async_register_command(hass, command)
     await panel_custom.async_register_panel(
@@ -118,7 +131,7 @@ def _ws_errors(func):
             await func(hass, connection, msg)
         except RuleNotFound as err:
             connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, str(err))
-        except (RuleError, AiSortError, MailError, ValueError) as err:
+        except (RuleError, AiSortError, MailError, ActionError, PolicyError, ValueError) as err:
             connection.send_error(msg["id"], "rule_error", str(err))
 
     wrapper.__name__ = func.__name__
@@ -164,6 +177,7 @@ async def ws_accounts(hass: HomeAssistant, connection: websocket_api.ActiveConne
                 "title": link.apple_id,
                 "mail_enabled": bool(core_opts.get(CONF_ENABLE_MAIL, DEFAULT_ENABLE_MAIL)),
                 "read_only": bool(core_opts.get(CONF_READ_ONLY, DEFAULT_READ_ONLY)),
+                "allow_delete": bool(core_opts.get(CONF_ALLOW_DELETE, DEFAULT_ALLOW_DELETE)),  # the trash action
                 "rules_auto": bool(opts.get(CONF_RULES_AUTO, DEFAULT_RULES_AUTO)),
                 "rules_interval": int(opts.get(CONF_RULES_INTERVAL, DEFAULT_RULES_INTERVAL)),
                 "rules_push": bool(opts.get(CONF_RULES_PUSH, DEFAULT_RULES_PUSH)),
@@ -364,6 +378,7 @@ async def ws_ai_categories(
         vol.Optional("entry_id"): str,
         vol.Required("rating_id"): str,
         vol.Required("category"): str,
+        vol.Optional("apply", default=False): bool,
     }
 )
 @websocket_api.require_admin
@@ -372,7 +387,30 @@ async def ws_ai_categories(
 async def ws_ai_correct(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
     """Correct a rating; the correction becomes an example for later ratings."""
     sorter = _sorter(hass, msg.get("entry_id"))
-    connection.send_result(msg["id"], {"rating": await sorter.async_correct(msg["rating_id"], msg["category"])})
+    link = _entry(hass, msg.get("entry_id")).runtime_data
+    if msg["apply"] and link.clients.options.get(CONF_READ_ONLY, DEFAULT_READ_ONLY):
+        raise ActionError("Frieda is in read-only mode (options of Frieda)")
+    rating = await sorter.async_correct(msg["rating_id"], msg["category"], apply=msg["apply"])
+    if msg["apply"] and link.state is not None:
+        link.state.request()  # follows the mail if the category moved it
+    connection.send_result(msg["id"], {"rating": rating})
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{DOMAIN}/ai/apply", vol.Optional("entry_id"): str, vol.Required("rating_id"): str}
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+@_ws_errors
+async def ws_ai_apply(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """Run the actions of a rating's (corrected) category where the mail is now – asked after a correction."""
+    link = _entry(hass, msg.get("entry_id")).runtime_data
+    if link.clients.options.get(CONF_READ_ONLY, DEFAULT_READ_ONLY):
+        raise ActionError("Frieda is in read-only mode (options of Frieda)")
+    rating = await _sorter(hass, msg.get("entry_id")).async_apply_category(msg["rating_id"])
+    if link.state is not None:
+        link.state.request()
+    connection.send_result(msg["id"], {"rating": rating})
 
 
 @websocket_api.websocket_command(
@@ -596,6 +634,72 @@ async def ws_mail_locate(hass: HomeAssistant, connection: websocket_api.ActiveCo
             line["key"], found["mailbox"], found["uid"], found["checked"]
         ):
             hass.async_create_background_task(link.state.async_sync(), "frieda_postfach_mail_state")
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/mail/act",
+        vol.Optional("entry_id"): str,
+        vol.Required("keys"): vol.All([str], vol.Length(min=1, max=100)),
+        vol.Required("action"): vol.In(ACTIONS),
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+@_ws_errors
+async def ws_mail_act(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """Read / unread / flag / unflag / archive / back to the inbox / trash for mails of the activity."""
+    link = _entry(hass, msg.get("entry_id")).runtime_data
+    options = link.clients.options
+    connection.send_result(
+        msg["id"],
+        await async_act(
+            link,
+            msg["keys"],
+            msg["action"],
+            read_only=bool(options.get(CONF_READ_ONLY, DEFAULT_READ_ONLY)),
+            allow_delete=bool(options.get(CONF_ALLOW_DELETE, DEFAULT_ALLOW_DELETE)),
+        ),
+    )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/mail/text",
+        vol.Optional("entry_id"): str,
+        vol.Required("message_id"): vol.All(str, vol.Length(min=3, max=300)),
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+@_ws_errors
+async def ws_mail_text(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """The text of a mail, on request in the reading pane: plain text, cleaned, read without marking it read."""
+    link = _entry(hass, msg.get("entry_id")).runtime_data
+    mail = link.mail or link.clients.mail
+    guard = link.clients.guard
+    line = link.activity.find({"message_id": msg["message_id"]}) if link.activity is not None else None
+    place = link.activity.where(line) if line is not None else None
+    if place is None:
+        found = await async_locate(mail, guard, msg["message_id"], [line.get("mailbox")] if line else [])
+        place = (found["mailbox"], found["uid"]) if found["found"] else None
+    if place is None:
+        connection.send_result(msg["id"], {"found": False})
+        return
+    if guard is not None:
+        guard.check_mailbox_visible(place[0])
+    message = await mail.async_get_message(place[0], int(place[1]), max_chars=TEXT_CHARS)
+    connection.send_result(
+        msg["id"],
+        {
+            "found": True,
+            "mailbox": place[0],
+            "text": message.get("body") or "",
+            "truncated": bool(message.get("body_truncated")),
+            "attachments": [str(a.get("filename") or a.get("name") or "") for a in message.get("attachments") or []],
+            "suspicious": bool(message.get("suspicious")),
+        },
+    )
 
 
 async def _target_folders(link: Any) -> list[str]:

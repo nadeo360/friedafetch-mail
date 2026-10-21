@@ -468,8 +468,12 @@ class AiSorter:
         await self._save()
         return clean
 
-    async def async_correct(self, rating_id: str, category: str) -> dict[str, Any]:
-        """Remember the right category for a rated mail; used as an example in later prompts."""
+    async def async_correct(self, rating_id: str, category: str, *, apply: bool = False) -> dict[str, Any]:
+        """Remember the right category for a rated mail; used as an example in later prompts.
+
+        apply: also run the actions of the new category (move, mark read, flag) where the mail is now – asked for in
+        the panel right after the correction. No notification: the mail is not new.
+        """
         await self.async_load()
         names = [c["name"] for c in self.categories] + [OTHER]
         if category not in names:
@@ -491,8 +495,36 @@ class AiSorter:
             }
         )
         self.examples = self.examples[-MAX_EXAMPLES:]
+        if apply:
+            await self._apply_correction(rating, category)
         await self._save()
         return rating
+
+    async def async_apply_category(self, rating_id: str) -> dict[str, Any]:
+        """Run the actions of the category a rating has now (after a correction, when the panel asks)."""
+        await self.async_load()
+        rating = next((r for r in self.ratings if r.get("id") == rating_id), None)
+        if rating is None:
+            raise AiSortError("Rating not found")
+        await self._apply_correction(rating, rating.get("corrected") or rating["category"])
+        await self._save()
+        return rating
+
+    async def _apply_correction(self, rating: dict[str, Any], category: str) -> None:
+        found = await self._locate({k: rating.get(k) for k in ("message_id", "mailbox", "uid", "applied")})
+        if found is None:
+            raise AiSortError("The mail was not found any more (moved or deleted)")
+        report = self._report("correct")
+        # importance 0: the actions of the category only, no flag or notification for an important new mail
+        done = {**rating, "category": category, "importance": 0, "time": _now_iso()}
+        async with self._lock:
+            await self._apply(found[1], done, report, mailbox=found[0])
+        if report["errors"]:
+            raise AiSortError(report["errors"][0])
+        if done.get("applied") == ["quota"]:
+            raise AiSortError("The hourly limit of mail changes is reached (options of Frieda)")
+        rating["applied"] = list(done.get("applied") or [])
+        rating["mailbox"], rating["uid"] = found
 
     async def async_clear_ratings(self) -> None:
         await self.async_load()

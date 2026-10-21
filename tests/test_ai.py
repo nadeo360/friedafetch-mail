@@ -664,3 +664,83 @@ async def test_unsure_ratings_have_their_own_view(hass: HomeAssistant) -> None:
     await sorter.async_correct(sorter.ratings[-1]["id"], sorter.categories[0]["name"])  # you decided: no longer unsure
     rows = link.activity.view(sorter.ratings, ai_active=True)
     assert summarize(rows, "unsure", "", 0, 50)["total"] == 0
+
+
+async def test_correction_can_run_the_new_categorys_actions(hass: HomeAssistant, hass_ws_client) -> None:
+    entry = await _setup(hass, ai_enabled=True, ai_entity=AI_ENTITY, ai_mode="observe")
+    sorter = entry.runtime_data.ai
+    with patch(f"{MAIL}.async_mailboxes", AsyncMock(return_value=[{"name": "Belege"}])):
+        await sorter.async_set_categories(
+            [{"name": "Bills", "description": "invoices", "move_to": "Belege", "mark_seen": True}, {"name": "Personal"}]
+        )
+    answer = SimpleNamespace(data={"category": "Personal", "importance": 5, "reason": "x"})
+    with (
+        patch(f"{MAIL}.async_search_uids", AsyncMock(side_effect=[[1], [1, 2]])),
+        patch(f"{MAIL}.async_summaries", AsyncMock(return_value=[_summary(2)])),
+        patch(GENERATE, AsyncMock(return_value=answer)),
+    ):
+        await sorter.async_process()
+        await sorter.async_process("push")
+    rating = sorter.ratings[-1]
+    ws = await hass_ws_client(hass)
+    with (
+        patch(f"{MAIL}.async_summaries", AsyncMock(return_value=[_summary(2)])),
+        patch(f"{MAIL}.async_set_flags", AsyncMock()) as flags,
+        patch(f"{MAIL}.async_move", AsyncMock()) as move,
+        patch("homeassistant.core.ServiceRegistry.async_call", AsyncMock()) as service,
+    ):
+        await ws.send_json(
+            {
+                "id": 1,
+                "type": "friedafetch_mail/ai/correct",
+                "entry_id": entry.entry_id,
+                "rating_id": rating["id"],
+                "category": "Bills",
+                "apply": True,
+            }
+        )
+        msg = await ws.receive_json()
+    assert msg["success"], msg
+    flags.assert_awaited_once_with("INBOX", [2], seen=True)
+    move.assert_awaited_once_with("INBOX", [2], "Belege")
+    service.assert_not_awaited()  # no notification: the mail is not new
+    assert rating["corrected"] == "Bills" and rating["applied"] == ["seen", "moved:Belege"]
+
+
+async def test_important_mail_notification_has_buttons_that_act(hass: HomeAssistant) -> None:
+    sent: list[dict[str, Any]] = []
+
+    async def mobile(call: Any) -> None:
+        sent.append(dict(call.data))
+
+    hass.services.async_register("notify", "mobile_app_annas_phone", mobile)
+    entry = await _setup(
+        hass,
+        ai_enabled=True,
+        ai_entity=AI_ENTITY,
+        ai_mode="act",
+        ai_notify_importance=4,
+        digest_notify="mobile_app_annas_phone",
+    )
+    link = entry.runtime_data
+    sorter = link.ai
+    answer = SimpleNamespace(data={"category": sorter.categories[0]["name"], "importance": 5, "reason": "urgent"})
+    with (
+        patch(f"{MAIL}.async_search_uids", AsyncMock(side_effect=[[1], [1, 2]])),
+        patch(f"{MAIL}.async_summaries", AsyncMock(return_value=[_summary(2)])),
+        patch(f"{MAIL}.async_set_flags", AsyncMock()),
+        patch(GENERATE, AsyncMock(return_value=answer)),
+    ):
+        await sorter.async_process()
+        report = await sorter.async_process("push")
+    await link.rules.async_record_ai("push", report)
+    buttons = sent[0]["data"]["actions"]
+    assert [b["title"] for b in buttons] == ["Read", "Archive"]
+
+    with (
+        patch(f"{MAIL}.async_special_mailbox", AsyncMock(return_value=None)),
+        patch(f"{MAIL}.async_set_flags", AsyncMock()) as flags,
+    ):
+        hass.bus.async_fire("mobile_app_notification_action", {"action": buttons[0]["action"]})
+        await hass.async_block_till_done()
+    flags.assert_awaited_once_with("INBOX", [2], seen=True)

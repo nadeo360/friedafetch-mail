@@ -8,7 +8,7 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse, callback
+from homeassistant.core import Event, HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse, callback
 from homeassistant.exceptions import ConfigEntryError, ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import issue_registry as ir
@@ -39,6 +39,7 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+NOTIFY_ACTION = "FRIEDA_POSTFACH_"  # prefix of the notification buttons: FRIEDA_POSTFACH_<seen|archive>_<rating id>
 STATE_INTERVAL = timedelta(minutes=10)  # read/flagged of the activity's inbox mails, besides pushes
 
 PLATFORMS = [Platform.SENSOR]
@@ -194,6 +195,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
             entry.async_create_background_task(hass, state.async_sync(), "frieda_postfach_mail_state")
 
     if state is not None:
+        state.on_request = _sync_state
         entry.async_on_unload(async_track_time_interval(hass, _sync_state, STATE_INTERVAL))
         entry.async_on_unload(async_call_later(hass, 20, _sync_state))
     clients.extensions[EXTENSION_NAME] = extension
@@ -203,7 +205,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
         message = f"{rating.get('from') or ''}: {rating.get('subject') or ''}\n{rating.get('reason') or ''}".strip()
         service = str(opts.get(CONF_DIGEST_NOTIFY) or "").removeprefix("notify.")
         if service and hass.services.has_service("notify", service):
-            await hass.services.async_call("notify", service, {"title": title, "message": message}, blocking=True)
+            data: dict[str, Any] = {"title": title, "message": message}
+            if service.startswith("mobile_app_") and rating.get("id") and rating.get("message_id"):
+                # buttons in the Companion app: the same actions as in the panel (mobile_app_notification_action)
+                de = (hass.config.language or "en").startswith("de")
+                data["data"] = {
+                    "tag": f"frieda_postfach_{rating['id']}",
+                    "actions": [
+                        {"action": f"{NOTIFY_ACTION}seen_{rating['id']}", "title": "Gelesen" if de else "Read"},
+                        {
+                            "action": f"{NOTIFY_ACTION}archive_{rating['id']}",
+                            "title": "Archivieren" if de else "Archive",
+                        },
+                    ],
+                }
+            await hass.services.async_call("notify", service, data, blocking=True)
         else:
             await hass.services.async_call(
                 "persistent_notification", "create", {"title": title, "message": message}, blocking=True
@@ -249,6 +265,31 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
             clients.extensions.pop(EXTENSION_NAME)
 
     entry.async_on_unload(_detach)
+
+    async def _notification_action(event: Event) -> None:
+        """A button of an important-mail notification was tapped in the Companion app."""
+        name = str(event.data.get("action") or "")
+        if not name.startswith(NOTIFY_ACTION):
+            return
+        verb, _, rating_id = name.removeprefix(NOTIFY_ACTION).partition("_")
+        rating = next((r for r in sorter.ratings if r.get("id") == rating_id), None)
+        line = activity.find({"message_id": rating.get("message_id")}) if rating else None
+        if line is None or verb not in ("seen", "archive"):
+            return
+        from .actions import async_act  # noqa: PLC0415
+
+        try:
+            await async_act(
+                link,
+                [line["key"]],
+                verb,
+                read_only=bool(core_opts.get(CONF_READ_ONLY, DEFAULT_READ_ONLY)),
+                allow_delete=False,
+            )
+        except Exception as err:  # noqa: BLE001 - a tap must not raise in the event bus
+            _LOGGER.warning("Action from the notification failed: %s", err)
+
+    entry.async_on_unload(hass.bus.async_listen("mobile_app_notification_action", _notification_action))
 
     mail_ok = core_opts.get(CONF_ENABLE_MAIL, DEFAULT_ENABLE_MAIL) and not core_opts.get(
         CONF_READ_ONLY, DEFAULT_READ_ONLY
