@@ -293,7 +293,10 @@ pytest && ruff check . && ruff format --check .
 ```
 
 `tests_imap/` runs Frieda's IMAP client and the read/flagged look against a real IMAP server: Dovecot as a process of
-your user (`brew install dovecot` or `apt install dovecot-imapd`; skipped without it, CI has its own job). The type
+your user (`brew install dovecot` or `apt install dovecot-imapd`; skipped without it, CI has its own job). Its random
+walks (`test_random.py`) let another mail program read, flag, move and delete at random while Frieda looks and acts,
+and compare every line of the activity with what the server really has; `RANDOM_WALKS=25 RANDOM_STEPS=120` makes them
+more and longer before a release that touches the look, and a failure names the seed that repeats it. The type
 check is `basedpyright` (requirements/types.txt); findings from before it came are in `.basedpyright/baseline.json`.
 
 ### Releases

@@ -18,26 +18,28 @@ from .activity import TRASH
 
 async def async_locate(mail: Any, guard: Any | None, message_id: str, hints: list[str] | None = None) -> dict[str, Any]:
     """{found, mailbox, uid, trash, checked}: the folder that holds the message, or found=False."""
-    boxes = await mail.async_mailboxes()
-    trash = next((b["name"] for b in boxes if b.get("special_use") == "trash"), None)
-    wanted = [trash if h == TRASH else h for h in hints or [] if h]
-    names = [b["name"] for b in boxes if b["name"] != trash]
-    order = list(dict.fromkeys([*wanted, "INBOX", *names, *([trash] if trash else [])]))
     quoted = '"' + str(message_id).replace("\\", "\\\\").replace('"', '\\"') + '"'
-    for name in order:
-        if name is None:
-            continue
-        if guard is not None:
+    searched: set[str] = set()
+    for fresh in (False, True):
+        # a folder created since Frieda last listed them (on the Mac, by a rule) is only in a fresh list
+        boxes = await mail.async_mailboxes(force=True) if fresh else await mail.async_mailboxes()
+        trash = next((b["name"] for b in boxes if b.get("special_use") == "trash"), None)
+        wanted = [trash if h == TRASH else h for h in hints or [] if h]
+        names = [b["name"] for b in boxes if b["name"] != trash]
+        order = [*wanted, "INBOX", *names, *([trash] if trash else [])]
+        for name in [n for n in dict.fromkeys(order) if n and n not in searched]:
+            searched.add(name)
+            if guard is not None:
+                try:
+                    guard.check_mailbox_visible(name)
+                except Exception:  # noqa: BLE001, S112 - a hidden folder is not searched
+                    continue
             try:
-                guard.check_mailbox_visible(name)
-            except Exception:  # noqa: BLE001, S112 - a hidden folder is not searched
+                uids = await mail.async_search_uids(name, ["HEADER", "Message-ID", quoted])
+            except (MailError, MailboxNotFound):
                 continue
-        try:
-            uids = await mail.async_search_uids(name, ["HEADER", "Message-ID", quoted])
-        except (MailError, MailboxNotFound):
-            continue
-        if uids:
-            return {"found": True, "mailbox": name, "uid": uids[-1], "trash": name == trash, "checked": _now()}
+            if uids:
+                return {"found": True, "mailbox": name, "uid": uids[-1], "trash": name == trash, "checked": _now()}
     return {"found": False, "mailbox": None, "uid": None, "trash": False, "checked": _now()}
 
 

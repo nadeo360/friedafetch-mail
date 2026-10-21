@@ -8,6 +8,7 @@ from __future__ import annotations
 import email.utils
 import imaplib
 import os
+import re
 import uuid
 from collections.abc import Generator
 from typing import Any
@@ -107,6 +108,52 @@ class Device:
         self._select(mailbox)
         self.imap.uid("STORE", str(uid), "+FLAGS", "(\\Deleted)")
         self.imap.expunge()
+
+    def copy(self, mailbox: str, uid: int, target: str) -> None:
+        self._select(mailbox)
+        typ, data = self.imap.uid("COPY", str(uid), f'"{target}"')
+        assert typ == "OK", data
+
+    def create(self, mailbox: str) -> None:
+        typ, data = self.imap.create(f'"{mailbox}"')
+        assert typ == "OK", data
+
+    def remove(self, mailbox: str) -> None:
+        self.imap.select("INBOX")  # a folder that is open cannot be deleted everywhere
+        typ, data = self.imap.delete(f'"{mailbox}"')
+        assert typ == "OK", data
+
+    def folders(self) -> list[str]:
+        """The folders as the server names them (modified UTF-7)."""
+        typ, data = self.imap.list()
+        assert typ == "OK", data
+        names = []
+        for line in data:
+            m = re.match(rb'\((?P<flags>[^)]*)\) (?:"[^"]*"|NIL) (?P<name>.+)$', line or b"")
+            if m and b"\\Noselect" not in m.group("flags"):
+                names.append(m.group("name").decode().strip('"'))
+        return names
+
+    def messages(self) -> dict[str, list[tuple[str, int, set[str]]]]:
+        """The truth: every Message-ID on the account with its places (folder, UID, flags), read with another client."""
+        out: dict[str, list[tuple[str, int, set[str]]]] = {}
+        for folder in self.folders():
+            typ, data = self.imap.select(f'"{folder}"', readonly=True)
+            assert typ == "OK", data
+            if int(data[0] or 0) == 0:
+                continue
+            typ, data = self.imap.uid("FETCH", "1:*", "(UID FLAGS BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])")
+            assert typ == "OK", data
+            for part in data:
+                if not isinstance(part, tuple):
+                    continue
+                head, body = part[0].decode(), part[1].decode()
+                uid = int(re.search(r"UID (\d+)", head).group(1))  # type: ignore[union-attr]
+                flags = set(re.search(r"FLAGS \(([^)]*)\)", head).group(1).split())  # type: ignore[union-attr]
+                mid = re.search(r"Message-ID:\s*(\S+)", body, re.IGNORECASE)
+                if mid:
+                    out.setdefault(mid.group(1), []).append((folder, uid, flags))
+        return out
 
     def close(self) -> None:
         try:

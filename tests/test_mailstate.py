@@ -46,7 +46,7 @@ class FakeImap:
         self.modseq[box] += 1
         self.put(target, new_uid, mid, flags)
 
-    async def async_mailboxes(self) -> list[dict[str, Any]]:
+    async def async_mailboxes(self, force: bool = False) -> list[dict[str, Any]]:
         return [{"name": n, "special_use": "trash" if n == "Deleted Messages" else None} for n in self.boxes]
 
     async def async_status(self, box: str) -> dict[str, int]:

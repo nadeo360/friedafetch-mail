@@ -221,6 +221,25 @@ async def test_locate_searches_the_hint_first_and_the_trash_last() -> None:
     assert res == {"found": False, "mailbox": None, "uid": None, "trash": False, "checked": res["checked"]}
 
 
+async def test_locate_finds_a_folder_created_meanwhile() -> None:
+    """Regression (random walk): moved into a folder created on the Mac after Frieda listed them – it was "gone"."""
+    known = [{"name": "INBOX", "special_use": None}]
+    mail = MagicMock()
+    mail.async_mailboxes = AsyncMock(
+        side_effect=lambda force=False: [*known, {"name": "Verträge", "special_use": None}] if force else known
+    )
+    searched: list[str] = []
+
+    async def search(box: str, criteria: list[str]) -> list[int]:
+        searched.append(box)
+        return [3] if box == "Verträge" else []
+
+    mail.async_search_uids = AsyncMock(side_effect=search)
+    res = await async_locate(mail, None, "<v@x>", ["INBOX"])
+    assert res["found"] and res["mailbox"] == "Verträge" and res["uid"] == 3
+    assert searched == ["INBOX", "Verträge"]  # each folder once
+
+
 async def test_locate_websocket(hass: HomeAssistant, hass_ws_client) -> None:
     entry = await _setup(hass)
     ws = await hass_ws_client(hass)
