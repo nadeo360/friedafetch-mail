@@ -1,8 +1,9 @@
 name: Panels in the browser
 
-# The browser tests live with Frieda's dev preview (tools/preview/tests in nadeo360/friedafetch); here they run with
-# this repository's panel next to Frieda's: both panels with example data, in Chromium and WebKit (the engine of Safari
-# and of the Home Assistant app on iPhone and iPad), on desktop and phone sizes.
+# This panel with the example data of the dev preview (tools/preview: its page, mock, scenarios and tests), in Chromium
+# and WebKit (the engine of Safari and of the Home Assistant app on iPhone and iPad), on desktop and phone sizes. The
+# harness (build, server, browsers) and the design library come from Frieda; only this repository's panel is tested,
+# so a change here is tested with its own mock and tests in the same commit.
 
 on:
   push:
@@ -52,9 +53,9 @@ jobs:
       - run: uv pip install --system --require-hashes -r frieda/requirements/ui.txt
       - run: python -m playwright install --with-deps ${{ matrix.browser }}
       - name: Browser tests
-        working-directory: frieda/tools/preview
+        working-directory: tools/preview
         env:
-          POSTFACH_DIR: ${{ github.workspace }}
+          FRIEDA_DIR: ${{ github.workspace }}/frieda
         run: python -m pytest -q -n auto --browser ${{ matrix.browser }} --tracing retain-on-failure --output "$RUNNER_TEMP/traces"
       - name: Traces of failed tests
         if: failure()

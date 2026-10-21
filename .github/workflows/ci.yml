@@ -23,8 +23,8 @@ jobs:
         with:
           python-version: "3.14"
       - run: pip install --require-hashes -r requirements/lint.txt
-      - run: ruff check custom_components tests tests_imap
-      - run: ruff format --check custom_components tests tests_imap
+      - run: ruff check custom_components tests tests_imap tools
+      - run: ruff format --check custom_components tests tests_imap tools
 
   tests:
     name: pytest against Home Assistant ${{ matrix.ha }} and Frieda
@@ -71,8 +71,6 @@ jobs:
     # or deleted by another device – what mocks cannot show (tests_imap; Dovecot runs as a user process)
     name: IMAP against Dovecot
     runs-on: ubuntu-latest
-    # until the job has run green on GitHub once (Dovecot 2.3 of Ubuntu; 2.4 is what runs locally)
-    continue-on-error: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
