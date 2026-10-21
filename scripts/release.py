@@ -205,7 +205,15 @@ def wait_for_ci(sha: str) -> None:
     while True:
         listed = json.loads(
             run(
-                gh(), "run", "list", "--commit", sha, "--json", "databaseId,workflowName,status,conclusion,event", "-L", "50"
+                gh(),
+                "run",
+                "list",
+                "--commit",
+                sha,
+                "--json",
+                "databaseId,workflowName,status,conclusion,event",
+                "-L",
+                "50",
             )
         )
         # GitHub's own Dependabot jobs (event "dynamic") look at the dependencies, not at this commit
