@@ -231,7 +231,7 @@ Neben dem Geburtstags-Sensor bekommt jedes Konto diese Sensoren (wenn Mail in Fr
 |---|---|
 | Ungelesen im Posteingang | ungelesene Mails im Posteingang (alle 5 Minuten und nach jedem Regellauf geprüft) |
 | Regeltreffer heute | Mails, auf die Regeln heute angewendet wurden; Attribute: Läufe heute, letzter und nächster Lauf |
-| Push | `listening`, `connecting`, `error`, `unsupported`, `stopped` oder `off` (Diagnose) |
+| Push | `listening`, `connecting`, `error`, `unsupported`, `stopped` oder `off` (Diagnose); die Attribute `state_*` zeigen den Blick auf gelesen/markiert (CONDSTORE, Modus, letzter Blick, Fehler) |
 | Wichtige Mails heute | nur mit KI-Sortierung: Mails ab der Benachrichtigungsschwelle (sonst ab 4), die letzten fünf als Attribute |
 | KI-Bewertungen diese Stunde | nur mit KI-Sortierung: Bewertungen in der laufenden Stunde, Limit und Modus als Attribute (Diagnose) |
 

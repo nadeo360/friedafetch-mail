@@ -174,3 +174,24 @@ async def test_a_push_during_a_look_gets_one_more_look(hass: HomeAssistant) -> N
     gate.set()
     await first
     assert calls == 2 and _states(log)[3]["seen"] is True
+
+
+@pytest.mark.real_mail_state
+async def test_a_failing_status_falls_back_to_the_full_look(hass: HomeAssistant) -> None:
+    """The counters cannot be read (a server refusing a form of SELECT): the flags are read all the same."""
+    from custom_components.friedafetch.mail import MailboxNotFound  # noqa: PLC0415
+
+    entry, log = await _activity(hass)
+    mail = MagicMock(condstore=True)
+    mail.async_status = AsyncMock(side_effect=MailboxNotFound("Mailbox 'INBOX' not found or cannot be opened"))
+    mail.async_flags = AsyncMock(return_value={1: [SEEN], 2: [], 3: [FLAGGED]})
+    state = MailState(mail, log)
+    entry.runtime_data.state = state
+    await state.async_sync()
+    assert state.error is None and state.status()["mode"] == "flags"
+    assert _states(log)[3] == {"seen": False, "flagged": True, "gone": False}
+    # the push sensor shows how the look goes (numbers and times only)
+    from custom_components.friedafetch_mail.sensor import PushSensor  # noqa: PLC0415
+
+    attrs = PushSensor(entry, entry.runtime_data).extra_state_attributes
+    assert attrs["state_mode"] == "flags" and attrs["state_tracked"] == 3 and attrs["state_error"] is None

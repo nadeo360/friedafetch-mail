@@ -219,7 +219,7 @@ Besides the birthday sensor, every account gets these sensors (when mail is enab
 |---|---|
 | Unread in inbox | unread messages in the inbox (checked every 5 minutes and after each rule run) |
 | Rule matches today | messages the rules acted on today; attributes: runs today, last and next run |
-| Push | `listening`, `connecting`, `error`, `unsupported`, `stopped` or `off` (diagnostic) |
+| Push | `listening`, `connecting`, `error`, `unsupported`, `stopped` or `off` (diagnostic); the attributes `state_*` show the read/flagged look (CONDSTORE, mode, last look, error) |
 | Important mails today | only with AI sorting: mails rated at or above the notification threshold (else 4), the latest five as attributes |
 | AI ratings this hour | only with AI sorting: ratings in the current hour, limit and mode as attributes (diagnostic) |
 

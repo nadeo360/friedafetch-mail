@@ -78,19 +78,25 @@ class MailState:
                     self._again = False
                     await self._sync(False)
                 self.error = None
-            except (MailError, MailboxNotFound) as err:
-                self.error = str(err) or err.__class__.__name__
-                _LOGGER.debug("Mail state sync failed: %s", err)
             except Exception as err:  # noqa: BLE001 - a background look must never break anything
-                self.error = str(err) or err.__class__.__name__
-                _LOGGER.warning("Mail state sync failed: %s", err)
+                error = str(err) or err.__class__.__name__
+                if error != self.error:  # once per kind of failure, so it shows in the log without flooding it
+                    _LOGGER.warning("Read/flagged look at the inbox failed: %s", error)
+                self.error = error
 
     async def _sync(self, full: bool) -> None:
         uids = self._activity.tracked_uids(MAILBOX, MAX_TRACKED)
         if not uids:
             return
         condstore = bool(self._mail.condstore)
-        status = await self._mail.async_status(MAILBOX) if condstore else {}
+        status: dict[str, int] = {}
+        if condstore:
+            try:
+                status = await self._mail.async_status(MAILBOX)
+            except (MailError, MailboxNotFound) as err:
+                # no counters this time: read all tracked flags instead of only the changes
+                _LOGGER.debug("Mail state: STATUS failed, full look instead: %s", err)
+                condstore = False
         modseq = status.get("highestmodseq")
         validity = status.get("uidvalidity")
         incremental = (

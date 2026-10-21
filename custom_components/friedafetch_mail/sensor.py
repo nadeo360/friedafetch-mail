@@ -193,10 +193,23 @@ class PushSensor(_StatusSensor):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         watcher = self._link.watcher
-        if watcher is None:
-            return {}
-        status = watcher.status()
-        return {k: status.get(k) for k in ("since", "last_push", "error")}
+        out: dict[str, Any] = {}
+        if watcher is not None:
+            status = watcher.status()
+            out = {k: status.get(k) for k in ("since", "last_push", "error")}
+        if self._link.state is not None:
+            # the read / flagged look (mailstate.py): numbers and times only
+            state = self._link.state.status()
+            out |= {
+                "state_condstore": state["condstore"],
+                "state_mode": state["mode"],
+                "state_last": state["last"],
+                "state_last_full": state["last_full"],
+                "state_tracked": state["tracked"],
+                "state_gone": state["gone"],
+                "state_error": state["error"],
+            }
+        return out
 
 
 class ImportantSensor(_StatusSensor):
