@@ -7,6 +7,10 @@ With CONDSTORE (RFC 7162) the server keeps a change counter per mailbox (HIGHEST
 whether anything changed at all, and if so the server names only the messages whose flags changed since the last
 look. Without CONDSTORE the flags of the tracked messages are read in one FETCH. Every hour (and after a renumbering
 of the mailbox) the full FETCH runs anyway: only it notices messages that left the inbox.
+
+A message counts as gone only when a second question (UID SEARCH) confirms that the inbox no longer has it – a FETCH
+answer that leaves messages out is not enough. Gone lines keep their last state (flags travel with a moved mail) and
+are asked about again in the next full looks, so a line that was wrongly taken for gone comes back by itself.
 """
 
 from __future__ import annotations
@@ -23,6 +27,7 @@ _LOGGER = logging.getLogger(__name__)
 
 MAILBOX = "INBOX"
 MAX_TRACKED = 500
+MAX_RECHECK = 100  # gone lines asked about again in a full look
 FULL_EVERY = 3600  # seconds
 
 
@@ -45,6 +50,8 @@ class MailState:
         self.last_full: str | None = None
         self.changed = 0  # lines whose state changed in the last look
         self.error: str | None = None
+        self.unconfirmed = 0  # messages a FETCH left out although the inbox still has them (kept, not gone)
+        self._again = False
 
     def status(self) -> dict[str, Any]:
         return {
@@ -54,16 +61,22 @@ class MailState:
             "last_full": self.last_full,
             "changed": self.changed,
             "tracked": len(self._activity.tracked_uids(MAILBOX, MAX_TRACKED)),
+            "gone": len(self._activity.tracked_uids(MAILBOX, MAX_TRACKED, gone=True)),
+            "unconfirmed": self.unconfirmed,
             "error": self.error,
         }
 
     async def async_sync(self, *, full: bool = False) -> None:
-        """One look at the inbox; a look already running covers this request."""
+        """One look at the inbox. A request while a look runs is not lost: one more look follows it."""
         if self._lock.locked():
+            self._again = True
             return
         async with self._lock:
             try:
                 await self._sync(full)
+                while self._again:  # a push came in meanwhile (another mail read on the iPhone)
+                    self._again = False
+                    await self._sync(False)
                 self.error = None
             except (MailError, MailboxNotFound) as err:
                 self.error = str(err) or err.__class__.__name__
@@ -97,11 +110,35 @@ class MailState:
                 wanted = set(uids)
                 flags = {uid: f for uid, f in changed.items() if uid in wanted}
         else:
-            flags = await self._mail.async_flags(MAILBOX, uids)
-            gone = set(uids) - set(flags)
+            recheck = self._activity.tracked_uids(MAILBOX, MAX_RECHECK, gone=True)
+            asked = list(dict.fromkeys([*uids, *recheck]))
+            flags = await self._mail.async_flags(MAILBOX, asked)
+            missing = set(uids) - set(flags)
+            if missing:
+                # confirmed by a second question: only what the inbox really lacks is gone
+                still = set(await self._mail.async_search_uids(MAILBOX, ["UID", ",".join(map(str, sorted(missing)))]))
+                gone = missing - still
+                self.unconfirmed = len(missing & still)
+                if self.unconfirmed:
+                    _LOGGER.warning(
+                        "Mail state: FETCH left out %s of %s messages that the inbox still has (kept)",
+                        self.unconfirmed,
+                        len(asked),
+                    )
+            else:
+                self.unconfirmed = 0
             self._full_at = time.monotonic()
             self.last_full = _now_iso()
         self._modseq, self._validity = modseq, validity
         self.mode = "condstore" if condstore else "flags"
         self.last = _now_iso()
         self.changed = self._activity.set_state(MAILBOX, flags, gone, self.last)
+        _LOGGER.debug(
+            "Mail state (%s, %s): %s tracked, %s answered, %s changed, %s gone",
+            self.mode,
+            "changes" if incremental else "full",
+            len(uids),
+            len(flags),
+            self.changed,
+            len(gone),
+        )

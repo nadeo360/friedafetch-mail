@@ -1769,8 +1769,9 @@ class FriedaPostfachPanel extends HTMLElement {
       const picked = a.sel.has(item.key);
       const name = item.name || item.from || "–";
       const when = fmtClock(item.time);
-      // read / flagged as the mailbox has it now (kept current in the background; CONDSTORE where the server has it)
-      const st = item.state && !item.state.gone ? item.state : null;
+      // read / flagged as the mailbox has it now (kept current in the background; CONDSTORE where the server has it);
+      // a mail that left the inbox keeps its last state – flags travel with a moved mail
+      const st = item.state && item.state.seen != null ? item.state : null;
       const unread = st?.seen === false;
       const flag = st?.flagged ? `<span class="fl" aria-hidden="true">${ico("flag")}</span>` : "";
       const aria = `${name}, ${item.subject || "–"}, ${this._dayLabel(item.day)} ${when}${unread ? `, ${t.stUnread}` : ""}${st?.flagged ? `, ${t.stFlagged}` : ""}`;
@@ -1903,11 +1904,11 @@ class FriedaPostfachPanel extends HTMLElement {
       <div class="rfoot">${esc(mid ? t.tlFoot : t.tlFootOld)}</div>`;
   }
 
-  // Read / flagged as the mailbox has it now (not shown once the mail has left the inbox: the location says where)
+  // Read / flagged as the mailbox has it now (for a mail that left the inbox: as last seen there)
   _stateChips(item) {
     const t = this.t;
     const st = item?.state;
-    if (!st || st.gone || st.seen == null) return "";
+    if (!st || st.seen == null) return "";
     return `<span class="mv">${ico(st.seen ? "email-open-outline" : "email-outline")}${esc(st.seen ? t.stRead : t.stUnread)}</span>${st.flagged ? `<span class="mv fl">${ico("flag")}${esc(t.stFlagged)}</span>` : ""}`;
   }
 

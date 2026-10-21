@@ -126,8 +126,11 @@ class ActivityLog:
                 return item
         return None
 
-    def tracked_uids(self, mailbox: str, limit: int) -> list[int]:
-        """UIDs of the newest lines that are in this mailbox as far as Frieda knows (for mailstate.py)."""
+    def tracked_uids(self, mailbox: str, limit: int, *, gone: bool = False) -> list[int]:
+        """UIDs of the newest lines in this mailbox as far as Frieda knows (for mailstate.py).
+
+        gone: instead the lines the last looks found missing (asked about again, in case that was wrong).
+        """
         uids: list[int] = []
         newest = sorted(self._items, key=lambda i: (_ts(i.get("time")), i.get("uid") or 0), reverse=True)
         for item in newest:
@@ -138,7 +141,7 @@ class ActivityLog:
                 item.get("uid") is not None
                 and (item.get("mailbox") or "INBOX") == mailbox
                 and folder_of(item) == (_folder_name(mailbox) or "INBOX")
-                and not state.get("gone")
+                and bool(state.get("gone")) == gone
             ):
                 uids.append(int(item["uid"]))
         return uids

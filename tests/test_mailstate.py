@@ -51,9 +51,11 @@ async def test_without_condstore_one_fetch_of_the_tracked_mails(hass: HomeAssist
     assert log.tracked_uids("INBOX", 10) == [3, 2, 1]  # 4 was moved to Archive by a rule
     mail = MagicMock(condstore=False)
     mail.async_flags = AsyncMock(return_value={1: [SEEN], 2: [SEEN, FLAGGED]})  # 3 left the inbox
+    mail.async_search_uids = AsyncMock(return_value=[])  # confirmed: the inbox has no 3
     state = MailState(mail, log)
     await state.async_sync()
     mail.async_flags.assert_awaited_once_with("INBOX", [3, 2, 1])
+    mail.async_search_uids.assert_awaited_once_with("INBOX", ["UID", "3"])
     assert _states(log) == {
         1: {"seen": True, "flagged": False, "gone": False},
         2: {"seen": True, "flagged": True, "gone": False},
@@ -70,6 +72,7 @@ async def test_without_condstore_one_fetch_of_the_tracked_mails(hass: HomeAssist
 async def test_with_condstore_only_the_changes(hass: HomeAssistant) -> None:
     entry, log = await _activity(hass)
     mail = MagicMock(condstore=True)
+    mail.async_search_uids = AsyncMock(return_value=[])
     mail.async_status = AsyncMock(return_value={"uidvalidity": 7, "highestmodseq": 100})
     mail.async_flags = AsyncMock(return_value={1: [], 2: [], 3: []})
     state = MailState(mail, log)
@@ -97,7 +100,7 @@ async def test_with_condstore_only_the_changes(hass: HomeAssistant) -> None:
     mail.async_status.return_value = {"uidvalidity": 8, "highestmodseq": 2}
     with patch.object(mailstate, "FULL_EVERY", -1):
         await state.async_sync()
-    assert mail.async_flags.await_args.args == ("INBOX", [2, 1])
+    assert mail.async_flags.await_args.args == ("INBOX", [2, 1, 3])  # 3 is asked about again
 
 
 @pytest.mark.real_mail_state
@@ -111,5 +114,63 @@ async def test_errors_are_kept_not_raised(hass: HomeAssistant) -> None:
     await state.async_sync()
     assert state.error == "IMAP operation failed: timeout"
     mail.async_flags = AsyncMock(return_value={})
+    mail.async_search_uids = AsyncMock(return_value=[])
     await state.async_sync()
     assert state.error is None
+
+
+@pytest.mark.real_mail_state
+async def test_a_mail_left_out_by_fetch_is_not_gone(hass: HomeAssistant) -> None:
+    """A FETCH answer that leaves mails out does not remove their state; only the inbox lacking them does."""
+    entry, log = await _activity(hass)
+    mail = MagicMock(condstore=False)
+    mail.async_flags = AsyncMock(return_value={1: [SEEN], 2: [SEEN], 3: [FLAGGED]})
+    mail.async_search_uids = AsyncMock(return_value=[1, 2, 3])
+    state = MailState(mail, log)
+    await state.async_sync()
+    mail.async_flags.return_value = {}  # an incomplete answer
+    await state.async_sync()
+    assert state.unconfirmed == 3 and all(s and not s["gone"] for u, s in _states(log).items() if u != 4)
+    assert _states(log)[3] == {"seen": False, "flagged": True, "gone": False}
+
+
+@pytest.mark.real_mail_state
+async def test_a_mail_wrongly_taken_for_gone_comes_back(hass: HomeAssistant) -> None:
+    entry, log = await _activity(hass)
+    mail = MagicMock(condstore=False)
+    mail.async_flags = AsyncMock(return_value={1: [SEEN], 2: [SEEN]})
+    mail.async_search_uids = AsyncMock(return_value=[])
+    state = MailState(mail, log)
+    await state.async_sync()
+    assert _states(log)[3]["gone"] is True
+    mail.async_flags.return_value = {1: [SEEN], 2: [SEEN], 3: [SEEN]}
+    await state.async_sync()
+    assert _states(log)[3] == {"seen": True, "flagged": False, "gone": False}
+    assert log.tracked_uids("INBOX", 10) == [3, 2, 1]
+
+
+@pytest.mark.real_mail_state
+async def test_a_push_during_a_look_gets_one_more_look(hass: HomeAssistant) -> None:
+    import asyncio  # noqa: PLC0415
+
+    entry, log = await _activity(hass)
+    gate = asyncio.Event()
+    calls = 0
+
+    async def flags(*args: Any, **kwargs: Any) -> dict[int, list[str]]:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            await gate.wait()
+        return {1: [], 2: [], 3: [SEEN] if calls > 1 else []}
+
+    mail = MagicMock(condstore=False)
+    mail.async_flags = flags
+    state = MailState(mail, log)
+    first = asyncio.create_task(state.async_sync())
+    await asyncio.sleep(0)
+    await state.async_sync()  # comes in while the first look waits for the server
+    await state.async_sync()  # two pushes: still one more look, not two
+    gate.set()
+    await first
+    assert calls == 2 and _states(log)[3]["seen"] is True
