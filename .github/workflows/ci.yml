@@ -23,8 +23,8 @@ jobs:
         with:
           python-version: "3.14"
       - run: pip install --require-hashes -r requirements/lint.txt
-      - run: ruff check custom_components tests
-      - run: ruff format --check custom_components tests
+      - run: ruff check custom_components tests tests_imap
+      - run: ruff format --check custom_components tests tests_imap
 
   tests:
     name: pytest against Home Assistant ${{ matrix.ha }} and Frieda
@@ -65,3 +65,35 @@ jobs:
         if: matrix.ha == 'minimum'
         run: python -c "import json, homeassistant.const as c; m = json.load(open('hacs.json'))['homeassistant']; assert c.__version__ == m, (c.__version__, m)"
       - run: pytest -q --timeout=120
+
+  imap:
+    # Frieda's IMAP client and the read/flagged look against a real server: CONDSTORE, QRESYNC, IDLE and mails moved
+    # or deleted by another device – what mocks cannot show (tests_imap; Dovecot runs as a user process)
+    name: IMAP against Dovecot
+    runs-on: ubuntu-latest
+    # until the job has run green on GitHub once (Dovecot 2.3 of Ubuntu; 2.4 is what runs locally)
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Check out Frieda
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: nadeo360/friedafetch
+          ref: ${{ env.FRIEDA_REF }}
+          path: frieda
+          persist-credentials: false
+      - run: ln -s "$GITHUB_WORKSPACE/frieda/custom_components/friedafetch" custom_components/friedafetch
+      - run: sudo apt-get install -y --no-install-recommends dovecot-imapd
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.14"
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: requirements/test.txt
+      - run: uv pip install --system --require-hashes -r requirements/test.txt
+      - run: pytest -q --timeout=120 tests_imap -rs
+        env:
+          IMAP_TESTS_REQUIRED: "1"

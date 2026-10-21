@@ -5,7 +5,7 @@ description = "Frieda Postfach – inbox rules, push delivery and daily overview
 requires-python = ">=3.13"
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "tests_imap"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 norecursedirs = [".venv", ".venv314", "custom_components/friedafetch"]
@@ -26,6 +26,7 @@ ignore = ["E501"]
 known-first-party = ["custom_components"]
 
 [tool.ruff.lint.per-file-ignores]
+"tests_imap/*" = ["S101", "S105", "S106", "S108", "S603"]  # the test server: asserts, its fixed password, its run directory
 "tests/*" = ["S101", "S105", "S106"]
 
 [tool.bandit]
