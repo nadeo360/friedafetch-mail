@@ -15,7 +15,9 @@ import re
 from datetime import date, datetime, timedelta
 from typing import Any
 
-PARSER = 2  # 2: DHL Express waybills, dates with month names and weekdays, shop hints in carrier mails
+# 2: DHL Express waybills, dates with month names and weekdays, shop hints in carrier mails
+# 3: parcels keep the mails they were read from (for "Where from?")
+PARSER = 3
 
 # carrier id: (name, sender domains, number patterns, tracking link with {n})
 CARRIERS: dict[str, tuple[str, tuple[str, ...], tuple[str, ...], str]] = {
