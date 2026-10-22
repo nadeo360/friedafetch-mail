@@ -744,3 +744,47 @@ async def test_important_mail_notification_has_buttons_that_act(hass: HomeAssist
         hass.bus.async_fire("mobile_app_notification_action", {"action": buttons[0]["action"]})
         await hass.async_block_till_done()
     flags.assert_awaited_once_with("INBOX", [2], seen=True)
+
+
+async def test_a_rated_mail_is_in_the_activity_at_once(hass: HomeAssistant) -> None:
+    """Regression: with a slow local model a pass takes minutes; its mails showed under AI sorting, not in the activity."""
+    entry = await _setup(hass, ai_enabled=True, ai_entity=AI_ENTITY)
+    link = entry.runtime_data
+    sorter = link.ai
+    sorter._last_uid["INBOX"] = 1  # noqa: SLF001
+    seen_during: list[list[str]] = []
+
+    async def slow_answer(hass: HomeAssistant, **kwargs: Any) -> Any:
+        seen_during.append([i["message_id"] for i in link.activity.items])
+        return SimpleNamespace(data={"category": sorter.categories[0]["name"], "importance": 3, "reason": "x"})
+
+    with (
+        patch(f"{MAIL}.async_new_uids", AsyncMock(return_value=[2, 3])),
+        patch(f"{MAIL}.async_summaries", AsyncMock(return_value=[_summary(2), _summary(3)])),
+        patch(GENERATE, side_effect=slow_answer),
+    ):
+        report = await sorter.async_process("push")
+    assert seen_during == [[], ["<2@example.com>"]]  # the first mail is listed while the AI rates the second
+    assert [i["ai"]["category"] for i in link.activity.items] == [sorter.categories[0]["name"]] * 2
+    await link.rules.async_record_ai("push", report)  # the pass itself: one step each, no second line
+    assert len(link.activity.items) == 2
+    assert [e["kind"] for e in link.activity.items[0]["events"]].count("checked") == 1
+
+
+async def test_an_ai_that_never_answers_stops_the_pass(hass: HomeAssistant) -> None:
+    entry = await _setup(hass, ai_enabled=True, ai_entity=AI_ENTITY)
+    sorter = entry.runtime_data.ai
+    sorter._last_uid["INBOX"] = 1  # noqa: SLF001
+
+    async def never(hass: HomeAssistant, **kwargs: Any) -> Any:
+        await asyncio.Event().wait()
+
+    with (
+        patch("custom_components.friedafetch_mail.ai.AI_TIMEOUT", 0.05),
+        patch(f"{MAIL}.async_new_uids", AsyncMock(return_value=[2])),
+        patch(f"{MAIL}.async_summaries", AsyncMock(return_value=[_summary(2)])),
+        patch(GENERATE, side_effect=never),
+    ):
+        report = await sorter.async_process()
+    assert report["rated"] == 0 and "No answer from the AI" in report["errors"][0]
+    assert sorter._last_uid["INBOX"] == 1  # noqa: SLF001 - tried again next time

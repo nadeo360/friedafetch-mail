@@ -141,7 +141,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
     from .insights import Insights  # noqa: PLC0415
     from .link import AccountLink, MailExtension  # noqa: PLC0415
     from .live import async_notify  # noqa: PLC0415
-    from .rules import RuleEngine  # noqa: PLC0415
+    from .rules import (
+        RuleEngine,  # noqa: PLC0415
+        handled_mails,  # noqa: PLC0415
+    )
 
     await _check_frieda_version(hass)
     core = _core_entry(hass, entry)
@@ -259,6 +262,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
     # the steps of each message came with 1.0.24: once, the older lines get theirs from what is still kept
     activity.fill_events(rules.history(limit=10_000), list(sorter.ratings), list(sorter.usage_log))
     sorter.activity = activity
+
+    def _rated_now(trigger: str, started: str, item: dict[str, Any]) -> None:
+        """A rated mail is in the activity at once; its pass (with the rules' part) is written when it is done."""
+        activity.add_pass(trigger, started, handled_mails([], None, {"items": [item]}), record=False)
+
+    sorter.on_item = _rated_now
 
     # For you: important senders, appointments from mails, waiting for a reply, rule suggestions, the week
     for_you = Insights(

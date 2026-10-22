@@ -268,7 +268,7 @@ class ActivityLog:
         self._changed()
 
     def add_pass(self, trigger: str, time: str, mails: list[dict[str, Any]], *, record: bool = True) -> None:
-        """Add the messages of one pass (entries of rules._handled_mails); known messages are updated.
+        """Add the messages of one pass (entries of rules.handled_mails); known messages are updated.
 
         record: the pass is a step of each message (not when the list is filled from ratings or held mails).
         """

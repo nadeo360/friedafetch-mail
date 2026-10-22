@@ -68,6 +68,7 @@ ASSIST_TURNS = 10  # messages of the category assistant's conversation that go a
 TRY_COUNT = 20  # recently rated mails in the assistant's test run
 CHECK_COUNT = 20  # corrected mails in the accuracy check
 WAIT_STEP = 15  # seconds between looks at the hourly limit while a re-rating waits for it
+AI_TIMEOUT = 300  # seconds for one answer: a local model may take a minute, one that hangs must not stop the pass
 CONFIDENCE = ("high", "medium", "low")
 USAGE_DAYS = 31
 AUDIT_TOOL = "friedafetch_mail_ai_sort"
@@ -115,6 +116,14 @@ async def _generate(hass: HomeAssistant, **kwargs: Any) -> Any:
     from homeassistant.components.ai_task import async_generate_data  # noqa: PLC0415
 
     return await async_generate_data(hass, **kwargs)
+
+
+async def _answer(hass: HomeAssistant, **kwargs: Any) -> Any:
+    """One AI answer within AI_TIMEOUT: an AI that never answers would hold every later pass."""
+    try:
+        return await asyncio.wait_for(_generate(hass, **kwargs), AI_TIMEOUT)
+    except TimeoutError as err:
+        raise HomeAssistantError(f"No answer from the AI within {AI_TIMEOUT} seconds") from err
 
 
 class AiSortError(ValueError):
@@ -244,6 +253,9 @@ class AiSorter:
         self.activity: Any | None = None  # ActivityLog: the steps of each message for its timeline
         self.is_vip: Any | None = None  # (sender address) -> bool: important senders count as important
         self.on_event: Any | None = None  # (rating, event) -> None: a date the AI read in a mail (insights.py)
+        # (trigger, started, item) -> None: a mail rated or held back, shown in the activity at once (a pass with a
+        # slow local model takes minutes; the pass itself is written when it is done)
+        self.on_item: Any | None = None
         self._loaded = False
         self.categories: list[dict[str, Any]] = []
         self.ratings: list[dict[str, Any]] = []
@@ -836,6 +848,7 @@ class AiSorter:
                         "held": sorted({str(r.get("type")) for r in held}),
                     }
                 )
+                self._show(report, report["items"][-1])
                 self.record_usage(
                     "sort",
                     entity=self.settings["entity"],
@@ -892,6 +905,7 @@ class AiSorter:
                     "applied": list(rating.get("applied") or []),
                 }
             )
+            self._show(report, report["items"][-1])
 
     # ------------------------------------------------- category assistant
     async def async_assist(
@@ -929,7 +943,7 @@ class AiSorter:
         }
         t0 = time.monotonic()
         try:
-            result = await _generate(
+            result = await _answer(
                 self._hass,
                 task_name="Frieda Postfach: describe a category",
                 entity_id=self.settings["entity"],
@@ -1281,7 +1295,7 @@ class AiSorter:
         }
         t0 = time.monotonic()
         try:
-            result = await _generate(
+            result = await _answer(
                 self._hass,
                 task_name="Frieda Postfach: sort e-mail",
                 entity_id=entity,
@@ -1420,6 +1434,13 @@ class AiSorter:
             },
         )
         return rating
+
+    def _show(self, report: dict[str, Any], item: dict[str, Any]) -> None:
+        if self.on_item is not None:
+            try:
+                self.on_item(report["trigger"], report["started"], item)
+            except Exception as err:  # noqa: BLE001 - the activity must never stop the rating
+                _LOGGER.debug("AI sorting: showing a mail in the activity failed: %s", err)
 
     def _step(self, mail: dict[str, Any], event: dict[str, Any]) -> None:
         if self.activity is not None:

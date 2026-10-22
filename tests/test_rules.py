@@ -491,14 +491,14 @@ async def test_new_scope_asks_only_for_new_uids_and_handles_renumbering(hass: Ho
 
 
 def test_handled_mails_are_merged_and_capped() -> None:
-    from custom_components.friedafetch_mail.rules import HISTORY_MAILS, _handled_mails
+    from custom_components.friedafetch_mail.rules import HISTORY_MAILS, handled_mails
 
     actions = [
         {"uid": 1, "mailbox": "INBOX", "rule": "A", "subject": "x" * 500, "from": ["a@b.c"], "delete": True},
         {"uid": 1, "mailbox": "INBOX", "rule": "B", "subject": "x" * 500, "from": ["a@b.c"], "delete": True},
         *[{"uid": n, "mailbox": "INBOX", "rule": "A", "subject": f"s{n}", "from": []} for n in range(2, 40)],
     ]
-    mails = _handled_mails(actions)
+    mails = handled_mails(actions)
     assert len(mails) == 39 and mails[0]["rules"] == ["A", "B"] and len(mails[0]["subject"]) == 200
     assert mails[1]["from"] == "" and HISTORY_MAILS < len(mails)
 

@@ -640,7 +640,7 @@ class RuleEngine:
         for act in report["actions"]:
             uids_per_rule.setdefault(act["rule"], set()).add((act.get("mailbox"), act["uid"]))
         per_rule = {name: len(uids) for name, uids in uids_per_rule.items()}
-        mails = _handled_mails(report["actions"], report.get("checked_mails"), ai)
+        mails = handled_mails(report["actions"], report.get("checked_mails"), ai)
         if self.activity is not None:
             self.activity.add_pass(report["trigger"], report["started"], mails)
         ai_part = (
@@ -949,7 +949,7 @@ class RuleEngine:
             report["errors"].append({"error": str(err)})
 
 
-def _handled_mails(
+def handled_mails(
     actions: list[dict[str, Any]],
     checked: list[dict[str, Any]] | None = None,
     ai: dict[str, Any] | None = None,
