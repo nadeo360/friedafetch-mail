@@ -27,8 +27,10 @@ Frieda Postfach ist der Teil, der **selbstständig handelt**:
 - **KI-Sortierung (optional, standardmäßig aus):** Eine KI deiner Wahl bewertet neue Mails – Kategorie, Wichtigkeit
   1–5 und eine kurze Begründung – und sortiert sie, wenn du es erlaubst, in Ordner. Siehe [KI-Sortierung](#ki-sortierung).
 - **Sensoren und Ereignisse** für Automationen: ungelesene Mails, Regeltreffer, Push-Status, wichtige Mails und KI-Nutzung; Ereignisse für jeden Regeltreffer und jede KI-Bewertung. Dazu ein Geburtstags-Sensor.
-- **KI-Tools** für die Regeln (`icloud_list_rules`, `icloud_create_rule`, …) und `icloud_daily_overview`; sie
-  erscheinen bei den Frieda-Tools des Kontos, also in jedem MCP-Client und Sprachassistenten, der Frieda nutzt.
+- **KI-Tools** für die Regeln (`icloud_list_rules`, `icloud_create_rule`, …), `icloud_daily_overview` und den Tab
+  *Für dich* (`icloud_mail_for_you`, `icloud_add_proposed_event`); sie erscheinen bei den Frieda-Tools des Kontos,
+  also in jedem MCP-Client und Sprachassistenten, der Frieda nutzt – frag Assist oder Claude „Was ist heute in meiner
+  Mail wichtig?“ oder „Wer schuldet mir noch eine Antwort?“.
 
 Durch die Trennung bleibt Frieda selbst ein reiner Connector: ohne Hintergrundverbindungen, ohne zeitgesteuerte
 Aufgaben und ohne Dateizugriffe – solange Frieda Postfach nicht installiert ist.
@@ -188,7 +190,15 @@ So funktioniert es:
 
 Im Panel korrigierst du eine Bewertung, indem du die richtige Kategorie wählst; bis zu 30 Korrekturen gehen als
 Beispiele an die KI. Ein Stundenlimit (Standard 30) begrenzt die KI-Aufrufe; jede Mail wird automatisch höchstens
-einmal bewertet.
+einmal bewertet. Eine KI-Antwort darf bis zu 5 Minuten dauern; eine Mail ohne Antwort wird im nächsten Durchgang
+bewertet.
+
+**Bekannte Absender ohne KI** (Option, standardmäßig an): Hat die KI die Mails eines Absenders dreimal in Folge gleich
+und jedes Mal sicher eingeordnet, sortiert Frieda seine nächsten Mails selbst – in dieselbe Kategorie mit derselben
+Wichtigkeit, ohne etwas zu senden und ohne das Stundenlimit zu belasten. Die Aktivität zeigt sie mit einem
+Personen-Symbol, der Verlauf sagt *Als bekannter Absender eingeordnet*, das KI-Protokoll zählt sie. Jedes zehnte Mal
+schaut die KI wieder hin; nach einer Korrektur, bei einem Betreff, der die Bewertung beeinflussen will, und bei *Neu
+bewerten* entscheidet immer die KI.
 
 **Korrigieren mit Aktion:** Verschiebt, markiert oder kennzeichnet die gewählte Kategorie Mails, fragt die Mail,
 ob das jetzt passieren soll; von selbst macht Frieda das nur bei neuen Mails.
@@ -200,7 +210,8 @@ einer wichtigen Mail *Gelesen* und *Archivieren*; ein Tippen erledigt das wie im
 oder alles, was eine Ansicht zeigt) oder öffnest eine einzelne Mail und wählst **Neu bewerten**. Die Mails gehen mit
 den aktuellen Kategorien erneut an die KI – Killswitch und Stundenlimit gelten wie immer –, und inzwischen verschobene
 Mails werden über ihre Message-ID im neuen Ordner gefunden. Auf Wunsch laufen danach die Aktionen der neuen
-Kategorie. Die Neubewertung läuft im Hintergrund mit Fortschritt und lässt sich abbrechen; ist das Stundenlimit
+Kategorie. Die Neubewertung läuft im Hintergrund mit Fortschritt und lässt sich sofort abbrechen – auch während die KI
+noch antwortet oder die Neubewertung darauf wartet, dass neue Mail einsortiert ist; ist das Stundenlimit
 aufgebraucht, wartet sie auf die nächste Stunde und macht dann von selbst weiter. Die frühere Bewertung bleibt im
 Verlauf der Mail sichtbar. Aktionen, die Mails verändert haben, stehen in Friedas Änderungsprotokoll.
 

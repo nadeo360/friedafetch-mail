@@ -470,3 +470,78 @@ async def test_options_for_you(hass: HomeAssistant) -> None:
     assert entry.options["vip_senders"] == "chef@firma.example" and entry.options["followup_days"] == 5
     assert entry.runtime_data.insights.opts["weekly_day"] == "sun"  # reloaded with the new options
     assert entry.runtime_data.ai.settings["events"] is False
+
+
+# ------------------------------------------------------------------ as tools for assistants
+async def test_for_you_as_tools(hass: HomeAssistant) -> None:
+    """Assist and Claude ask what is important; a proposal goes into the calendar when the user asks for it."""
+    from homeassistant.core import Context  # noqa: PLC0415
+    from homeassistant.helpers import llm  # noqa: PLC0415
+
+    from custom_components.friedafetch.const import LLM_API_ID  # noqa: PLC0415
+
+    core = await setup_core(hass)
+    entry = await setup_postfach(hass, core, rules_auto=False, vip_senders="oma@example.com", followup_days=0)
+    link = entry.runtime_data
+    insights = link.insights
+    link.activity.add_pass(
+        "push",
+        _now(0),
+        [
+            {**_line(1, "oma@example.com"), "name": "Oma"},
+            {**_line(2, "news@shop.example"), "ai": {"category": "Werbung", "importance": 1}},
+        ],
+    )
+    for item in link.activity.items:
+        item.pop("_days", None)
+        item["state"] = {"seen": False, "flagged": False, "gone": False, "mailbox": "INBOX", "uid": item["uid"]}
+    day = (dt_util.now().date() + timedelta(days=3)).isoformat()
+    proposal = insights.add_proposal(
+        {"id": "r1", "message_id": "<1@example.com>", "subject": "Sonntag?", "from": "Oma"},
+        {"kind": "appointment", "title": "Kaffee bei Oma", "start": f"{day}T15:00"},
+    )
+    ctx = llm.LLMContext(platform="test", context=Context(), language="de", assistant=None, device_id=None)
+    api = await llm.async_get_api(hass, LLM_API_ID, ctx)
+    assert {"icloud_mail_for_you", "icloud_add_proposed_event"} <= {t.name for t in api.tools}
+
+    result = await api.async_call_tool(llm.ToolInput(tool_name="icloud_mail_for_you", tool_args={}))
+    data = result.data if hasattr(result, "data") else result
+    assert [m["from"] for m in data["important_unread"]] == ["Oma"]  # the newsletter is not important
+    assert data["important_unread"][0]["important_sender"] is True
+    assert data["calendar_proposals"][0]["id"] == proposal["id"] and data["content_notice"]
+
+    calendar = SimpleNamespace(id="home", name="Zuhause", color=None, supports_events=True)
+    with (
+        patch(
+            "custom_components.friedafetch.caldav_client.ICloudCalDav.async_calendars",
+            AsyncMock(return_value=[calendar]),
+        ),
+        patch(
+            "custom_components.friedafetch.caldav_client.ICloudCalDav.async_create_event",
+            AsyncMock(return_value={"uid": "EV1"}),
+        ) as create,
+    ):
+        result = await api.async_call_tool(
+            llm.ToolInput(
+                tool_name="icloud_add_proposed_event",
+                tool_args={"proposal_id": proposal["id"], "calendar": "Zuhause", "title": "Kaffee"},
+            )
+        )
+    data = result.data if hasattr(result, "data") else result
+    assert data["status"] == "added" and data["calendar"] == "Zuhause" and data["title"] == "Kaffee"
+    assert create.await_args.args[1] == "Kaffee"
+    logged = [e.get("tool") for e in core.runtime_data.audit.entries()]
+    assert logged.count("icloud_add_proposed_event") == 1 and "icloud_create_event" not in logged  # one entry
+
+
+async def test_the_calendar_tool_is_not_offered_read_only(hass: HomeAssistant) -> None:
+    from homeassistant.core import Context  # noqa: PLC0415
+    from homeassistant.helpers import llm  # noqa: PLC0415
+
+    from custom_components.friedafetch.const import LLM_API_ID  # noqa: PLC0415
+
+    core = await setup_core(hass, read_only=True)
+    await setup_postfach(hass, core, rules_auto=False)
+    ctx = llm.LLMContext(platform="test", context=Context(), language="de", assistant=None, device_id=None)
+    names = {t.name for t in (await llm.async_get_api(hass, LLM_API_ID, ctx)).tools}
+    assert "icloud_mail_for_you" in names and "icloud_add_proposed_event" not in names

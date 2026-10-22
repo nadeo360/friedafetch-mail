@@ -27,8 +27,10 @@ Frieda Postfach is the part that **acts on its own**:
 - **AI sorting (optional, off by default):** an AI of your choice rates new mail – category, importance 1–5 and a
   short reason – and, if you allow it, sorts it into folders. See [AI sorting](#ai-sorting).
 - **Sensors and events** for automations: unread mail, rule matches, push state, important mails and AI usage; events for every rule match and AI rating. Plus a birthday sensor.
-- **AI tools** for the rules (`icloud_list_rules`, `icloud_create_rule`, … ) and `icloud_daily_overview`; they are
-  added to Frieda's tools for the account, so every MCP client and conversation agent that uses Frieda gets them.
+- **AI tools** for the rules (`icloud_list_rules`, `icloud_create_rule`, … ), `icloud_daily_overview` and the tab
+  *For you* (`icloud_mail_for_you`, `icloud_add_proposed_event`); they are added to Frieda's tools for the account, so
+  every MCP client and conversation agent that uses Frieda gets them – ask Assist or Claude “what is important in my
+  mail today?” or “who still owes me an answer?”.
 
 Keeping this separate means Frieda itself stays a pure connector: no background connections, no scheduled jobs and
 no file writes unless you install Frieda Postfach.
@@ -178,7 +180,13 @@ How it works:
 
 In the panel you correct a rating by choosing the right category; up to 30 corrections are passed to the AI as
 examples. An hourly limit (default 30) caps the number of AI calls; every mail is rated at most once
-automatically.
+automatically. One AI answer may take up to 5 minutes; a mail without an answer is rated in the next pass.
+
+**Known senders without the AI** (option, on by default): when the AI sorted a sender's mail the same way three times
+in a row and was sure each time, Frieda sorts that sender's next mails itself – into the same category with the
+same importance, without sending anything and without using the hourly limit. The activity marks them with a person
+icon, the timeline says *Sorted as a known sender*, the AI log counts them. Every tenth time the AI looks again; a
+correction, a subject that tries to steer the rating, or *Rate again* always go to the AI.
 
 **Correct with action:** if the category you choose moves, marks or flags mails, the mail asks whether to do that
 now; Frieda otherwise only does it for new mail.
@@ -190,7 +198,8 @@ carries *Read* and *Archive*; a tap does that like the panel would.
 everything a view shows) or open one mail, and choose **Rate again**. The messages go to the AI once more with the
 current categories – the kill switch and the hourly limit apply as always – and messages that were moved since are
 found in their new folder by their Message-ID. On request the actions of the new category run afterwards. The
-re-rating runs in the background with progress and can be cancelled; when the hourly limit is used up it waits for the
+re-rating runs in the background with progress and can be cancelled at once – also while the AI is still answering or
+the batch waits for new mail to be sorted; when the hourly limit is used up it waits for the
 next hour and goes on by itself. The earlier rating stays visible in the message timeline. Actions that changed mail
 are written to Frieda's change log.
 

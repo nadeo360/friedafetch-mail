@@ -43,6 +43,7 @@ CONF_AI_LIMIT = "ai_hourly_limit"  # ratings per hour
 CONF_AI_EXCLUDE = "ai_exclude"  # senders/domains that are never sent to the AI
 CONF_AI_BLOCK_TERMS = "ai_block_terms"  # kill switch: mails containing one of these terms never go to an AI
 CONF_AI_NOTIFY = "ai_notify_importance"  # 0 = off, else notify from this importance on (act mode)
+CONF_AI_KNOWN = "ai_known_senders"  # senders the AI rated the same way several times are sorted without it
 
 DEFAULT_AI_ENABLED = False
 DEFAULT_AI_BODY = False
@@ -50,6 +51,7 @@ DEFAULT_AI_MODE = "observe"
 DEFAULT_AI_LIMIT = 30
 MAX_AI_LIMIT = 200
 DEFAULT_AI_NOTIFY = 0
+DEFAULT_AI_KNOWN = True
 AI_MODES = ("observe", "act")
 AI_BODY_CHARS = 1000
 

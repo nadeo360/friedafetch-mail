@@ -411,6 +411,7 @@ class Insights:
         read_only: bool,
         calendar_on: bool,
         client: str = "Frieda Postfach (panel)",
+        audit: bool = True,
     ) -> dict[str, Any]:
         """Put a proposal into the calendar (the user clicked): the calendar of the options or the one chosen."""
         from .actions import ActionError  # noqa: PLC0415
@@ -444,12 +445,22 @@ class Insights:
         created = await self._clients.caldav.async_create_event(
             cal["id"], name, begin, finish, description=note, location=proposal.get("location")
         )
-        proposal.update(status="added", calendar=cal["name"], added=_now_iso(), event_uid=created.get("uid"))
+        proposal.update(
+            status="added",
+            calendar=cal["name"],
+            added=_now_iso(),
+            event_uid=created.get("uid"),
+            # as entered: the proposal shows what is in the calendar now
+            title=name,
+            start=begin.isoformat(),
+            end=finish.isoformat() if finish is not None else None,
+            all_day=not isinstance(begin, datetime),
+        )
         self._step(proposal, "event_added", calendar=cal["name"], title=name, start=begin.isoformat())
-        audit = getattr(self._clients, "audit", None)
-        if audit is not None:
+        log = getattr(self._clients, "audit", None) if audit else None
+        if log is not None:
             try:
-                await audit.async_record(
+                await log.async_record(
                     tool="icloud_create_event",
                     action="write",
                     params={"calendar": cal["name"], "summary": name},
@@ -812,6 +823,37 @@ class Insights:
         self.weekly_sent = key
         await self._save()
         return True
+
+    def important_unread(self, limit: int = 15) -> list[dict[str, Any]]:
+        """Today's mail that is important (AI rating or an important sender) and still unread, newest first."""
+        today = dt_util.now().date()
+        threshold = self.sorter.important_from if self.sorter is not None else 4
+        out = []
+        for item in sorted(self._activity.items, key=lambda i: _ts(i.get("time")), reverse=True):
+            when = dt_util.parse_datetime(str(item.get("time") or ""))
+            if when is None or dt_util.as_local(when).date() != today:
+                continue
+            state = item.get("state") or {}
+            if state.get("seen") is not False or state.get("mailbox") is None:
+                continue  # read, or not in a folder any more
+            ai = item.get("ai") or {}
+            vip = bool(item.get("vip")) or self.vip_now(item.get("from"))
+            if not vip and int(ai.get("importance") or 0) < threshold:
+                continue
+            out.append(
+                {
+                    "from": item.get("name") or item.get("from") or "",
+                    "subject": item.get("subject") or "",
+                    "time": item.get("time"),
+                    "folder": state.get("mailbox"),
+                    "category": ai.get("category"),
+                    "importance": ai.get("importance"),
+                    "important_sender": vip,
+                }
+            )
+            if len(out) >= limit:
+                break
+        return out
 
     # ------------------------------------------------------------- overview
     async def async_get(self) -> dict[str, Any]:

@@ -282,7 +282,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
     )
     await for_you.async_load()
     for_you.sorter, for_you.rules = sorter, rules
-    link.insights = for_you
+    link.insights = extension.insights = for_you
     sorter.is_vip = for_you.vip_now
     sorter.on_event = for_you.add_proposal
 

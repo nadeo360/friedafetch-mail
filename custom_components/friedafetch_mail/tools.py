@@ -251,4 +251,116 @@ class DailyOverview(ICloudTool):
         return data
 
 
-TOOL_CLASSES: list[type[ICloudTool]] = [ListRules, CreateRule, UpdateRule, DeleteRule, RunRules, DailyOverview]
+class ForYouTool(ICloudTool):
+    """Base for the tools of "For you": they read what Frieda Postfach worked out locally."""
+
+    @property
+    def insights(self) -> Any:
+        ext = self.clients.extensions.get(EXTENSION_NAME)
+        insights = getattr(ext, "insights", None)
+        if insights is None:
+            raise ValueError("This is not available (Frieda Postfach is not set up for this account)")
+        return insights
+
+
+class MailForYou(ForYouTool):
+    name = "icloud_mail_for_you"
+    feature = "mail"
+    description = (
+        "What needs the user's attention in their mail, worked out locally by Frieda Postfach: important mail of "
+        "today that is still unread (rated important by the AI sorting, or from an important sender), mail the user "
+        "sent that is still waiting for a reply, appointments and deadlines found in mails (calendar proposals, with "
+        "ids for icloud_add_proposed_event), rule suggestions, newsletters never opened, and this week's numbers. "
+        "Use it for questions like 'what is important in my mail today?' or 'who still owes me an answer?'."
+    )
+    parameters = vol.Schema(
+        {vol.Optional("refresh", description="Look at the mailbox again first (slower; normally every 3 hours)"): bool}
+    )
+
+    async def run(self, hass, args):
+        insights = self.insights
+        if args.get("refresh"):
+            await insights.async_vips(force=True)
+            await insights.async_followups(force=True)
+            await insights.async_subscriptions(force=True)
+        data = await insights.async_get()
+        return {
+            "important_unread": insights.important_unread(),
+            "waiting_for_reply": [
+                {
+                    "subject": f["subject"],
+                    "to": [p.get("name") or p["email"] for p in f["to"]] + ([f"+{f['more']}"] if f.get("more") else []),
+                    "sent": f["sent"],
+                    "days": f["days"],
+                }
+                for f in data["followups"]
+            ],
+            "calendar_proposals": [
+                {k: p.get(k) for k in ("id", "kind", "title", "start", "end", "all_day", "location", "from", "subject")}
+                for p in data["proposals"]
+            ],
+            "rule_suggestions": [
+                {k: g[k] for k in ("sender", "folder", "count", "total")} for g in data["suggestions"]
+            ],
+            "never_opened_newsletters": [
+                {"sender": n["sender"], "name": n.get("name") or "", "count": n["count"]}
+                for n in data["subscriptions"]
+                if n.get("never_opened") and not n.get("unsubscribed")
+            ],
+            "week": data["week"],
+            "checked": data.get("followups_checked"),
+            "content_notice": UNTRUSTED_NOTICE,
+        }
+
+
+class AddProposedEvent(ForYouTool):
+    name = "icloud_add_proposed_event"
+    feature = "calendar"
+    writes = True
+    description = (
+        "Put a calendar proposal of icloud_mail_for_you into the calendar – only when the user asked for it. Title "
+        "and times may be changed (YYYY-MM-DD for a whole day, YYYY-MM-DDTHH:MM in local time); the calendar by id or "
+        "name, otherwise the one of the options. Calendars that Frieda protects are never used."
+    )
+    parameters = vol.Schema(
+        {
+            vol.Required("proposal_id", description="id from icloud_mail_for_you (calendar_proposals)"): str,
+            vol.Optional("calendar", description="Calendar id or name"): str,
+            vol.Optional("title"): str,
+            vol.Optional("start"): str,
+            vol.Optional("end"): str,
+        }
+    )
+
+    async def run(self, hass, args):
+        from custom_components.friedafetch.const import (  # noqa: PLC0415
+            CONF_ENABLE_CALENDAR,
+            CONF_READ_ONLY,
+            DEFAULT_ENABLE_CALENDAR,
+            DEFAULT_READ_ONLY,
+        )
+
+        opts = self.clients.options
+        proposal = await self.insights.async_add_event(
+            str(args["proposal_id"]),
+            calendar_id=args.get("calendar"),
+            title=args.get("title"),
+            start=args.get("start"),
+            end=args.get("end"),
+            read_only=bool(opts.get(CONF_READ_ONLY, DEFAULT_READ_ONLY)),
+            calendar_on=bool(opts.get(CONF_ENABLE_CALENDAR, DEFAULT_ENABLE_CALENDAR)),
+            audit=False,  # this tool's call is in the change log already
+        )
+        return {k: proposal.get(k) for k in ("id", "title", "start", "end", "all_day", "calendar", "status")}
+
+
+TOOL_CLASSES: list[type[ICloudTool]] = [
+    ListRules,
+    CreateRule,
+    UpdateRule,
+    DeleteRule,
+    RunRules,
+    DailyOverview,
+    MailForYou,
+    AddProposedEvent,
+]

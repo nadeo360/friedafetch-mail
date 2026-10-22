@@ -56,14 +56,16 @@
           "ai_hourly_limit": "Ratings per hour (max.)",
           "ai_notify_importance": "Notify about important mail",
           "ai_exclude": "Kill switch: senders/domains",
-          "ai_block_terms": "Kill switch: terms"
+          "ai_block_terms": "Kill switch: terms",
+          "ai_known_senders": "Sort known senders without the AI"
         },
         "data_description": {
           "ai_entity": "An AI Task entity, e.g. from Google Generative AI, OpenAI or a local Ollama model.",
           "ai_exclude": "Never sent to an AI, one per line. For example your bank, doctor or employer: bank.example, doctor@example.com",
           "ai_block_terms": "Mail containing these terms is never sent to an AI, one per line. Checked locally in subject, sender and text before anything is sent, also for the AI daily overview. Example: diagnosis, salary, password",
           "ai_include_body": "The first 1,000 characters of the text.",
-          "ai_notify_importance": "Only in act mode."
+          "ai_notify_importance": "Only in act mode.",
+          "ai_known_senders": "When the AI sorted a sender's mail the same way three times in a row and was sure, Frieda sorts that sender's next mail itself – nothing is sent, the hourly limit is not used. Every tenth time the AI looks again; a correction makes the AI look again at once."
         }
       },
       "foryou": {

@@ -343,7 +343,9 @@ class ActivityLog:
             if mail.get("delete"):
                 item["delete"] = True
             if mail.get("ai"):
-                item["ai"] = {k: mail["ai"].get(k) for k in ("category", "importance", "confidence", "applied", "held")}
+                item["ai"] = {
+                    k: mail["ai"].get(k) for k in ("category", "importance", "confidence", "applied", "held", "local")
+                }
         self._prune()
         self._changed()
 
@@ -470,6 +472,7 @@ class ActivityLog:
                     importance=rating.get("importance"),
                     confidence=rating.get("confidence"),
                     applied=list(rating.get("applied") or []),
+                    local=bool(rating.get("local")),
                 )
                 row["rating_id"] = rating.get("id")
                 row["corrected"] = bool(rating.get("corrected"))

@@ -56,14 +56,16 @@
           "ai_hourly_limit": "Bewertungen pro Stunde (max.)",
           "ai_notify_importance": "Wichtige Mails melden",
           "ai_exclude": "Killswitch: Absender/Domains",
-          "ai_block_terms": "Killswitch: Begriffe"
+          "ai_block_terms": "Killswitch: Begriffe",
+          "ai_known_senders": "Bekannte Absender ohne KI sortieren"
         },
         "data_description": {
           "ai_entity": "Eine AI-Task-Entität, z. B. von Google Generative AI, OpenAI oder einem lokalen Ollama-Modell.",
           "ai_exclude": "Nie an eine KI senden, eine Angabe pro Zeile. Zum Beispiel Bank, Arzt oder Arbeitgeber: bank.example, praxis@example.com",
           "ai_block_terms": "Mails mit diesen Begriffen nie an eine KI senden, einer pro Zeile. Wird lokal in Betreff, Absender und Text geprüft, bevor etwas gesendet wird – auch für den KI-Tagesüberblick. Beispiel: Diagnose, Gehalt, Passwort",
           "ai_include_body": "Die ersten 1.000 Zeichen des Textes.",
-          "ai_notify_importance": "Nur im Modus „Aktionen ausführen“."
+          "ai_notify_importance": "Nur im Modus „Aktionen ausführen“.",
+          "ai_known_senders": "Hat die KI die Mails eines Absenders dreimal in Folge gleich und sicher eingeordnet, sortiert Frieda seine nächsten Mails selbst – es wird nichts gesendet, das Stundenlimit bleibt unberührt. Jedes zehnte Mal schaut die KI wieder hin; nach einer Korrektur sofort."
         }
       },
       "foryou": {

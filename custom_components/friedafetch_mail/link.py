@@ -16,6 +16,7 @@ class MailExtension:
 
     rules: RuleEngine
     tool_classes: list = field(default_factory=lambda: list(TOOL_CLASSES))
+    insights: Any | None = None  # insights.Insights ("For you"), read by its tools
 
     def rule_matcher(self, mailbox: str) -> Callable[[dict[str, Any]], str | None]:
         """Name of the first enabled rule that matches a message summary (used by icloud_mailbox_stats)."""

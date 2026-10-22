@@ -999,7 +999,7 @@ def handled_mails(
             mail["rules"].append(act["rule"])
     for item in (ai or {}).get("items") or []:
         mail = entry(item.get("mailbox") or "INBOX", item.get("uid"), item.get("subject"), item.get("from"), item)
-        mail["ai"] = {k: item.get(k) for k in ("category", "importance", "confidence", "applied", "held")}
+        mail["ai"] = {k: item.get(k) for k in ("category", "importance", "confidence", "applied", "held", "local")}
     return list(mails.values())
 
 

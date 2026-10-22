@@ -61,7 +61,8 @@
      "held": [
       "str"
      ],
-     "importance": "null|num"
+     "importance": "null|num",
+     "local": "bool|null"
     },
     "?corrected": "bool",
     "date": "null",
@@ -134,6 +135,7 @@
     "?corrected_at": "str",
     "?corrected_by": "null",
     "date": "str",
+    "email": "str",
     "from": "str",
     "from_domain": "str",
     "id": "str",
@@ -158,6 +160,8 @@
    "events": "bool",
    "excluded": "num",
    "include_body": "bool",
+   "known": "bool",
+   "known_senders": "num",
    "last_error": "null",
    "last_run": "str",
    "limit": "num",
@@ -206,6 +210,7 @@
     },
     "errors": "num",
     "held_back": "num",
+    "local": "num",
     "sort": "num"
    },
    "today": {
@@ -219,6 +224,7 @@
     },
     "errors": "num",
     "held_back": "num",
+    "local": "num",
     "sort": "num"
    },
    "week": {
@@ -232,6 +238,7 @@
     },
     "errors": "num",
     "held_back": "num",
+    "local": "num",
     "sort": "num"
    }
   }
@@ -450,6 +457,7 @@
     "?flag": "null",
     "?importance": "num",
     "kind": "str",
+    "?local": "bool",
     "?mailbox": "str",
     "?move_to": "null",
     "?ok": "bool",
@@ -506,7 +514,8 @@
        "held": [
         "str"
        ],
-       "importance": "null|num"
+       "importance": "null|num",
+       "local": "bool|null"
       },
       "date": "null",
       "delete": "bool",

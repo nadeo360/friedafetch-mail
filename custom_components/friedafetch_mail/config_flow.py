@@ -29,6 +29,7 @@ from .const import (
     CONF_AI_ENTITY,
     CONF_AI_EVENTS,
     CONF_AI_EXCLUDE,
+    CONF_AI_KNOWN,
     CONF_AI_LIMIT,
     CONF_AI_MODE,
     CONF_AI_NOTIFY,
@@ -49,6 +50,7 @@ from .const import (
     DEFAULT_AI_BODY,
     DEFAULT_AI_ENABLED,
     DEFAULT_AI_EVENTS,
+    DEFAULT_AI_KNOWN,
     DEFAULT_AI_LIMIT,
     DEFAULT_AI_MODE,
     DEFAULT_AI_NOTIFY,
@@ -235,6 +237,7 @@ class FriedaPostfachOptionsFlow(OptionsFlow):
                     )
                 ),
                 vol.Required(CONF_AI_BODY, default=opts.get(CONF_AI_BODY, DEFAULT_AI_BODY)): BooleanSelector(),
+                vol.Required(CONF_AI_KNOWN, default=opts.get(CONF_AI_KNOWN, DEFAULT_AI_KNOWN)): BooleanSelector(),
                 vol.Required(CONF_AI_LIMIT, default=opts.get(CONF_AI_LIMIT, DEFAULT_AI_LIMIT)): NumberSelector(
                     NumberSelectorConfig(min=1, max=MAX_AI_LIMIT, step=1, mode=NumberSelectorMode.BOX)
                 ),
