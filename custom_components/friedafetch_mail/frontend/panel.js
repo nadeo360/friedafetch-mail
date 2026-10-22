@@ -571,7 +571,7 @@ class FriedaPostfachPanel extends HTMLElement {
       return W.donut(parts, { size: 52 });
     };
     const stat = (label, w) => `<div class="stat ${charts ? "with-chart" : ""}"><div class="stat-tx"><div class="k">${esc(label)}</div><div class="v">${esc(num(w.calls))} <small class="muted">${esc(t.aiuCalls)}</small></div>
-      <div class="facts">${fact("format-text", num(w.chars), t.aiuTipChars)}${fact("text-long", num(w.body), t.aiuTipBody, w.body ? "hot" : "")}${fact("shield-check-outline", num(w.held_back), t.aiuTipHeld)}${w.errors ? fact("alert-circle-outline", num(w.errors), t.aiuTipErrors, "err") : ""}</div></div>${charts ? pie(w) : ""}</div>`;
+      <div class="facts">${fact("format-text", num(w.chars), t.aiuTipChars)}${fact("text-long", num(w.body), t.aiuTipBody, w.body ? "hot" : "")}${fact("shield-check-outline", num(w.held_back), t.aiuTipHeld)}${w.errors ? fact("alert-circle-outline", num(w.errors), t.aiuTipErrors, "err") : ""}${w.local ? fact("account-check-outline", num(w.local), t.aiuTipLocal) : ""}</div></div>${charts ? pie(w) : ""}</div>`;
     const legend = charts
       ? `<div class="legend" style="margin-top:8px"><span><i style="background:${COLORS.sent}"></i>${esc(t.aiuSent)}</span><span><i style="background:${COLORS.held}"></i>${esc(t.aiuHeldBack)}</span><span><i style="background:${COLORS.err}"></i>${esc(t.resError)}</span></div>`
       : "";
@@ -711,13 +711,17 @@ class FriedaPostfachPanel extends HTMLElement {
     const t = this.t;
     const b = ai.batch;
     if (!b) return "";
+    // "Cancel" shows at once; the backend stops without waiting for the AI's answer
+    const cancelBtn = b.cancelling
+      ? `<button class="secondary small" disabled>${esc(t.rerateCancelling)}</button>`
+      : `<button class="secondary small" data-action="rerate-cancel">${esc(t.rerateCancel)}</button>`;
     if (b.state === "waiting") {
       const pct = b.total ? Math.round((b.done / b.total) * 100) : 0;
-      return `<div class="batch wait" role="status">${ico("timer-sand")}<div class="bt"><strong>${esc(fmt(t.rerateWaiting, b.done, b.total))}</strong><span class="muted">${esc(fmt(t.rerateWaitingSub, fmtClock(b.resume_at)))}</span><div class="bar" aria-hidden="true"><span style="width:${pct}%"></span></div></div><button class="secondary small" data-action="rerate-cancel">${esc(t.rerateCancel)}</button></div>`;
+      return `<div class="batch wait" role="status">${ico("timer-sand")}<div class="bt"><strong>${esc(fmt(t.rerateWaiting, b.done, b.total))}</strong><span class="muted">${esc(fmt(t.rerateWaitingSub, fmtClock(b.resume_at)))}</span><div class="bar" aria-hidden="true"><span style="width:${pct}%"></span></div></div>${cancelBtn}</div>`;
     }
     if (b.state === "running") {
       const pct = b.total ? Math.round((b.done / b.total) * 100) : 0;
-      return `<div class="batch"><span class="spinner" aria-hidden="true"></span><div class="bt"><strong>${esc(fmt(t.rerateRunning, b.done, b.total))}</strong><div class="bar" aria-hidden="true"><span style="width:${pct}%"></span></div></div><button class="secondary small" data-action="rerate-cancel">${esc(t.rerateCancel)}</button></div>`;
+      return `<div class="batch"><span class="spinner" aria-hidden="true"></span><div class="bt"><strong>${esc(fmt(t.rerateRunning, b.done, b.total))}</strong><div class="bar" aria-hidden="true"><span style="width:${pct}%"></span></div></div>${cancelBtn}</div>`;
     }
     const age = Date.now() - (parseTime(b.finished)?.getTime() || 0);
     // closed by the user: remembered per user in Home Assistant, so it stays closed after reopening the panel
@@ -780,6 +784,7 @@ class FriedaPostfachPanel extends HTMLElement {
       st.block_terms ? fmt(t.aiBlockTerms, st.block_terms) : "",
       act && st.notify ? fmt(t.aiNotify, st.notify) : "",
       ai.examples ? fmt(t.aiExamples, ai.examples) : "",
+      st.known && st.known_senders ? fmt(t.aiKnown, st.known_senders) : "",
     ].filter(Boolean);
     const warn = !st.entity_ok ? fmt(t.aiEntityMissing, st.entity) : st.last_error ? fmt(t.aiError, st.last_error) : "";
     const cats = ai.categories || [];
@@ -1243,9 +1248,9 @@ class FriedaPostfachPanel extends HTMLElement {
       sub = t.tlHeldSub;
       minis = (e.reasons || []).map((r) => (r.type === "sender" ? (r.value ? fmt(t.aiuHeldSenderV, r.value) : t.aiuHeldSender) : fmt(t.aiuHeldTerm, r.value)));
     } else if (e.kind === "rated") {
-      icon = "tag-outline";
+      icon = e.local ? "account-check-outline" : "tag-outline";
       tone = "ai";
-      title = fmt(e.again ? t.tlRatedAgain : t.tlRated, cat(e.category));
+      title = fmt(e.local ? t.tlRatedLocal : e.again ? t.tlRatedAgain : t.tlRated, cat(e.category));
       sub = [e.importance ? fmt(t.tlImportance, e.importance) : "", e.confidence ? t[`tlConf_${e.confidence}`] || "" : ""].filter(Boolean).join(" · ");
       quote = e.reason || "";
       if (e.suspicious) minis = [t.aiSuspicious];
@@ -1839,7 +1844,7 @@ class FriedaPostfachPanel extends HTMLElement {
     const [label, icon, cls] = {
       rule: [(item.rules || []).join(", "), "filter-check-outline", "rule"],
       held: [t.actHeld, "shield-check-outline", "held"],
-      ai: [`${cat(ai.category)}${ai.importance ? ` · ${ai.importance}/5` : ""}`, item.corrected ? "pencil-outline" : "creation", "ai"],
+      ai: [`${cat(ai.category)}${ai.importance ? ` · ${ai.importance}/5` : ""}`, item.corrected ? "pencil-outline" : ai.local ? "account-check-outline" : "creation", "ai"],
       none: [t.actNone, "minus-circle-outline", ""],
     }[item.kind] || ["–", "circle-small", ""];
     const moved = item.folder !== "INBOX";

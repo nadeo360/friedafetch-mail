@@ -35,12 +35,14 @@ from .const import (
     CONF_AI_ENTITY,
     CONF_AI_EVENTS,
     CONF_AI_EXCLUDE,
+    CONF_AI_KNOWN,
     CONF_AI_LIMIT,
     CONF_AI_MODE,
     CONF_AI_NOTIFY,
     DEFAULT_AI_BODY,
     DEFAULT_AI_ENABLED,
     DEFAULT_AI_EVENTS,
+    DEFAULT_AI_KNOWN,
     DEFAULT_AI_LIMIT,
     DEFAULT_AI_MODE,
     DEFAULT_AI_NOTIFY,
@@ -68,6 +70,9 @@ ASSIST_TURNS = 10  # messages of the category assistant's conversation that go a
 TRY_COUNT = 20  # recently rated mails in the assistant's test run
 CHECK_COUNT = 20  # corrected mails in the accuracy check
 WAIT_STEP = 15  # seconds between looks at the hourly limit while a re-rating waits for it
+KNOWN_AFTER = 3  # the AI rated a sender's mail this many times in a row the same way, sure of it: sorted locally
+KNOWN_RECHECK = 10  # every so many local ratings of a sender, the AI looks again (a sender may change)
+MAX_SENDERS = 1000
 AI_TIMEOUT = 300  # seconds for one answer: a local model may take a minute, one that hangs must not stop the pass
 CONFIDENCE = ("high", "medium", "low")
 USAGE_DAYS = 31
@@ -118,12 +123,48 @@ async def _generate(hass: HomeAssistant, **kwargs: Any) -> Any:
     return await async_generate_data(hass, **kwargs)
 
 
-async def _answer(hass: HomeAssistant, **kwargs: Any) -> Any:
-    """One AI answer within AI_TIMEOUT: an AI that never answers would hold every later pass."""
+class Cancelled(Exception):  # noqa: N818 - a request of the user, not an error
+    """The user stopped a re-rating while the AI was answering or while it waited for its turn."""
+
+
+async def _answer(hass: HomeAssistant, stop: asyncio.Event | None = None, **kwargs: Any) -> Any:
+    """One AI answer within AI_TIMEOUT: an AI that never answers would hold every later pass.
+
+    stop: set by "Cancel" of a re-rating – the answer is not waited for (a local model takes a minute).
+    """
+    call = asyncio.ensure_future(asyncio.wait_for(_generate(hass, **kwargs), AI_TIMEOUT))
+    if stop is None:
+        waits = {call}
+    else:
+        waits = {call, asyncio.ensure_future(stop.wait())}
     try:
-        return await asyncio.wait_for(_generate(hass, **kwargs), AI_TIMEOUT)
+        await asyncio.wait(waits, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        for task in waits:
+            if task is not call and not task.done():
+                task.cancel()
+    if not call.done():
+        call.cancel()
+        raise Cancelled
+    try:
+        return call.result()
     except TimeoutError as err:
         raise HomeAssistantError(f"No answer from the AI within {AI_TIMEOUT} seconds") from err
+
+
+async def _acquire(lock: asyncio.Lock, stop: asyncio.Event) -> None:
+    """Wait for the lock unless the user cancels meanwhile (a pass of new mail may hold it for minutes)."""
+    acquire = asyncio.ensure_future(lock.acquire())
+    stopped = asyncio.ensure_future(stop.wait())
+    await asyncio.wait({acquire, stopped}, return_when=asyncio.FIRST_COMPLETED)
+    stopped.cancel()
+    if acquire.done() and not acquire.cancelled():
+        if stop.is_set():
+            lock.release()
+            raise Cancelled
+        return
+    acquire.cancel()
+    raise Cancelled
 
 
 class AiSortError(ValueError):
@@ -221,6 +262,7 @@ def ai_settings(opts: dict[str, Any]) -> dict[str, Any]:
         "block_terms": parse_terms(opts.get(CONF_AI_BLOCK_TERMS)),
         "notify": notify if 1 <= notify <= 5 else 0,
         "events": bool(opts.get(CONF_AI_EVENTS, DEFAULT_AI_EVENTS)),
+        "known": bool(opts.get(CONF_AI_KNOWN, DEFAULT_AI_KNOWN)),
     }
 
 
@@ -256,10 +298,13 @@ class AiSorter:
         # (trigger, started, item) -> None: a mail rated or held back, shown in the activity at once (a pass with a
         # slow local model takes minutes; the pass itself is written when it is done)
         self.on_item: Any | None = None
+        self._stop: asyncio.Event | None = None  # set while a re-rating runs: "Cancel" interrupts the AI answer
         self._loaded = False
         self.categories: list[dict[str, Any]] = []
         self.ratings: list[dict[str, Any]] = []
         self.examples: list[dict[str, Any]] = []
+        # per sender address: {cat, n (AI ratings in a row, the same category, sure of it), imp, local, time}
+        self.senders: dict[str, dict[str, Any]] = {}
         self._last_uid: dict[str, int] = {}
         self._uidvalidity: int | None = None
         self._hour = ""
@@ -276,9 +321,10 @@ class AiSorter:
             return
         data = await self._store.async_load() or {}
         self.categories = list(data.get("categories") or [])
-        # ratings of 1.0.23 and older: without the AI's confidence
-        self.ratings = [{"confidence": None, **r} for r in list(data.get("ratings") or [])[-MAX_RATINGS:]]
+        # ratings of 1.0.23 and older: without the AI's confidence; of 1.0.31 and older: without the sender's address
+        self.ratings = [{"confidence": None, "email": "", **r} for r in list(data.get("ratings") or [])[-MAX_RATINGS:]]
         self.examples = list(data.get("examples") or [])[-MAX_EXAMPLES:]
+        self.senders = dict(data.get("senders") or {})
         self._last_uid = {k: int(v) for k, v in (data.get("last_uid") or {}).items()}
         self._uidvalidity = int(data["uidvalidity"]) if data.get("uidvalidity") is not None else None
         usage = data.get("usage") or {}
@@ -305,6 +351,7 @@ class AiSorter:
             "categories": self.categories,
             "ratings": self.ratings[-MAX_RATINGS:],
             "examples": self.examples[-MAX_EXAMPLES:],
+            "senders": self.senders,
             "last_uid": self._last_uid,
             "uidvalidity": self._uidvalidity,
             "usage": {"hour": self._hour, "count": self._hour_count},
@@ -340,6 +387,8 @@ class AiSorter:
             "block_terms": len(s["block_terms"]),
             "notify": s["notify"],
             "events": s["events"],
+            "known": s["known"],
+            "known_senders": sum(1 for v in self.senders.values() if self._is_known(v)),
             "last_run": self.last_run,
             "last_error": self.last_error,
         }
@@ -432,6 +481,7 @@ class AiSorter:
                 "sort": 0,
                 "digest": 0,
                 "assist": 0,
+                "local": 0,
             }
             entities: dict[str, int] = {}
             for key, day in self.usage_days.items():
@@ -514,6 +564,7 @@ class AiSorter:
         before = rating.get("corrected") or rating.get("category")
         rating["corrected"] = category
         rating["corrected_at"] = _now_iso()
+        self._learn(rating.get("email"), category, corrected=True)
         rating["corrected_by"] = by
         step = {"time": rating["corrected_at"], "kind": "corrected", "before": before, "after": category}
         self._step(rating, {**step, "by": by} if by else step)
@@ -611,7 +662,11 @@ class AiSorter:
     # ---------------------------------------------------------- re-rating
     def batch_status(self) -> dict[str, Any] | None:
         """Progress of the re-rating for the panel (None before the first one)."""
-        return None if self._batch is None else {k: v for k, v in self._batch.items() if k != "cancel"}
+        if self._batch is None:
+            return None
+        status = {k: v for k, v in self._batch.items() if k != "cancel"}
+        status["cancelling"] = bool(self._batch["cancel"]) and self._batch["state"] in ("running", "waiting")
+        return status
 
     async def async_start_rerate(self, items: list[dict[str, Any]], *, apply: bool) -> dict[str, Any]:
         """Rate chosen messages again with the current categories, one AI call each, in the background.
@@ -656,11 +711,17 @@ class AiSorter:
         """Stop after the message in progress (or while waiting for the hourly limit)."""
         if self._batch is not None and self._batch["state"] in ("running", "waiting"):
             self._batch["cancel"] = True
+            if self._stop is not None:
+                self._stop.set()  # the answer in progress is not waited for
+            async_notify(self._hass, self._entry_id, "ai")
 
     async def _run_rerate(self, todo: list[dict[str, Any]]) -> None:
         batch = self._batch
         assert batch is not None  # noqa: S101 - set by async_start_rerate
         report = self._report("rerate")
+        stop = self._stop = asyncio.Event()
+        if batch["cancel"]:
+            stop.set()
         try:
             for item in todo:
                 if batch["cancel"]:
@@ -669,14 +730,22 @@ class AiSorter:
                 if self._budget() <= 0 and not await self._wait_for_budget(batch):
                     batch["state"] = "cancelled"
                     break
-                async with self._lock:  # one message at a time; new mail can be sorted in between
-                    found = await self._locate(item)
-                    if found is None:
-                        batch["missing"] += 1
-                    else:
-                        await self._rate(
-                            [found[1]], report, advance=False, mailbox=found[0], apply=batch["apply"], again=True
-                        )
+                try:
+                    # one message at a time; new mail can be sorted in between
+                    await _acquire(self._lock, stop)
+                    try:
+                        found = await self._locate(item)
+                        if found is None:
+                            batch["missing"] += 1
+                        else:
+                            await self._rate(
+                                [found[1]], report, advance=False, mailbox=found[0], apply=batch["apply"], again=True
+                            )
+                    finally:
+                        self._lock.release()
+                except Cancelled:
+                    batch["state"] = "cancelled"
+                    break
                 batch.update(rated=report["rated"], held=report["skipped"], applied=report["applied"])
                 batch["done"] += 1
                 async_notify(self._hass, self._entry_id, "ai")
@@ -685,6 +754,7 @@ class AiSorter:
             _LOGGER.warning("Re-rating failed: %s", err)
             report["errors"].append(str(err) or err.__class__.__name__)
         finally:
+            self._stop = None
             if batch["state"] == "running":
                 batch["state"] = "done"
             batch["finished"] = _now_iso()
@@ -699,7 +769,11 @@ class AiSorter:
         batch.update(state="waiting", resume_at=resume.isoformat(timespec="seconds"))
         async_notify(self._hass, self._entry_id, "ai")
         while self._budget() <= 0 and not batch["cancel"]:
-            await _wait(WAIT_STEP)
+            pause = asyncio.ensure_future(_wait(WAIT_STEP))
+            waits = {pause} if self._stop is None else {pause, asyncio.ensure_future(self._stop.wait())}
+            await asyncio.wait(waits, return_when=asyncio.FIRST_COMPLETED)  # "Cancel" does not wait for the pause
+            for task in waits:
+                task.cancel()
         batch.update(state="running", resume_at=None)
         async_notify(self._hass, self._entry_id, "ai")
         return not batch["cancel"]
@@ -863,18 +937,26 @@ class AiSorter:
                 if advance:
                     self._last_uid[MAILBOX] = max(self._last_uid.get(MAILBOX, 0), uid)
                 continue
-            if self._budget() <= 0:
-                report["errors"].append("hourly limit reached")
-                break
-            try:
-                result = await self._classify(summary, body, report["trigger"])
-            except Exception as err:  # noqa: BLE001 - AI providers raise all kinds of errors; retry next run
-                self.last_error = str(err) or err.__class__.__name__
-                _LOGGER.warning("AI sorting failed for message %s: %s", uid, self.last_error)
-                report["errors"].append(self.last_error)
-                break  # keep the uid for the next run
-            self._hour_count += 1
-            self.last_error = None
+            result = None if again else self._known_result(summary)
+            if result is not None:
+                report["local"] = report.get("local", 0) + 1
+                self._count_local()
+            else:
+                if self._budget() <= 0:
+                    report["errors"].append("hourly limit reached")
+                    break
+                try:
+                    result = await self._classify(summary, body, report["trigger"])
+                except Cancelled:
+                    raise
+                except Exception as err:  # noqa: BLE001 - AI providers raise all kinds of errors; retry next run
+                    self.last_error = str(err) or err.__class__.__name__
+                    _LOGGER.warning("AI sorting failed for message %s: %s", uid, self.last_error)
+                    report["errors"].append(self.last_error)
+                    break  # keep the uid for the next run
+                self._hour_count += 1
+                self.last_error = None
+                self._learn(sender.get("email"), result["category"], result=result)
             event = result.pop("event", None)
             if self.is_vip is not None and self.is_vip(sender.get("email")):
                 # an important sender (contacts, options): never lost among the rest, also when the AI was unsure
@@ -903,6 +985,7 @@ class AiSorter:
                     "importance": rating.get("importance"),
                     "confidence": rating.get("confidence"),
                     "applied": list(rating.get("applied") or []),
+                    "local": bool(rating.get("local")),
                 }
             )
             self._show(report, report["items"][-1])
@@ -1297,11 +1380,16 @@ class AiSorter:
         try:
             result = await _answer(
                 self._hass,
+                self._stop,
                 task_name="Frieda Postfach: sort e-mail",
                 entity_id=entity,
                 instructions=instructions,
                 structure=self._structure(categories),
             )
+        except Cancelled:
+            log["duration"] = round(time.monotonic() - t0, 1)
+            self.record_usage("sort", ok=False, error="Cancelled by the user", **log)
+            raise
         except Exception as err:
             log["duration"] = round(time.monotonic() - t0, 1)
             self.record_usage("sort", ok=False, error=str(err) or err.__class__.__name__, **log)
@@ -1392,6 +1480,7 @@ class AiSorter:
             "mode": self.settings["mode"],
             "applied": [],
             "corrected": None,
+            "email": email.lower(),
             **result,
         }
         mid = summary.get("message_id")
@@ -1431,9 +1520,78 @@ class AiSorter:
                 "confidence": rating.get("confidence"),
                 "reason": rating.get("reason"),
                 "suspicious": bool(rating.get("suspicious")),
+                "local": bool(rating.get("local")),
             },
         )
         return rating
+
+    # ------------------------------------------------------ known senders
+    @staticmethod
+    def _is_known(memory: dict[str, Any]) -> bool:
+        return int(memory.get("n") or 0) >= KNOWN_AFTER
+
+    def _learn(
+        self, email: Any, category: str, *, result: dict[str, Any] | None = None, corrected: bool = False
+    ) -> None:
+        """What the AI (or a correction) said about a sender's mail: a run of sure, equal ratings makes it known.
+
+        A correction starts the run again: the AI was wrong about this sender, so it has to show it again.
+        """
+        address = str(email or "").strip().lower()
+        if not address or "@" not in address:
+            return
+        memory = self.senders.get(address) or {"cat": None, "n": 0, "imp": 3, "local": 0}
+        if corrected:
+            memory.update(cat=category, n=0, local=0)
+        else:
+            sure = (result or {}).get("confidence") == "high" and not (result or {}).get("suspicious")
+            if sure and memory.get("cat") == category:
+                memory["n"] = int(memory.get("n") or 0) + 1
+            else:
+                memory.update(cat=category, n=1 if sure else 0)
+            memory.update(imp=int((result or {}).get("importance") or 3), local=0)
+        memory["time"] = _now_iso()
+        self.senders[address] = memory
+        if len(self.senders) > MAX_SENDERS:  # the senders not seen for longest go first
+            for old in sorted(self.senders, key=lambda k: str(self.senders[k].get("time") or ""))[
+                : len(self.senders) - MAX_SENDERS
+            ]:
+                del self.senders[old]
+
+    def _known_result(self, summary: dict[str, Any]) -> dict[str, Any] | None:
+        """A rating without the AI for a known sender (its usual category), or None when the AI should look."""
+        if not self.settings["known"]:
+            return None
+        sender = (summary.get("from") or [{}])[0]
+        address = str(sender.get("email") or "").strip().lower()
+        memory = self.senders.get(address)
+        names = {c["name"] for c in self.categories}
+        if memory is None or not self._is_known(memory) or memory.get("cat") not in names:
+            return None
+        if int(memory.get("local") or 0) >= KNOWN_RECHECK:
+            return None  # now and then the AI looks again
+        if detect_injection(summary.get("subject")):
+            return None
+        memory["local"] = int(memory.get("local") or 0) + 1
+        memory["time"] = _now_iso()
+        de = self._language == "de"
+        n = int(memory["n"])
+        return {
+            "category": memory["cat"],
+            "importance": max(1, min(int(memory.get("imp") or 3), 5)),
+            "confidence": "high",
+            "reason": (
+                f"Bekannter Absender: von der KI {n}-mal in Folge so eingeordnet."
+                if de
+                else f"Known sender: sorted this way by the AI {n} times in a row."
+            ),
+            "suspicious": False,
+            "local": True,
+        }
+
+    def _count_local(self) -> None:
+        day = self.usage_days.setdefault(datetime.now().date().isoformat(), {})
+        day["local"] = day.get("local", 0) + 1
 
     def _show(self, report: dict[str, Any], item: dict[str, Any]) -> None:
         if self.on_item is not None:

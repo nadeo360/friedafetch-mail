@@ -34,7 +34,7 @@ function makeRows(volume) {
     { id: "ratenkredit", min: 90, name: "Kundenservice Bank", from: "service@bank.example", subject: "Ihr Ratenkredit - letzte Rate im November", type: "bill", importance: 4, corrected: "Persönlich & wichtig" },
     { id: "karte-belasten", min: 90, name: "Reiseportal", from: "noreply@reiseportal.example", subject: "Wir werden Ihre Karte bald belasten", type: "bill", importance: 4, confidence: "low" },
     { id: "bestellung-unterwegs", min: 60 * 15, name: "Shop Versand", from: "versand@shop.example", subject: "Ihre Bestellung ist unterwegs", type: "bill", confidence: "low" },
-    { id: "moebel-wochenende", min: 60 * 17, name: "Möbelhaus", from: "newsletter@moebel.example", subject: "Wochenend-Angebote: bis zu 40 % auf Sofas", type: "news", confidence: "medium" },
+    { id: "moebel-wochenende", min: 60 * 17, name: "Möbelhaus", from: "newsletter@moebel.example", subject: "Wochenend-Angebote: bis zu 40 % auf Sofas", type: "news", local: true },
     { id: "elternabend", min: 60 * 21, name: "Schule Sekretariat", from: "sekretariat@schule.example", subject: "Elternabend am Donnerstag", type: "personal", importance: 4, gone: true },
     { id: "rabatt-code", min: 60 * 23, name: "Werbung", from: "promo@werbung.example", subject: "Rabatt-Code nur heute", type: "promo" },
   ].map((x) => ({ ...x, time: at(x.min) }));
@@ -56,11 +56,11 @@ function makeRows(volume) {
     const row = { key: mid, message_id: mid, mailbox: "INBOX", uid: 1000 - i, subject: x.subject, from: x.from, name: x.name, date: x.time, time: x.time, updated: x.time, trigger: "push", rules: [], move_to: null, delete: false, seen: null, flag: null, ai: null, day: dayOf(x.time) };
     if (x.type === "ci") Object.assign(row, { rules: ["CI-Meldungen löschen"], delete: true });
     else if (x.type === "promo") Object.assign(row, { rules: ["Werbung & Newsletter löschen"], delete: true });
-    else if (x.type === "held") row.ai = { category: null, importance: null, confidence: null, applied: [], held: ["term"] };
+    else if (x.type === "held") row.ai = { category: null, importance: null, confidence: null, applied: [], held: ["term"], local: null };
     else if (CATS[x.type]) {
       const [category, importance, applied, reason] = CATS[x.type];
-      row.ai = { category: x.corrected || category, importance: x.importance || importance, confidence: x.confidence || "high", applied, held: null };
-      row.reason = reason;
+      row.ai = { category: x.corrected || category, importance: x.importance || importance, confidence: x.confidence || "high", applied, held: null, local: !!x.local };
+      row.reason = x.local ? "Bekannter Absender: von der KI 3-mal in Folge so eingeordnet." : reason;
       row.rating_id = `r${i}`;
       row.corrected = !!x.corrected;
       row.original = x.corrected ? category : null;
@@ -140,10 +140,10 @@ function derive(data, rows) {
   Object.assign(account, { automation, core_entry_id: "e1", rules_total: rules.length, rules_enabled: rules.filter((r) => r.enabled).length, digest_time: "07:30", last_run: data["friedafetch_mail/rules/list"].last_run });
   // iCloud's folders (the trash is "Deleted Messages"), plus two of the user's own
   data["friedafetch_mail/mailboxes"] = { mailboxes: ["INBOX", "Archive", "Belege", "Company", "Drafts", "Sent Messages", "Junk", "Deleted Messages"] };
-  Object.assign(ai.status, { include_body: false, body_chars: 1000, excluded: 2, block_terms: 3, last_run: rows.find((r) => r.kind === "ai")?.time || null, last_error: null });
+  Object.assign(ai.status, { known: true, known_senders: 4, include_body: false, body_chars: 1000, excluded: 2, block_terms: 3, last_run: rows.find((r) => r.kind === "ai")?.time || null, last_error: null });
   ai.ratings = rows
     .filter((r) => r.kind === "ai")
-    .map((r) => ({ id: r.rating_id, time: r.time, mailbox: "INBOX", uid: r.uid, message_id: r.message_id, subject: r.subject, from: r.name, from_domain: r.from.split("@")[1], date: r.date, mode: "act", category: r.original || r.ai.category, importance: r.ai.importance, confidence: r.ai.confidence, reason: r.reason, applied: r.ai.applied, corrected: r.original ? r.ai.category : null, suspicious: false }))
+    .map((r) => ({ id: r.rating_id, time: r.time, mailbox: "INBOX", uid: r.uid, message_id: r.message_id, subject: r.subject, from: r.name, from_domain: r.from.split("@")[1], email: r.from, local: !!r.ai.local, date: r.date, mode: "act", category: r.original || r.ai.category, importance: r.ai.importance, confidence: r.ai.confidence, reason: r.reason, applied: r.ai.applied, corrected: r.original ? r.ai.category : null, suspicious: false }))
     .reverse();
   ai.examples = rows.filter((r) => r.corrected).length;
   ai.corrected = ai.examples;
@@ -160,6 +160,8 @@ function derive(data, rows) {
     .sort((a, b) => (a.time < b.time ? 1 : -1));
   const blank = { error: null, held_back: null, items: null, duration: null, message_id: null, sender: "", subject: "" };
   ai.usage = { ...usageWindows(log), log: log.map((e) => ({ ...blank, ...e })) };
+  // known senders, sorted without the AI (nothing was sent for them)
+  for (const w of ["today", "week", "month"]) ai.usage[w].local = rows.filter((r) => r.ai?.local).length;
   // the runs: one pass per arrival time (push), plus a merged idle stretch and a pass that failed
   const passes = new Map();
   for (const r of [...rows].reverse()) {
@@ -172,7 +174,7 @@ function derive(data, rows) {
     const rated = mails.filter((m) => m.kind === "ai");
     return { started: time, finished: time, trigger: "push", scope: "new", mailboxes: ["INBOX"], checked: mails.length, matched: mails.filter((m) => m.rules.length).length, actions: mails.filter((m) => m.rules.length).length, rules: perRule,
       ai: rated.length || mails.some((m) => m.kind === "held") ? { rated: rated.length, applied: rated.filter((m) => m.ai.applied.length).length, held: mails.filter((m) => m.kind === "held").length, errors: [] } : null,
-      mails: mails.map((m) => ({ subject: m.subject, from: m.from, name: m.name, mailbox: "INBOX", uid: m.uid, message_id: m.message_id, date: m.date, rules: m.rules, move_to: null, delete: m.delete, seen: null, flag: null, ai: m.ai ? { category: m.ai.category, importance: m.ai.importance, confidence: m.ai.confidence, applied: m.ai.applied, held: m.ai.held } : null })),
+      mails: mails.map((m) => ({ subject: m.subject, from: m.from, name: m.name, mailbox: "INBOX", uid: m.uid, message_id: m.message_id, date: m.date, rules: m.rules, move_to: null, delete: m.delete, seen: null, flag: null, ai: m.ai ? { category: m.ai.category, importance: m.ai.importance, confidence: m.ai.confidence, applied: m.ai.applied, held: m.ai.held, local: m.ai.local ?? null } : null })),
       mails_more: 0, errors: [], skipped: 0, saved_files: 0, idle: false, runs: 1 };
   });
   runs.push({ started: at(300), finished: at(120), trigger: "auto", scope: "new", mailboxes: ["INBOX"], checked: 0, matched: 0, rules: {}, ai: null, mails: [], mails_more: 0, errors: [], idle: true, runs: 15 });
@@ -230,7 +232,7 @@ function insights(data, rows) {
 function usageWindows(log) {
   const win = (days) => {
     const since = Date.now() - days * 86400000;
-    const w = { calls: 0, chars: 0, body: 0, held_back: 0, errors: 0, sort: 0, digest: 0, assist: 0, entities: {} };
+    const w = { calls: 0, chars: 0, body: 0, held_back: 0, errors: 0, sort: 0, digest: 0, assist: 0, local: 0, entities: {} };
     for (const e of log) {
       if (new Date(e.time).getTime() < since) continue;
       if (!e.sent) { w.held_back += 1; continue; }
@@ -388,7 +390,7 @@ export function install({ data, q }) {
     if (m.type === "friedafetch_mail/ai/rerate") {
       // works through the messages, one per tick, and reports live – like the background task
       const keys = [...(m.rating_ids || []).map((id) => rows.find((r) => r.rating_id === id)?.message_id), ...(m.messages || []).map((x) => x.message_id)].filter(Boolean);
-      ai.batch = { state: "running", total: keys.length, done: 0, rated: 0, held: 0, missing: 0, applied: 0, errors: [], apply: !!m.apply, started: new Date().toISOString(), finished: null, resume_at: null };
+      ai.batch = { state: "running", cancelling: false, total: keys.length, done: 0, rated: 0, held: 0, missing: 0, applied: 0, errors: [], apply: !!m.apply, started: new Date().toISOString(), finished: null, resume_at: null };
       const waitAfter = Number(q.get("waitafter") || 0);
       let waited = 0;
       const tick = () => {
