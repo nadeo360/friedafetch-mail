@@ -227,3 +227,35 @@ async def test_for_you_against_the_server(hass: HomeAssistant, account: dict[str
     assert (sub["sender"], sub["count"], sub["unread"]) == ("news@moebel.example", 2, 2)
     _, msg = await mail.async_fetch_raw(sub["mailbox"], sub["uid"])
     assert list_unsubscribe(msg)["one_click"]
+
+
+async def test_parcels_and_conversations_against_the_server(
+    hass: HomeAssistant, account: dict[str, Any], mail: Any
+) -> None:
+    """A shipping mail in a folder is read once; my answer to a mail is found in the sent mail by its reference."""
+    from types import SimpleNamespace  # noqa: PLC0415
+
+    from custom_components.friedafetch_mail.insights import Insights  # noqa: PLC0415
+
+    device = account["device"]
+    device.create("Sent Messages")
+    device.append("Archive", "<dhl1@dhl.de>", "Ihre DHL Sendung kommt heute", sender="DHL <noreply@dhl.de>")
+    device.append("INBOX", "<q1@example.com>", "Frage zum Elternabend", sender="Schule <sekretariat@schule.example>")
+    device.append(
+        "Sent Messages",
+        "<a1@icloud.com>",
+        "Re: Frage zum Elternabend",
+        sender=account["user"],
+        to="sekretariat@schule.example",
+        headers="In-Reply-To: <q1@example.com>\r\n",
+    )
+    log = ActivityLog(hass, "fy-imap2")
+    await log.async_load()
+    clients = SimpleNamespace(guard=None, audit=None, mail=mail)
+    insights = Insights(hass, "fy-imap2", clients, mail, log, {}, language="de")
+    await insights.async_subscriptions(force=True)  # the same look reads the shipping mails
+    [parcel] = insights.parcels()
+    assert parcel["carrier"] == "DHL" and parcel["status"] == "out_for_delivery"
+
+    uids = await mail.async_search_uids("Sent Messages", ["HEADER", "In-Reply-To", '"<q1@example.com>"'])
+    assert len(uids) == 1  # how the conversation finds my answer

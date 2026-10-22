@@ -124,6 +124,9 @@
       },
       "ai_ratings_hour": {
         "name": "AI ratings this hour"
+      },
+      "parcels": {
+        "name": "Parcels on their way"
       }
     }
   },

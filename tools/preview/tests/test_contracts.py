@@ -32,6 +32,7 @@ REQUESTS = {
     "friedafetch_mail/ai/check": {},
     "friedafetch_mail/mail/act": {"keys": ["<test-frieda@example>"], "action": "flag"},
     "friedafetch_mail/mail/text": {"message_id": "<ratenkredit@example>"},
+    "friedafetch_mail/mail/thread": {"message_id": "<elternabend@example>"},
     "friedafetch_mail/insights": {},
     "friedafetch_mail/insights/calendars": {},
     "friedafetch_mail/insights/event": {"proposal_id": "p1"},

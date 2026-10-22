@@ -24,6 +24,7 @@ from custom_components.friedafetch.const import (
 from custom_components.friedafetch.insights import upcoming_birthdays
 
 from .const import CONF_BIRTHDAY_SENSOR, DEFAULT_BIRTHDAY_SENSOR, DOMAIN, SIGNAL_UPDATED
+from .live import SIGNAL_PANEL
 
 _LOGGER = logging.getLogger(__name__)
 LOOKAHEAD_DAYS = 30
@@ -61,6 +62,8 @@ async def async_setup_entry(
         entities.append(UnreadSensor(unread, entry, link))
         entities.append(RuleMatchesSensor(entry, link))
         entities.append(PushSensor(entry, link))
+        if getattr(link, "insights", None) is not None:
+            entities.append(ParcelsSensor(entry, link))
         if link.ai is not None and link.ai.settings["enabled"]:
             entities.append(ImportantSensor(entry, link))
             entities.append(AiUsageSensor(entry, link))
@@ -232,6 +235,37 @@ class ImportantSensor(_StatusSensor):
             "mails": [
                 {k: r.get(k) for k in ("time", "from", "subject", "category", "importance", "reason")}
                 for r in ai.important_today()[:MAX_LISTED]
+            ],
+        }
+
+
+class ParcelsSensor(_StatusSensor):
+    """Parcels on their way (from shipping mails); the list with carrier, status and expected day as attributes."""
+
+    key = "parcels"
+    _attr_icon = "mdi:package-variant-closed"
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self.async_on_remove(async_dispatcher_connect(self.hass, SIGNAL_PANEL, self._panel_changed))
+
+    @callback
+    def _panel_changed(self, core_entry_id: str, topic: str) -> None:
+        if core_entry_id == self._link.core_entry_id and topic == "insights":
+            self.async_write_ha_state()
+
+    @property
+    def native_value(self) -> int:
+        return sum(1 for p in self._link.insights.parcels() if p["status"] != "delivered")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        listed = self._link.insights.parcels()
+        return {
+            "out_for_delivery": sum(1 for p in listed if p["status"] == "out_for_delivery"),
+            "parcels": [
+                {k: p[k] for k in ("carrier", "number", "shop", "status", "eta", "window", "url")}
+                for p in listed[:MAX_LISTED]
             ],
         }
 

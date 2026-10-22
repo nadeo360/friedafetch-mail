@@ -124,6 +124,9 @@
       },
       "ai_ratings_hour": {
         "name": "KI-Bewertungen diese Stunde"
+      },
+      "parcels": {
+        "name": "Pakete unterwegs"
       }
     }
   },

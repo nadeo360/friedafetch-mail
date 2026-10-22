@@ -105,7 +105,7 @@ wie `(a+)+` oder Ketten wie `a+a+a+` –, werden beim Speichern abgelehnt; Regex
 ## Panel
 
 **Frieda Postfach** in der Seitenleiste (nur Admins, Deutsch/Englisch). Es nutzt die Design-Bibliothek von Frieda und
-sieht daher aus wie Friedas eigenes Panel. Vier Tabs halten es übersichtlich: **Aktivität**, **Regeln**,
+sieht daher aus wie Friedas eigenes Panel. Fünf Tabs halten es übersichtlich: **Aktivität**, **Für dich**, **Regeln**,
 **KI-Sortierung** und **KI-Protokoll**; jede Tabelle hat Suche, Filter und ein Menü **Spalten** (gespeichert pro
 Home-Assistant-Benutzer).
 
@@ -116,6 +116,11 @@ die gewählte Mail (auf dem Handy öffnet sich die Mail in einem Blatt über der
   passiert ist – die Regel, Kategorie und Wichtigkeit der KI, ein Killswitch-Stopp oder „keine Aktion“; ein Ordner
   nur, wenn die Mail verschoben wurde. Die Tage sind gruppiert (und lassen sich einklappen), die Liste lädt beim
   Scrollen je 50 Mails nach, die Suche umfasst alle. Sie reicht 30 Tage zurück (höchstens 3.000 Mails).
+- **Unterhaltungen**: Mails einer Unterhaltung teilen sich eine Zeile – die neueste – mit der Zahl ihrer Mails neben
+  dem Absender (*Jede Mail einzeln zeigen* im Menü der Liste schaltet das ab). Eine Antwort gehört zu der Mail, auf die
+  sie antwortet (In-Reply-To); fehlt dieser Bezug, schließt sich eine „Re:“-/„AW:“-Mail einer früheren Mail mit
+  demselben Betreff aus den letzten 30 Tagen an. Die geöffnete Mail zeigt ihre Unterhaltung, älteste zuerst, mit
+  deinen eigenen Antworten aus „Gesendet“.
 - **Gelesen und markiert** so, wie es das Postfach gerade hat: ungelesene Mails fallen mit einem Punkt auf, markierte
   tragen eine Fahne – liest oder markierst du eine Mail am iPhone, zeigt die Aktivität das. Verlässt eine Mail ihren
   Ordner (am iPhone archiviert, von einer Regel oder der KI verschoben, gelöscht), findet Frieda sie über ihre
@@ -262,6 +267,7 @@ Neben dem Geburtstags-Sensor bekommt jedes Konto diese Sensoren (wenn Mail in Fr
 | Push | `listening`, `connecting`, `error`, `unsupported`, `stopped` oder `off` (Diagnose); die Attribute `state_*` zeigen den Blick auf gelesen/markiert (CONDSTORE, Modus, letzter Blick, Fehler) |
 | Wichtige Mails heute | nur mit KI-Sortierung: Mails ab der Benachrichtigungsschwelle (sonst ab 4), die letzten fünf als Attribute |
 | KI-Bewertungen diese Stunde | nur mit KI-Sortierung: Bewertungen in der laufenden Stunde, Limit und Modus als Attribute (Diagnose) |
+| Pakete unterwegs | noch nicht zugestellte Pakete; Attribute: wie viele heute kommen, und die Liste mit Versanddienst, Nummer, Shop, Status, voraussichtlichem Tag, Zeitfenster und Verfolgungslink |
 
 Automationen können auf diese Ereignisse reagieren (die Daten bleiben auf dem Ereignisbus von Home Assistant):
 
@@ -270,6 +276,7 @@ Automationen können auf diese Ereignisse reagieren (die Daten bleiben auf dem E
 | `friedafetch_mail_rule_matched` | eine Regel wurde auf eine Mail angewendet (nur echte Läufe, höchstens 25 pro Lauf) | `account`, `rule`, `rule_id`, `trigger`, `mailbox`, `uid`, `subject`, `from`, `move_to`, `delete`, `mark_seen`, `flag` |
 | `friedafetch_mail_rated` | die KI hat eine Mail bewertet | `account`, `uid`, `subject`, `from`, `from_domain`, `category`, `importance`, `reason`, `mode`, `applied` |
 | `friedafetch_mail_important` | wie `rated`, ab der Wichtigkeits-Schwelle | wie bei `rated` |
+| `friedafetch_mail_package` | ein Paket hat seinen Status geändert (aus einer neuen Versandmail) | `account`, `status`, `previous`, `carrier`, `number`, `url`, `shop`, `order`, `eta`, `window`, `subject`, `updated` |
 
 ```yaml
 triggers:
@@ -312,6 +319,13 @@ Aktivität und den Kontakten ermittelt; davon geht nichts an eine KI, und ohne d
 - **Abos** – Newsletter der letzten 30 Tage, die am seltensten gelesenen zuerst. *Abmelden* arbeitet wie Friedas
   `icloud_unsubscribe`: Ein-Klick-Link, sonst die Abmelde-Mail (braucht *E-Mails senden erlauben*), sonst öffnet sich
   die Seite für dich.
+- **Pakete** – ohne KI aus Versandmails erkannt: Versanddienst (DHL, DPD, Hermes, GLS, UPS, Amazon Logistics),
+  Sendungsnummer, Status (unterwegs, kommt heute mit Zeitfenster, liegt zur Abholung bereit, zugestellt, Problem) und
+  der voraussichtliche Tag. Eine Versandmail wird einmal gelesen, gleich nach ihrem Eingang; Sendungsnummern zählen nur
+  neben einem Wort wie „Sendungsnummer“, in einem Verfolgungslink des Versanddienstes oder in einer unverwechselbaren
+  Form, damit Bestellnummern nicht für Pakete gehalten werden. *Verfolgen* öffnet die Seite des Versanddienstes – nie
+  einen Link aus der Mail. Zugestellte Pakete bleiben zwei Tage stehen. Der Sensor *Pakete unterwegs* und das Ereignis
+  `friedafetch_mail_package` machen Automationen möglich.
 - **Wichtige Absender** – Kontaktgruppen (oder alle Kontakte) und Adressen oder Domains, die du nennst. Ihre Mails gehen
   nie unter: Die KI stuft sie mindestens als wichtig ein, und sie werden sofort gemeldet, auch ohne KI-Sortierung.
   In der Aktivität tragen sie einen Stern.

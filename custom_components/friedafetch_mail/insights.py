@@ -8,6 +8,8 @@
 - Rule suggestions: a sender whose mails the user always moves to the same folder (or deletes).
 - Subscriptions: newsletters of the last weeks, how many of them stayed unread, and unsubscribing from the panel.
 - The week: what arrived, what the rules and the AI did, how often the AI was right, what is still open.
+- Parcels on their way: carrier, tracking number, status and the expected day, read from shipping mails
+  (packages.py); an event for automations when one is out for delivery, waiting for pick-up or delivered.
 
 Everything is worked out locally from the activity, the mailbox and the contacts. Nothing of it goes to an AI.
 """
@@ -30,6 +32,7 @@ from homeassistant.util import dt as dt_util
 
 from custom_components.friedafetch.mail import MailboxNotFound, MailError
 
+from . import packages as shipping
 from .activity import TRASH, TRASH_NAMES, _ts
 from .const import (
     CONF_EVENTS_CALENDAR,
@@ -41,6 +44,7 @@ from .const import (
     DEFAULT_FOLLOWUP_DAYS,
     DEFAULT_VIP_NOTIFY,
     DOMAIN,
+    EVENT_PACKAGE,
     VIP_ALL_CONTACTS,
 )
 from .live import async_notify
@@ -60,6 +64,11 @@ SUBS_SCAN = 400  # newest mails per folder for the subscriptions
 SUBS_EVERY = 6 * 3600
 VIP_EVERY = 6 * 3600  # the contact groups are read again after this
 MAX_DISMISSED = 300
+PACKAGE_DAYS = 21  # shipping mails of these days are read; a parcel without news for so long is forgotten
+PACKAGE_DELIVERED_DAYS = 2  # a delivered parcel stays on the list this long
+PACKAGE_READS = 40  # shipping mails read per look (each once)
+MAX_PARSED = 1000
+PACKAGE_ORDER = {"out_for_delivery": 0, "pickup": 1, "problem": 2, "in_transit": 3, "delivered": 4}
 WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 AUTOMATED = re.compile(
     r"(^|[._+-])(no-?reply|do-?not-?reply|donotreply|noreply|notifications?|notify|mailer-daemon|postmaster|bounces?|"
@@ -156,11 +165,14 @@ class Insights:
         self._subs_at = 0.0
         self.unsubscribed: dict[str, str] = {}  # sender -> when
         self.weekly_sent: str | None = None  # ISO week of the last weekly review
+        self.packages: list[dict[str, Any]] = []
+        self.parsed: list[str] = []  # Message-IDs of shipping mails read already (each is read once)
         self._last_uid: int | None = None
         self._validity: int | None = None
         self._vips: set[str] = set()
         self._vips_at = 0.0
         self.error: str | None = None
+        self.account = ""  # label of the account, part of the events
 
     # ------------------------------------------------------------ storage
     async def async_load(self) -> None:
@@ -174,6 +186,8 @@ class Insights:
         self.replied = list(data.get("replied") or [])
         self.unsubscribed = dict(data.get("unsubscribed") or {})
         self.weekly_sent = data.get("weekly_sent")
+        self.packages = list(data.get("packages") or [])
+        self.parsed = list(data.get("parsed") or [])
         self._last_uid = data.get("last_uid")
         self._validity = data.get("validity")
         self._loaded = True
@@ -187,6 +201,8 @@ class Insights:
             "replied": self.replied[-MAX_DISMISSED:],
             "unsubscribed": dict(list(self.unsubscribed.items())[-MAX_DISMISSED:]),
             "weekly_sent": self.weekly_sent,
+            "packages": self.packages,
+            "parsed": self.parsed[-MAX_PARSED:],
             "last_uid": self._last_uid,
             "validity": self._validity,
         }
@@ -198,7 +214,9 @@ class Insights:
     async def async_dismiss(self, kind: str, item_id: str) -> None:
         """Not shown again: a rule suggestion, a reply that is not expected, a subscription, a proposal."""
         await self.async_load()
-        if kind == "proposal":
+        if kind == "package":
+            self.packages = [p for p in self.packages if p["id"] != item_id]
+        elif kind == "proposal":
             for p in self.proposals:
                 if p["id"] == item_id and p["status"] == "open":
                     p["status"] = "dismissed"
@@ -656,12 +674,15 @@ class Insights:
     async def _look_for_subscriptions(self) -> list[dict[str, Any]]:
         since = (dt_util.now() - timedelta(days=SUBS_DAYS)).date()
         per_sender: dict[str, dict[str, Any]] = {}
+        candidates: list[tuple[str, dict[str, Any]]] = []  # shipping mails, read below (the same look)
         for folder in await self._reply_folders():
             try:
                 uids = await self._mail.async_search_uids(folder, ["SINCE", _imap_date(since)])
             except MailboxNotFound:
                 continue
             for s in await self._mail.async_summaries(folder, sorted(uids)[-SUBS_SCAN:]) if uids else []:
+                if self._parcel_candidate(s):
+                    candidates.append((folder, s))
                 if not s.get("newsletter"):
                     continue
                 sender = (s.get("from") or [{}])[0]
@@ -678,6 +699,7 @@ class Insights:
                 if when >= sub["last"]:
                     sub.update(last=when, name=sender.get("name") or sub["name"], mailbox=folder, uid=s["uid"])
                     sub["subject"] = str(s.get("subject") or "")[:120]
+        await self._read_parcels(candidates, fire=False)
         dismissed = set(self.dismissed.get("subscription") or [])
         out = []
         for sub in per_sender.values():
@@ -743,6 +765,149 @@ class Insights:
         await self._save()
         return {"sender": sub["sender"], **result}
 
+    # ---------------------------------------------------------------- parcels
+    def _parcel_candidate(self, summary: dict[str, Any]) -> bool:
+        mid = summary.get("message_id")
+        when = dt_util.parse_datetime(str(summary.get("date") or ""))
+        if not mid or mid in self.parsed or when is None:
+            return False
+        return dt_util.now() - when < timedelta(days=PACKAGE_DAYS) and shipping.is_candidate(summary)
+
+    async def async_parcels_after_pass(self) -> None:
+        """New mail of the last pass: shipping mails are read at once (status changes are announced)."""
+        await self.async_load()
+        cutoff = dt_util.now().timestamp() - 86400
+        found: list[tuple[str, dict[str, Any]]] = []
+        for item in self._activity.items:
+            if _ts(item.get("time")) < cutoff:
+                continue
+            summary = {
+                "from": [{"email": email_of(item.get("from")), "name": item.get("name") or ""}],
+                "subject": item.get("subject") or "",
+                "message_id": item.get("message_id"),
+                "date": item.get("date") or item.get("time"),
+            }
+            place = self._activity.where(item)
+            if place is not None and self._parcel_candidate(summary):
+                found.append((place[0], {**summary, "uid": place[1]}))
+        if found:
+            async with self._lock:
+                await self._read_parcels(found, fire=True)
+
+    async def _read_parcels(self, candidates: list[tuple[str, dict[str, Any]]], *, fire: bool) -> None:
+        """Read the shipping mails (newest last) and merge what they say into the parcels."""
+        guard = self._clients.guard
+        candidates.sort(key=lambda c: str(c[1].get("date") or ""))
+        changed = False
+        for folder, summary in candidates[-PACKAGE_READS:]:
+            if guard is not None:
+                try:
+                    guard.check_mailbox_visible(folder)
+                except Exception:  # noqa: BLE001, S112 - a hidden folder is not read
+                    continue
+            try:
+                message = await self._mail.async_get_message(folder, int(summary["uid"]), max_chars=20000)
+            except (MailError, MailboxNotFound) as err:
+                _LOGGER.debug("Parcels: reading a shipping mail failed: %s", err)
+                continue
+            self.parsed.append(str(summary["message_id"]))
+            sent = dt_util.parse_datetime(str(message.get("date") or summary.get("date") or "")) or dt_util.now()
+            info = shipping.parse({**summary, **message}, str(message.get("body") or ""), dt_util.as_local(sent))
+            if info is not None:
+                changed |= self._merge_parcel(info, fire=fire)
+        self.parsed = self.parsed[-MAX_PARSED:]
+        self._prune_parcels()
+        await self._save()
+        if changed:
+            async_notify(self._hass, self._entry_id, "insights")
+
+    def _merge_parcel(self, info: dict[str, Any], *, fire: bool) -> bool:
+        keys = [f"{info['carrier']}:{n}" for n in info["numbers"]]
+        if info.get("order"):
+            keys.append(f"order:{info['domain']}:{info['order']}")
+        if not keys:
+            keys = [f"mail:{info['message_id']}"]
+        parcel = next((p for p in self.packages if set(p.get("keys") or []) & set(keys)), None)
+        if parcel is None:
+            parcel = {
+                "id": _id(*keys),
+                "keys": [],
+                "carrier": None,
+                "number": None,
+                "shop": None,
+                "order": None,
+                "status": None,
+                "eta": None,
+                "window": None,
+                "subject": "",
+                "updated": "",
+                "mails": [],
+            }
+            self.packages.append(parcel)
+        parcel["keys"] = list(dict.fromkeys([*parcel["keys"], *keys]))
+        parcel["mails"] = list(dict.fromkeys([*parcel["mails"], info["message_id"]]))[-10:]
+        for key in ("carrier", "shop", "order"):
+            parcel[key] = parcel[key] or info.get(key)
+        parcel["number"] = parcel["number"] or (info["numbers"][0] if info["numbers"] else None)
+        if info["date"] < parcel["updated"]:
+            return False  # an older mail: it only adds what was missing
+        before = parcel["status"]
+        parcel.update(status=info["status"], subject=info["subject"], updated=info["date"])
+        if info.get("eta"):
+            parcel["eta"] = info["eta"]
+        if info.get("window") or info.get("eta"):
+            parcel["window"] = info.get("window")
+        if info["status"] == "delivered":
+            parcel["window"] = None
+        if fire and info["status"] != before:
+            self._hass.bus.async_fire(
+                EVENT_PACKAGE,
+                {
+                    "account": self.account,
+                    "entry_id": self._entry_id,
+                    "status": info["status"],
+                    "previous": before,
+                    **{k: v for k, v in self.parcel_view(parcel).items() if k not in ("id", "status")},
+                },
+            )
+        return True
+
+    def _prune_parcels(self) -> None:
+        now = dt_util.now()
+        keep = []
+        for p in self.packages:
+            updated = dt_util.parse_datetime(p.get("updated") or "")
+            age = now - updated if updated is not None else timedelta(days=999)
+            if age > timedelta(days=PACKAGE_DAYS):
+                continue
+            if p.get("status") == "delivered" and age > timedelta(days=PACKAGE_DELIVERED_DAYS):
+                continue
+            keep.append(p)
+        self.packages = keep
+
+    @staticmethod
+    def parcel_view(p: dict[str, Any]) -> dict[str, Any]:
+        """A parcel as the panel, the sensor and the tool show it (the link built from the carrier's address)."""
+        return {
+            "id": p["id"],
+            "carrier": shipping.carrier_name(p.get("carrier")),
+            "number": p.get("number"),
+            "url": shipping.tracking_url(p.get("carrier"), p.get("number")),
+            "shop": p.get("shop"),
+            "order": p.get("order"),
+            "status": p.get("status"),
+            "eta": p.get("eta"),
+            "window": p.get("window"),
+            "subject": p.get("subject"),
+            "updated": p.get("updated"),
+        }
+
+    def parcels(self) -> list[dict[str, Any]]:
+        """The parcels to show: on their way first, the expected day next; delivered ones for two days."""
+        self._prune_parcels()
+        listed = [self.parcel_view(p) for p in self.packages]
+        return sorted(listed, key=lambda p: (PACKAGE_ORDER.get(p["status"] or "", 9), p["eta"] or "9999", p["updated"]))
+
     # --------------------------------------------------------------- the week
     def week(self, now: datetime | None = None) -> dict[str, Any]:
         """The last seven days, and the seven before for comparison."""
@@ -776,6 +941,7 @@ class Insights:
             "waiting": len(self.followups),
             "proposals": len(self.open_proposals()),
             "never_opened": sum(1 for s in self.subscriptions if s.get("never_opened") and not s.get("unsubscribed")),
+            "parcels": sum(1 for p in self.packages if p.get("status") != "delivered"),
         }
 
     def week_text(self, week: dict[str, Any]) -> tuple[str, str]:
@@ -868,6 +1034,7 @@ class Insights:
             "suggestions": self.rule_suggestions(),
             "subscriptions": self.subscriptions,
             "subscriptions_checked": self.subscriptions_checked,
+            "parcels": self.parcels(),
             "vip": {
                 "groups": list(self.opts.get(CONF_VIP_GROUPS) or []),
                 "senders": len(parse_list(self.opts.get(CONF_VIP_SENDERS))),

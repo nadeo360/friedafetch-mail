@@ -138,6 +138,22 @@ async def test_panel_answers_keep_their_shape(hass: HomeAssistant, hass_ws_clien
         AsyncMock(return_value={"body": "Hallo", "body_truncated": False, "attachments": [{"filename": "a.pdf"}]}),
     ):
         shapes["friedafetch_mail/mail/text"] = await call("friedafetch_mail/mail/text", message_id="<3@example.com>")
+    with (
+        patch(f"{MAIL}.async_special_mailbox", AsyncMock(return_value="Sent Messages")),
+        patch(f"{MAIL}.async_search_uids", AsyncMock(return_value=[21])),
+        patch(
+            f"{MAIL}.async_summaries",
+            AsyncMock(
+                return_value=[
+                    _summary(21, "Re: Treffen morgen?", "me@icloud.com")
+                    | {"to": [{"name": "Anna", "email": "anna@example.com"}], "date": "2026-10-20T10:00:00+02:00"}
+                ]
+            ),
+        ),
+    ):
+        shapes["friedafetch_mail/mail/thread"] = await call(
+            "friedafetch_mail/mail/thread", message_id="<4@example.com>"
+        )
     shapes["friedafetch_mail/mail/timeline"] = await call(
         "friedafetch_mail/mail/timeline", message_id="<4@example.com>"
     )

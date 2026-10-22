@@ -487,6 +487,41 @@ class FriedaPostfachPanel extends HTMLElement {
     this._renderWhenFree();
   }
 
+  async _loadThread(mid) {
+    const threads = (this._s.threads ||= new Map());
+    threads.set(mid, { busy: true });
+    try {
+      threads.set(mid, { data: await this._ws({ type: "friedafetch_mail/mail/thread", entry_id: this._s.entryId, message_id: mid }) });
+    } catch (err) {
+      threads.set(mid, { err: err.message || String(err) });
+    }
+    this._renderWhenFree();
+  }
+
+  // The conversation of the open mail: its mails in the activity and your answers from the sent mail, oldest first.
+  _threadHtml(mid, item) {
+    const t = this.t;
+    if (!item || !(item.thread_count > 1)) return "";
+    const threads = (this._s.threads ||= new Map());
+    const x = threads.get(mid);
+    if (!x) {
+      this._loadThread(mid);
+      return "";
+    }
+    if (x.busy || x.err || !x.data) return "";
+    const rows = x.data.items
+      .map((m) => {
+        const me = m.message_id === mid;
+        const who = m.mine ? fmt(t.threadYou, m.name || m.from || "–") : m.name || m.from || "–";
+        const body = `<span class="tw">${m.mine ? ico("reply") : ""}<strong>${esc(who)}</strong><span class="muted">${esc(fmtShort(m.date))}</span></span><span class="ts">${esc(m.subject || "–")}</span>`;
+        return m.key && !me
+          ? `<li><button class="threadrow ${m.seen === false ? "unread" : ""}" data-action="thread-open" data-id="${esc(m.key)}">${body}</button></li>`
+          : `<li><div class="threadrow ${me ? "here" : ""} ${m.mine ? "mine" : ""}" ${me ? 'aria-current="true"' : ""}>${body}</div></li>`;
+      })
+      .join("");
+    return `<h3 class="sect">${esc(fmt(t.thread, x.data.items.length))}</h3><ul class="thread">${rows}</ul>`;
+  }
+
   _textHtml(mid) {
     const t = this.t;
     const x = this._s.texts.get(mid);
@@ -1684,7 +1719,8 @@ class FriedaPostfachPanel extends HTMLElement {
     const a = this._s.act;
     const offset = more ? a.items.length : 0;
     const limit = more ? ACT_PAGE : Math.max(ACT_PAGE, Math.min(a.items.length, 500));
-    const res = await this._ws({ type: "friedafetch_mail/activity/list", entry_id: this._s.entryId, view: a.view, query: a.query.trim(), offset, limit });
+    const threads = this._layout.opt("act", "threads", true); // one line per conversation, like a mail program
+    const res = await this._ws({ type: "friedafetch_mail/activity/list", entry_id: this._s.entryId, view: a.view, query: a.query.trim(), offset, limit, threads });
     a.items = more ? [...a.items, ...res.items] : res.items;
     a.total = res.total;
     a.days = res.days || [];
@@ -1946,7 +1982,7 @@ class FriedaPostfachPanel extends HTMLElement {
       const st = item.state && item.state.seen != null ? item.state : null;
       const unread = st?.seen === false;
       const flag = st?.flagged ? `<span class="fl" aria-hidden="true">${ico("flag")}</span>` : "";
-      const aria = `${name}, ${item.subject || "–"}, ${this._dayLabel(item.day)} ${when}${unread ? `, ${t.stUnread}` : ""}${st?.flagged ? `, ${t.stFlagged}` : ""}`;
+      const aria = `${name}, ${item.subject || "–"}, ${this._dayLabel(item.day)} ${when}${unread ? `, ${t.stUnread}` : ""}${st?.flagged ? `, ${t.stFlagged}` : ""}${item.thread_count > 1 ? `, ${fmt(t.actThreadCount, item.thread_count)}` : ""}`;
       const role = a.picking
         ? item.selectable
           ? `role="checkbox" aria-checked="${picked}" aria-label="${esc(aria)}"`
@@ -1955,7 +1991,7 @@ class FriedaPostfachPanel extends HTMLElement {
       const av = a.picking ? `<span class="av ${item.selectable ? "pick" : "off"}" aria-hidden="true">${picked ? ico("check") : ""}</span>` : "";
       parts.push(`<li class="m ${!a.picking && a.open === item.key ? "open" : ""} ${picked ? "picked" : ""} ${a.picking && !item.selectable ? "dim" : ""} ${this._fresh?.has?.(item.key) ? "fresh" : ""} ${unread ? "unread" : ""}">
           ${av}<button class="mitem" data-action="act-open" data-id="${esc(item.key)}" ${role}>
-            <span class="r1">${unread ? `<span class="ud" aria-hidden="true"></span>` : ""}<span class="from">${esc(name)}</span>${flag}<span class="time">${esc(when)}</span></span>
+            <span class="r1">${unread ? `<span class="ud" aria-hidden="true"></span>` : ""}<span class="from">${esc(name)}</span>${item.thread_count > 1 ? `<span class="thr">${ico("forum-outline")}${esc(item.thread_count)}</span>` : ""}${flag}<span class="time">${esc(when)}</span></span>
             <span class="subj">${esc(item.subject || "–")}</span>
             <span class="r3">${this._actMeta(item)}${this._actRowBatch(item.key)}</span>
           </button></li>`);
@@ -1965,7 +2001,14 @@ class FriedaPostfachPanel extends HTMLElement {
       ? `<div class="lmore" data-more-sentinel>${a.loadingMore ? `<span class="spinner" aria-hidden="true"></span>` : ""}<button class="link small" data-action="act-more" ${a.loadingMore ? "disabled" : ""}>${esc(fmt(t.actMore, Math.min(ACT_PAGE, left)))}</button><span class="muted">${esc(fmt(t.actLeft, left))}</span></div>`
       : "";
     // the rare "clear" sits next to the title on wide screens, next to the search on narrow ones
-    const menu = W.cardMenu([a.counts?.all && { action: "act-clear", icon: "delete-sweep-outline", label: t.actClear, danger: true, disabled: s.busy }], t);
+    const grouped = this._layout.opt("act", "threads", true);
+    const menu = W.cardMenu(
+      [
+        { action: "act-threads", icon: grouped ? "format-list-bulleted" : "forum-outline", label: grouped ? t.actThreadsOff : t.actThreadsOn },
+        a.counts?.all && { action: "act-clear", icon: "delete-sweep-outline", label: t.actClear, danger: true, disabled: s.busy },
+      ],
+      t
+    );
     const opts = (group, list) => `<optgroup label="${esc(group)}">${list.map(([id, l, , n]) => `<option value="${esc(id)}" ${a.view === id ? "selected" : ""}>${esc(l)} (${esc(n)})</option>`).join("")}</optgroup>`;
     const tools = a.picking
       ? `<div class="pickbar">
@@ -2082,6 +2125,7 @@ class FriedaPostfachPanel extends HTMLElement {
           ${askHtml}
         </div>
         ${mid ? `<div class="mtextwrap">${this._textHtml(mid)}</div>` : ""}
+        ${mid ? this._threadHtml(mid, item) : ""}
         <h3 class="sect">${esc(t.actHistory)}</h3>
         ${body}
       </div>
@@ -2412,6 +2456,7 @@ class FriedaPostfachPanel extends HTMLElement {
       w.rated ? tile("creation", w.accuracy == null ? "–" : `${w.accuracy} %`, t.fyAccuracy, fmt(t.fyRated, w.rated, w.corrected)) : "",
       tile("email-mark-as-unread", w.unread ?? 0, t.fyUnread),
       fy.followup_days ? tile("reply-outline", w.waiting ?? 0, t.fyWaiting) : "",
+      w.parcels ? tile("truck-delivery-outline", w.parcels, t.fyParcelsTile) : "",
       w.proposals ? tile("calendar-plus", w.proposals, t.fyProposals) : "",
       w.never_opened ? tile("email-off-outline", w.never_opened, t.fyNeverOpened) : "",
     ].join("");
@@ -2429,11 +2474,40 @@ class FriedaPostfachPanel extends HTMLElement {
       </div>`;
     return [
       `<section class="widget w-full" data-widget="fy-week">${week}</section>`,
+      (fy.parcels || []).length ? `<section class="widget w-full" data-widget="fy-parcels">${this._fyParcels(fy)}</section>` : "",
       `<section class="widget w-full" data-widget="fy-events">${this._fyEvents(fy)}</section>`,
       `<section class="widget w-full" data-widget="fy-replies">${this._fyReplies(fy)}</section>`,
       `<section class="widget w-full" data-widget="fy-rules">${this._fySuggestions(fy)}</section>`,
       `<section class="widget w-full" data-widget="fy-subs">${this._fySubs(fy)}</section>`,
     ].join("");
+  }
+
+  _fyParcels(fy) {
+    const t = this.t;
+    const icons = { out_for_delivery: "truck-delivery-outline", pickup: "store-marker-outline", problem: "package-variant-remove", delivered: "package-variant-closed-check", in_transit: "package-variant-closed" };
+    const day = (iso) => {
+      if (!iso) return "";
+      const d = new Date(`${iso}T12:00:00`);
+      const today = new Date();
+      const diff = Math.round((new Date(d.toDateString()) - new Date(today.toDateString())) / 86400000);
+      return diff === 0 ? t.fyToday : diff === 1 ? t.fyTomorrow : d.toLocaleDateString(this._lang(), { weekday: "short", day: "numeric", month: "short" });
+    };
+    const rows = (fy.parcels || [])
+      .map((p) => {
+        const when = p.status === "delivered" ? "" : [day(p.eta), p.window ? fmt(t.fyWindow, p.window) : ""].filter(Boolean).join(" ");
+        const who = [p.carrier, p.number].filter(Boolean).join(" · ");
+        const warn = p.status === "problem" || p.status === "out_for_delivery" || p.status === "pickup";
+        return `<div class="ai-cat fy-row"><span class="fy-ic ${warn ? "warn" : ""}">${ico(icons[p.status] || "package-variant-closed")}</span>
+          <span class="tx"><strong>${esc(p.shop || p.carrier || p.subject || "–")}</strong><span>${esc(t.fyParcel[p.status] || p.status)}${when ? ` · ${esc(when)}` : ""}</span>
+            <span class="muted">${esc(who || p.subject || "")}</span></span>
+          ${p.url ? `<button class="secondary small ib" data-action="fy-track" data-url="${esc(p.url)}">${ico("open-in-new")}${esc(t.fyTrack)}</button>` : ""}
+          <button class="icon" data-action="fy-dismiss" data-kind="package" data-id="${esc(p.id)}" title="${esc(t.fyHide)}" aria-label="${esc(t.fyHide)}: ${esc(p.shop || p.carrier || "")}">${ico("close")}</button></div>`;
+      })
+      .join("");
+    const open = (fy.parcels || []).filter((p) => p.status !== "delivered").length;
+    return `<div class="card"><div class="chead"><h2>${esc(t.fyParcels)}</h2>${open ? `<span class="badge">${open}</span>` : ""}</div>
+      <p class="muted" style="margin:-4px 0 10px">${esc(t.fyParcelsHint)}</p>
+      <div class="ai-cats">${rows}</div></div>`;
   }
 
   _fyEvents(fy) {
@@ -2795,6 +2869,13 @@ class FriedaPostfachPanel extends HTMLElement {
         "fy-rule": () => this._fyRule(el.dataset.id),
         "fy-unsub": () => this._fyUnsub(el.dataset.sender, el.dataset.name),
         "fy-tab": () => this._setTab(el.dataset.v),
+        "act-threads": async () => {
+          this._layout.setOpt("act", "threads", !this._layout.opt("act", "threads", true));
+          await this._loadActivity().catch(() => {});
+          this._render();
+        },
+        "thread-open": () => this._actOpen(el.dataset.id),
+        "fy-track": () => window.open(el.dataset.url, "_blank", "noopener,noreferrer"),
         // a new rule for mails like this one: the sender as its condition, to be changed in the editor
         "rule-from-mail": () => {
           const rule = this._blankRule();

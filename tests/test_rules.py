@@ -386,6 +386,7 @@ async def test_run_history_merges_idle_auto_runs(hass: HomeAssistant) -> None:
             "message_id": None,
             "date": None,
             "name": NEWSLETTER["from"][0]["name"],
+            "in_reply_to": None,
             "rules": ["News"],
             "move_to": None,
             "delete": False,

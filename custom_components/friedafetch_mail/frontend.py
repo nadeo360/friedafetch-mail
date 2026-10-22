@@ -94,6 +94,7 @@ async def async_setup_frontend(hass: HomeAssistant, version: str) -> None:
         ws_mail_locate,
         ws_mail_act,
         ws_mail_text,
+        ws_mail_thread,
         ws_ai_apply,
         ws_insights_get,
         ws_insights_refresh,
@@ -573,6 +574,7 @@ VIEW = vol.All(str, vol.Match(r"^(all|k:(ai|rule|held|none)|f:.{1,200})$"))
         vol.Optional("query", default=""): vol.All(str, vol.Length(max=200)),
         vol.Optional("offset", default=0): vol.All(int, vol.Range(min=0)),
         vol.Optional("limit", default=50): vol.All(int, vol.Range(min=1, max=500)),
+        vol.Optional("threads", default=False): bool,
     }
 )
 @websocket_api.require_admin
@@ -584,7 +586,8 @@ async def ws_activity_list(
     """One page of the checked messages (newest first), the days in the view, and the counts of all views."""
     link = _entry(hass, msg.get("entry_id")).runtime_data
     rows = await _activity_rows(link)
-    connection.send_result(msg["id"], summarize(rows, msg["view"], msg["query"].strip(), msg["offset"], msg["limit"]))
+    result = summarize(rows, msg["view"], msg["query"].strip(), msg["offset"], msg["limit"], grouped=msg["threads"])
+    connection.send_result(msg["id"], result)
 
 
 @websocket_api.websocket_command(
@@ -719,6 +722,69 @@ async def ws_mail_text(hass: HomeAssistant, connection: websocket_api.ActiveConn
     )
 
 
+THREAD_REPLIES = 10  # mails of a conversation whose answers are looked for in the sent mail
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/mail/thread",
+        vol.Optional("entry_id"): str,
+        vol.Required("message_id"): vol.All(str, vol.Length(min=3, max=300)),
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+@_ws_errors
+async def ws_mail_thread(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """The conversation of a mail: the mails of it in the activity and the user's own answers from the sent mail."""
+    link = _entry(hass, msg.get("entry_id")).runtime_data
+    rows = await _activity_rows(link)
+    mine = next((r for r in rows if r.get("message_id") == msg["message_id"]), None)
+    members = [r for r in rows if mine is not None and r["thread"] == mine["thread"]]
+    items = [
+        {
+            "key": r["key"],
+            "message_id": r.get("message_id"),
+            "from": r.get("from"),
+            "name": r.get("name"),
+            "subject": r.get("subject"),
+            "date": r.get("date") or r.get("time"),
+            "mine": False,
+            "seen": (r.get("state") or {}).get("seen"),
+        }
+        for r in members
+    ]
+    sent: list[dict[str, Any]] = []
+    mail = link.mail or link.clients.mail
+    ids = [r["message_id"] for r in members if r.get("message_id")][:THREAD_REPLIES]
+    box = await mail.async_special_mailbox("sent") if len(ids) and hasattr(mail, "async_special_mailbox") else None
+    if box:
+        try:
+            uids: set[int] = set()
+            for mid in ids:
+                quoted = '"' + mid.replace("\\", "\\\\").replace('"', '\\"') + '"'
+                uids.update(await mail.async_search_uids(box, ["HEADER", "In-Reply-To", quoted]))
+            sent = await mail.async_summaries(box, sorted(uids)[-THREAD_REPLIES:]) if uids else []
+        except MailError as err:
+            _LOGGER.debug("Conversation: the sent mail could not be searched: %s", err)
+    for s in sent:
+        to = (s.get("to") or [{}])[0]
+        items.append(
+            {
+                "key": None,
+                "message_id": s.get("message_id"),
+                "from": to.get("email"),
+                "name": to.get("name"),
+                "subject": s.get("subject"),
+                "date": s.get("date"),
+                "mine": True,
+                "seen": True,
+            }
+        )
+    items.sort(key=lambda i: str(i.get("date") or ""))
+    connection.send_result(msg["id"], {"items": items})
+
+
 async def _target_folders(link: Any) -> list[str]:
     """Folders a category may move mails to: every folder the AI may see, except the inbox."""
     boxes = await (link.mail or link.clients.mail).async_mailboxes()
@@ -838,7 +904,7 @@ async def ws_insights_refresh(
     connection.send_result(msg["id"], await insights.async_get())
 
 
-INSIGHT_KINDS = ("rule", "followup", "subscription", "proposal")
+INSIGHT_KINDS = ("rule", "followup", "subscription", "proposal", "package")
 
 
 @websocket_api.websocket_command(

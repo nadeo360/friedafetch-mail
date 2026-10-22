@@ -35,6 +35,7 @@ function makeRows(volume) {
     { id: "karte-belasten", min: 90, name: "Reiseportal", from: "noreply@reiseportal.example", subject: "Wir werden Ihre Karte bald belasten", type: "bill", importance: 4, confidence: "low" },
     { id: "bestellung-unterwegs", min: 60 * 15, name: "Shop Versand", from: "versand@shop.example", subject: "Ihre Bestellung ist unterwegs", type: "bill", confidence: "low" },
     { id: "moebel-wochenende", min: 60 * 17, name: "Möbelhaus", from: "newsletter@moebel.example", subject: "Wochenend-Angebote: bis zu 40 % auf Sofas", type: "news", local: true },
+    { id: "elternabend-antwort", min: 60 * 18, name: "Schule Sekretariat", from: "sekretariat@schule.example", subject: "Re: Elternabend am Donnerstag", type: "personal", importance: 3, reply: "elternabend" },
     { id: "elternabend", min: 60 * 21, name: "Schule Sekretariat", from: "sekretariat@schule.example", subject: "Elternabend am Donnerstag", type: "personal", importance: 4, gone: true },
     { id: "rabatt-code", min: 60 * 23, name: "Werbung", from: "promo@werbung.example", subject: "Rabatt-Code nur heute", type: "promo" },
   ].map((x) => ({ ...x, time: at(x.min) }));
@@ -51,7 +52,7 @@ function makeRows(volume) {
     }
   }
   base.sort((a, b) => (a.time < b.time ? 1 : -1));
-  return base.map((x, i) => {
+  const rows = base.map((x, i) => {
     const mid = `<${x.id}@example>`;
     const row = { key: mid, message_id: mid, mailbox: "INBOX", uid: 1000 - i, subject: x.subject, from: x.from, name: x.name, date: x.time, time: x.time, updated: x.time, trigger: "push", rules: [], move_to: null, delete: false, seen: null, flag: null, ai: null, day: dayOf(x.time) };
     if (x.type === "ci") Object.assign(row, { rules: ["CI-Meldungen löschen"], delete: true });
@@ -70,12 +71,18 @@ function makeRows(volume) {
     row.folder = row.delete ? TRASH : moved ? (moved.slice(6) === "Deleted Messages" ? TRASH : moved.slice(6)) : "INBOX";
     row.selectable = !!row.message_id && row.kind !== "rule";
     row.vip = x.from === "erika@example.com"; // a contact of the group "Familie"
+    row.in_reply_to = x.reply ? `<${x.reply}@example>` : null;
+    row.thread = x.reply ? `<${x.reply}@example>` : mid; // one conversation: the school's answer to its invitation
     row.unsure = row.kind === "ai" && row.ai.confidence === "low" && !row.corrected;
     // read / flagged as the mailbox has it (mailstate.py): the newest ones still unread, flagged personal mails
     // (one was moved to the archive on another device: followed there by its Message-ID)
     row.state = row.folder === "INBOX" ? { seen: i >= 2 && i !== 6, flagged: (row.ai?.applied || []).includes("flagged"), gone: false, mailbox: x.gone ? "Archive" : "INBOX", uid: x.gone ? 9000 + i : row.uid, searched: null, checked: new Date(now).toISOString() } : null;
     return row;
   });
+  const sizes = {};
+  for (const r of rows) sizes[r.thread] = (sizes[r.thread] || 0) + 1;
+  for (const r of rows) r.thread_count = sizes[r.thread];
+  return rows;
 }
 
 const matches = (row, view, query) => {
@@ -174,7 +181,7 @@ function derive(data, rows) {
     const rated = mails.filter((m) => m.kind === "ai");
     return { started: time, finished: time, trigger: "push", scope: "new", mailboxes: ["INBOX"], checked: mails.length, matched: mails.filter((m) => m.rules.length).length, actions: mails.filter((m) => m.rules.length).length, rules: perRule,
       ai: rated.length || mails.some((m) => m.kind === "held") ? { rated: rated.length, applied: rated.filter((m) => m.ai.applied.length).length, held: mails.filter((m) => m.kind === "held").length, errors: [] } : null,
-      mails: mails.map((m) => ({ subject: m.subject, from: m.from, name: m.name, mailbox: "INBOX", uid: m.uid, message_id: m.message_id, date: m.date, rules: m.rules, move_to: null, delete: m.delete, seen: null, flag: null, ai: m.ai ? { category: m.ai.category, importance: m.ai.importance, confidence: m.ai.confidence, applied: m.ai.applied, held: m.ai.held, local: m.ai.local ?? null } : null })),
+      mails: mails.map((m) => ({ subject: m.subject, from: m.from, name: m.name, mailbox: "INBOX", uid: m.uid, message_id: m.message_id, date: m.date, in_reply_to: m.in_reply_to ?? null, rules: m.rules, move_to: null, delete: m.delete, seen: null, flag: null, ai: m.ai ? { category: m.ai.category, importance: m.ai.importance, confidence: m.ai.confidence, applied: m.ai.applied, held: m.ai.held, local: m.ai.local ?? null } : null })),
       mails_more: 0, errors: [], skipped: 0, saved_files: 0, idle: false, runs: 1 };
   });
   runs.push({ started: at(300), finished: at(120), trigger: "auto", scope: "new", mailboxes: ["INBOX"], checked: 0, matched: 0, rules: {}, ai: null, mails: [], mails_more: 0, errors: [], idle: true, runs: 15 });
@@ -202,7 +209,12 @@ function insights(data, rows) {
   const corrected = ai.ratings.filter((r) => r.corrected).length;
   data["friedafetch_mail/ai"].status.events = true;
   return {
-    week: { from: ago(7), to: new Date().toISOString(), mails: rows.length, mails_before: Math.max(1, rows.length - 3), by_rules: rows.filter((r) => r.kind === "rule").length, by_ai: rows.filter((r) => r.kind === "ai").length, rated, corrected, accuracy: rated ? Math.round((100 * (rated - corrected)) / rated) : null, unread: rows.filter((r) => r.state?.seen === false).length, top_senders: [{ sender: "news@gartenmarkt.example", count: 3 }], waiting: 2, proposals: 2, never_opened: 1 },
+    week: { from: ago(7), to: new Date().toISOString(), mails: rows.length, mails_before: Math.max(1, rows.length - 3), by_rules: rows.filter((r) => r.kind === "rule").length, by_ai: rows.filter((r) => r.kind === "ai").length, rated, corrected, accuracy: rated ? Math.round((100 * (rated - corrected)) / rated) : null, unread: rows.filter((r) => r.state?.seen === false).length, top_senders: [{ sender: "news@gartenmarkt.example", count: 3 }], waiting: 2, proposals: 2, never_opened: 1, parcels: 2 },
+    parcels: [
+      { id: "k1", carrier: "DHL", number: "00340434161094000001", url: "https://www.dhl.de/de/privatkunden/pakete-empfangen/verfolgen.html?piececode=00340434161094000001", shop: "Shop Versand", order: "4711-2026", status: "out_for_delivery", eta: day(0), window: "10:00–14:00", subject: "Ihre Sendung kommt heute", updated: ago(0.1) },
+      { id: "k2", carrier: "Hermes", number: "H1001234567890123456", url: "https://www.myhermes.de/empfangen/sendungsverfolgung/sendungsinformation/#H1001234567890123456", shop: "Möbelhaus", order: null, status: "in_transit", eta: day(3), window: null, subject: "Ihre Bestellung ist unterwegs", updated: ago(1) },
+      { id: "k3", carrier: "DPD", number: "01234567890123", url: "https://tracking.dpd.de/status/de_DE/parcel/01234567890123", shop: "Gartenmarkt", order: null, status: "delivered", eta: null, window: null, subject: "Ihr Paket wurde zugestellt", updated: ago(0.6) },
+    ],
     proposals: [
       { id: "p1", status: "open", created: ago(0.1), rating_id: "r0", message_id: "<test-frieda@example>", subject: "Kurze Frage zu Samstag", from: "Erika Mustermann", kind: "appointment", title: "Grillen bei Erika", start: day(3, "18:00"), end: day(3, "22:00"), all_day: false, location: "Gartenweg 5" },
       { id: "p2", status: "open", created: ago(0.5), rating_id: "r5", message_id: "<ratenkredit@example>", subject: "Ihr Ratenkredit - letzte Rate im November", from: "Kundenservice Bank", kind: "deadline", title: "Letzte Rate überweisen", start: day(12), end: null, all_day: true, location: null },
@@ -268,7 +280,11 @@ export function install({ data, q }) {
         kinds[r.kind] += 1;
         folders[r.folder] = (folders[r.folder] || 0) + 1;
       }
-      const hits = rows.filter((r) => matches(r, view, query));
+      let hits = rows.filter((r) => matches(r, view, query));
+      if (m.threads) {
+        const seen = new Set();
+        hits = hits.filter((r) => !seen.has(r.thread) && seen.add(r.thread)); // one line per conversation
+      }
       const days = [];
       for (const r of hits) {
         let d = days.find((x) => x.day === r.day);
@@ -281,6 +297,18 @@ export function install({ data, q }) {
       const unread = rows.filter((r) => r.state?.seen === false).length;
       const flagged = rows.filter((r) => r.state?.flagged).length;
       return structuredClone({ items: hits.slice(offset, offset + (m.limit || 50)), total: hits.length, selectable: hits.filter((r) => r.selectable).length, days, counts: { all: rows.length, unsure, unread, flagged, kinds, folders } });
+    }
+    if (m.type === "friedafetch_mail/mail/thread") {
+      const me = find(m.message_id);
+      const items = rows
+        .filter((r) => me && r.thread === me.thread)
+        .map((r) => ({ key: r.key, message_id: r.message_id, from: r.from, name: r.name, subject: r.subject, date: r.date, mine: false, seen: r.state?.seen ?? null }));
+      if (items.length > 1) {
+        const first = items[items.length - 1];
+        const at = new Date(new Date(first.date).getTime() + 3600000).toISOString();
+        items.push({ key: null, message_id: "<antwort@example>", from: first.from, name: first.name, subject: `Re: ${first.subject}`, date: at, mine: true, seen: true });
+      }
+      return { items: items.sort((a, b) => (a.date < b.date ? -1 : 1)) };
     }
     if (m.type === "friedafetch_mail/activity/select") {
       return { messages: rows.filter((r) => matches(r, m.view || "all", (m.query || "").trim()) && r.selectable && (!m.day || r.day === m.day)).map((r) => ({ key: r.key, message_id: r.message_id, mailbox: r.mailbox })) };
@@ -468,9 +496,10 @@ export function install({ data, q }) {
       return fy;
     }
     if (m.type === "friedafetch_mail/insights/dismiss") {
-      const list = { rule: "suggestions", followup: "followups", subscription: "subscriptions", proposal: "proposals" }[m.kind];
+      const list = { rule: "suggestions", followup: "followups", subscription: "subscriptions", proposal: "proposals", package: "parcels" }[m.kind];
       fy[list] = fy[list].filter((x) => x.id !== m.item_id);
-      if (m.kind !== "proposal") fy.dismissed[m.kind] = (fy.dismissed[m.kind] || 0) + 1;
+      if (m.kind !== "proposal" && m.kind !== "package") fy.dismissed[m.kind] = (fy.dismissed[m.kind] || 0) + 1;
+      fy.week.parcels = fy.parcels.filter((x) => x.status !== "delivered").length;
       fy.week.waiting = fy.followups.length;
       fy.week.proposals = fy.proposals.length;
       return fy;

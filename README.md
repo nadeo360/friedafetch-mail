@@ -103,7 +103,7 @@ rule is saved; regex conditions look at the first 300 characters of a header.
 ## Panel
 
 **Frieda Postfach** in the sidebar (admins only, German/English). It uses Frieda's design library, so it looks like
-Frieda's own panel. Four tabs keep it tidy: **Activity**, **Rules**, **AI sorting** and **AI log**; every table has
+Frieda's own panel. Five tabs keep it tidy: **Activity**, **For you**, **Rules**, **AI sorting** and **AI log**; every table has
 search, filters and a **Columns** menu (stored per Home Assistant user).
 
 **Activity** looks like a mail program: views and folders on the left, the checked mails in the middle, the chosen
@@ -113,6 +113,10 @@ mail on the right (on phones the mail opens in a sheet over the list that you sw
   rule, the AI's category and importance, a kill-switch hold or "no action"; a folder only when the mail was moved.
   Days are grouped (and can be folded), the list loads 50 mails at a time while you scroll, the search covers all of
   them. It keeps the last 30 days (at most 3,000 mails).
+- **Conversations**: mails of one conversation share one line – the newest – with the number of its mails next to
+  the sender (*Show every mail* in the list's menu turns it off). A reply belongs to the mail it answers
+  (In-Reply-To); without that reference, a “Re:”/“AW:” mail joins an earlier mail with the same subject of the last
+  30 days. The open mail lists its conversation, oldest first, including your own answers from the sent mail.
 - **Read and flagged** as the mailbox has it now: unread mails stand out with a dot, flagged ones carry a flag – read
   or flag a mail on the iPhone and the activity shows it. A mail that leaves its folder (archived on the iPhone,
   moved by a rule or the AI, deleted) is found again by its Message-ID and followed there. Push notices changes in
@@ -246,6 +250,7 @@ Besides the birthday sensor, every account gets these sensors (when mail is enab
 | Push | `listening`, `connecting`, `error`, `unsupported`, `stopped` or `off` (diagnostic); the attributes `state_*` show the read/flagged look (CONDSTORE, mode, last look, error) |
 | Important mails today | only with AI sorting: mails rated at or above the notification threshold (else 4), the latest five as attributes |
 | AI ratings this hour | only with AI sorting: ratings in the current hour, limit and mode as attributes (diagnostic) |
+| Parcels on their way | parcels not yet delivered; attributes: how many arrive today, and the list with carrier, number, shop, status, expected day, time window and tracking link |
 
 Automations can react to these events (data stays on the Home Assistant event bus):
 
@@ -254,6 +259,7 @@ Automations can react to these events (data stays on the Home Assistant event bu
 | `friedafetch_mail_rule_matched` | a rule acted on a message (real runs only, at most 25 per run) | `account`, `rule`, `rule_id`, `trigger`, `mailbox`, `uid`, `subject`, `from`, `move_to`, `delete`, `mark_seen`, `flag` |
 | `friedafetch_mail_rated` | the AI rated a mail | `account`, `uid`, `subject`, `from`, `from_domain`, `category`, `importance`, `reason`, `mode`, `applied` |
 | `friedafetch_mail_important` | like `rated`, from the importance threshold on | same as `rated` |
+| `friedafetch_mail_package` | a parcel changed its status (from a new shipping mail) | `account`, `status`, `previous`, `carrier`, `number`, `url`, `shop`, `order`, `eta`, `window`, `subject`, `updated` |
 
 ```yaml
 triggers:
@@ -293,6 +299,12 @@ the mailbox, the activity and the contacts; nothing of it goes to an AI, and not
 - **Subscriptions** – newsletters of the last 30 days, the least read first. *Unsubscribe* works like Frieda's
   `icloud_unsubscribe`: one-click link, else the unsubscribe e-mail (needs *Allow sending e-mails*), else the page
   opens for you.
+- **Parcels** – recognised in shipping mails without AI: carrier (DHL, DPD, Hermes, GLS, UPS, Amazon Logistics),
+  tracking number, status (on its way, arrives today with the time window, ready for pick-up, delivered, problem) and
+  the expected day. A shipping mail is read once, right after it arrives; tracking numbers count only next to a word
+  like “Sendungsnummer”, in a carrier's tracking link or in an unmistakable form, so order numbers are not taken for
+  parcels. *Track* opens the carrier's own tracking page – never a link from the mail. Delivered parcels stay for two
+  days. The sensor *Parcels on their way* and the event `friedafetch_mail_package` make automations possible.
 - **Important senders** – contact groups (or every contact) and addresses or domains you name. Their mail is never lost
   among the rest: the AI rates it at least as important, and it is announced right away also without AI sorting.
   The activity marks them with a star.

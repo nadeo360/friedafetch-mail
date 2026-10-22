@@ -554,3 +554,73 @@ async def test_the_text_of_a_mail_on_request(hass: HomeAssistant, hass_ws_client
         "suspicious": False,
     }
     get.assert_awaited_once_with("INBOX", 1, max_chars=4000)
+
+
+# ------------------------------------------------------------------ conversations
+def _line(key: str, subject: str, minutes: int, **extra: Any) -> dict[str, Any]:
+    from datetime import timedelta  # noqa: PLC0415
+
+    from homeassistant.util import dt as dt_util  # noqa: PLC0415
+
+    time = (dt_util.now() - timedelta(minutes=minutes)).isoformat()
+    return {"key": key, "message_id": key, "subject": subject, "time": time, **extra}
+
+
+def test_conversations_by_reference_and_by_subject() -> None:
+    from custom_components.friedafetch_mail.activity import threads, topic  # noqa: PLC0415
+
+    assert topic("AW: Re:  WG: Termin nächste Woche?") == "termin nächste woche?"
+    items = [
+        _line("<a>", "Termin nächste Woche?", 300),
+        _line("<b>", "Re: Termin nächste Woche?", 200, in_reply_to="<my-answer>"),  # an answer to my answer
+        _line("<c>", "Was anderes", 150, in_reply_to="<a>"),  # a reply with another subject: by its reference
+        _line("<d>", "Termin nächste Woche?", 100),  # the same subject without "Re:": a new conversation
+        _line("<e>", "Re: Hi", 50),  # too short to join anything by its subject
+        _line("<f>", "Hi", 60),
+        _line("<g>", "Re: Termin nächste Woche?", 60 * 24 * 40),  # older than the window: on its own
+    ]
+    groups = threads(items)
+    assert groups["<a>"] == groups["<b>"] == groups["<c>"]
+    assert len({groups["<a>"], groups["<d>"], groups["<e>"], groups["<f>"], groups["<g>"]}) == 5
+
+
+async def test_one_line_per_conversation_and_its_answers(hass: HomeAssistant, hass_ws_client) -> None:
+    entry = await _setup(hass)
+    log = entry.runtime_data.activity
+    log.add_pass("push", _line("x", "", 30)["time"], [_mail(1, subject="Elternabend am Donnerstag")])
+    log.add_pass(
+        "push",
+        _line("x", "", 20)["time"],
+        [_mail(2, subject="Re: Elternabend am Donnerstag", in_reply_to="<1@example.com>")],
+    )
+    log.add_pass("push", _line("x", "", 10)["time"], [_mail(3, subject="Rechnung")])
+    rows = log.view([], ai_active=False)
+    assert {r["uid"]: r["thread_count"] for r in rows} == {1: 2, 2: 2, 3: 1}
+    assert summarize(rows, "all", "", 0, 50)["total"] == 3
+    grouped = summarize(rows, "all", "", 0, 50, grouped=True)
+    assert grouped["total"] == 2 and [i["uid"] for i in grouped["items"]] == [3, 2]  # the newest of each
+
+    ws = await hass_ws_client(hass)
+    sent = {
+        "uid": 9,
+        "subject": "Re: Elternabend am Donnerstag",
+        "to": [{"name": "Schule", "email": "sekretariat@schule.example"}],
+        "date": "2026-10-22T12:00:00+02:00",
+        "message_id": "<9@icloud.com>",
+    }
+    with (
+        patch(f"{MAIL}.async_special_mailbox", AsyncMock(return_value="Sent Messages")),
+        patch(
+            f"{MAIL}.async_search_uids",
+            AsyncMock(side_effect=lambda box, crit: [9] if '"<1@example.com>"' in crit else []),
+        ),
+        patch(f"{MAIL}.async_summaries", AsyncMock(return_value=[sent])),
+    ):
+        await ws.send_json({"id": 1, "type": "friedafetch_mail/mail/thread", "message_id": "<2@example.com>"})
+        msg = await ws.receive_json()
+    items = msg["result"]["items"]
+    assert [i["message_id"] for i in items if not i["mine"]] == ["<1@example.com>", "<2@example.com>"]
+    assert [i for i in items if i["mine"]][0]["name"] == "Schule"  # my answer, to the school
+    await ws.send_json({"id": 2, "type": "friedafetch_mail/activity/list", "threads": True})
+    msg = await ws.receive_json()
+    assert msg["result"]["total"] == 2

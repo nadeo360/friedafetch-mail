@@ -771,6 +771,7 @@ class RuleEngine:
                     "name": sender[0].get("name"),
                     "message_id": summary.get("message_id"),
                     "date": summary.get("date"),
+                    "in_reply_to": summary.get("in_reply_to"),
                 }
             )
 
@@ -968,6 +969,7 @@ def handled_mails(
                 "message_id": None,
                 "date": None,
                 "name": None,
+                "in_reply_to": None,
                 "rules": [],
                 "move_to": None,
                 "delete": False,
@@ -977,7 +979,7 @@ def handled_mails(
             },
         )
         # the Message-ID links the entry to the mail's timeline (it survives moves, the UID does not)
-        for key in ("message_id", "date", "name"):
+        for key in ("message_id", "date", "name", "in_reply_to"):
             if item.get(key) and not mail.get(key):
                 mail[key] = str(item[key])[:300]
         return mail
@@ -1006,7 +1008,7 @@ def handled_mails(
 def _complete_run(run: dict[str, Any]) -> dict[str, Any]:
     """A run as stored by any version, with every field of today (older ones lack the mails and their IDs)."""
     run = {"ai": None, "mails": [], "mails_more": 0, **run}
-    blank = {"uid": None, "message_id": None, "date": None, "name": None, "ai": None}
+    blank = {"uid": None, "message_id": None, "date": None, "name": None, "in_reply_to": None, "ai": None}
     run["mails"] = [{**blank, **mail} for mail in run["mails"] or []]
     for mail in run["mails"]:
         if isinstance(mail["ai"], dict):  # the AI's confidence came with 1.0.24

@@ -282,6 +282,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
     )
     await for_you.async_load()
     for_you.sorter, for_you.rules = sorter, rules
+    for_you.account = link.label
     link.insights = extension.insights = for_you
     sorter.is_vip = for_you.vip_now
     sorter.on_event = for_you.add_proposal
@@ -304,7 +305,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
 
     @callback
     def _after_pass() -> None:
-        """New mail from important senders, in the background."""
+        """New mail from important senders and new shipping mail, in the background."""
         entry.async_create_background_task(hass, _new_mail_insights(), "frieda_postfach_insights")
 
     async def _new_mail_insights() -> None:
@@ -312,6 +313,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
             await for_you.async_new_mail()
         except Exception as err:  # noqa: BLE001 - never break the automation
             _LOGGER.debug("Important senders: the look at new mail failed: %s", err)
+        try:
+            await for_you.async_parcels_after_pass()
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Parcels: reading new shipping mail failed: %s", err)
 
     @callback
     def _refresh_insights(*_: Any) -> None:

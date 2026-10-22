@@ -270,7 +270,8 @@ class MailForYou(ForYouTool):
         "What needs the user's attention in their mail, worked out locally by Frieda Postfach: important mail of "
         "today that is still unread (rated important by the AI sorting, or from an important sender), mail the user "
         "sent that is still waiting for a reply, appointments and deadlines found in mails (calendar proposals, with "
-        "ids for icloud_add_proposed_event), rule suggestions, newsletters never opened, and this week's numbers. "
+        "ids for icloud_add_proposed_event), parcels on their way (carrier, status, expected day), rule suggestions, "
+        "newsletters never opened, and this week's numbers. "
         "Use it for questions like 'what is important in my mail today?' or 'who still owes me an answer?'."
     )
     parameters = vol.Schema(
@@ -306,6 +307,10 @@ class MailForYou(ForYouTool):
                 {"sender": n["sender"], "name": n.get("name") or "", "count": n["count"]}
                 for n in data["subscriptions"]
                 if n.get("never_opened") and not n.get("unsubscribed")
+            ],
+            "parcels": [
+                {k: p[k] for k in ("carrier", "number", "shop", "status", "eta", "window", "url")}
+                for p in data["parcels"]
             ],
             "week": data["week"],
             "checked": data.get("followups_checked"),

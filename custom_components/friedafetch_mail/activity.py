@@ -15,6 +15,7 @@ complete when the run history or the AI log have long moved on. Steps that come 
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -55,6 +56,51 @@ def _folder_name(name: Any) -> str | None:
     if not text:
         return None
     return TRASH if text.lower() in TRASH_NAMES else text
+
+
+_REPLY = re.compile(r"^\s*(?:(?:re|aw|antw|fw|fwd|wg|wtr|sv|vs)\s*(?:\[\d+\])?\s*:\s*)+", re.IGNORECASE)
+THREAD_DAYS = 30  # a reply without a reference joins an earlier mail of the same subject within these days
+
+
+def topic(subject: Any) -> str:
+    """The subject without "Re:", "AW:", "Fwd:" … (to find the mails of one conversation)."""
+    return " ".join(_REPLY.sub("", str(subject or "")).lower().split())
+
+
+def threads(items: list[dict[str, Any]]) -> dict[str, str]:
+    """Line key -> key of its conversation: replies (In-Reply-To) and, without one, "Re: …" of the same subject."""
+    parent: dict[str, str] = {}
+
+    def root(key: str) -> str:
+        while parent.get(key, key) != key:
+            parent[key] = parent.get(parent[key], parent[key])
+            key = parent[key]
+        return key
+
+    def join(a: str, b: str) -> None:
+        ra, rb = root(a), root(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    by_mid = {i["message_id"]: i["key"] for i in items if i.get("message_id")}
+    for item in items:
+        if (other := by_mid.get(str(item.get("in_reply_to") or ""))) is not None:
+            join(item["key"], other)
+    last: dict[str, dict[str, Any]] = {}
+    for item in sorted(items, key=lambda i: _ts(i.get("time"))):
+        subject = str(item.get("subject") or "")
+        about = topic(subject)
+        if len(about) < 4:
+            continue
+        earlier = last.get(about)
+        if (
+            earlier is not None
+            and _REPLY.match(subject)
+            and _ts(item.get("time")) - _ts(earlier.get("time")) <= THREAD_DAYS * 86400
+        ):
+            join(item["key"], earlier["key"])
+        last[about] = item
+    return {i["key"]: root(i["key"]) for i in items}
 
 
 def kind_of(item: dict[str, Any]) -> str:
@@ -331,7 +377,7 @@ class ActivityLog:
                         "count": 1,
                     },
                 )
-            for k in ("message_id", "date", "name"):
+            for k in ("message_id", "date", "name", "in_reply_to"):
                 if mail.get(k) and not item.get(k):
                     item[k] = str(mail[k])[:300]
             for rule in mail.get("rules") or []:
@@ -459,6 +505,10 @@ class ActivityLog:
         """All entries newest first, with what the panel needs: kind, folder, the current rating, selectable."""
         by_mid = {r["message_id"]: r for r in ratings if r.get("message_id")}
         by_uid = {(r.get("mailbox"), r.get("uid")): r for r in ratings}
+        conversation = threads(self._items)
+        sizes: dict[str, int] = {}
+        for key in conversation.values():
+            sizes[key] = sizes.get(key, 0) + 1
         out = []
         for item in sorted(self._items, key=lambda i: _ts(i.get("time")), reverse=True):
             row = dict(item)
@@ -486,6 +536,9 @@ class ActivityLog:
             row["folder"] = folder_of(row)
             row["day"] = _day(item.get("time"))
             row["selectable"] = bool(ai_active and row.get("message_id") and row["kind"] != "rule")
+            thread = conversation.get(str(item["key"]), str(item["key"]))
+            row["thread"] = thread
+            row["thread_count"] = sizes.get(thread, 1)
             out.append(row)
         return out
 
@@ -528,14 +581,22 @@ def matches(row: dict[str, Any], view: str, query: str) -> bool:
     return all(word in hay for word in query.lower().split())
 
 
-def summarize(rows: list[dict[str, Any]], view: str, query: str, offset: int, limit: int) -> dict[str, Any]:
-    """One page of the filtered list, its size, the days in it, and the counts for the views."""
+def summarize(
+    rows: list[dict[str, Any]], view: str, query: str, offset: int, limit: int, *, grouped: bool = False
+) -> dict[str, Any]:
+    """One page of the filtered list, its size, the days in it, and the counts for the views.
+
+    grouped: one line per conversation (its newest mail in the view), like a mail program.
+    """
     kinds = dict.fromkeys(KINDS, 0)
     folders: dict[str, int] = {}
     for row in rows:
         kinds[row["kind"]] += 1
         folders[row["folder"]] = folders.get(row["folder"], 0) + 1
     hits = [r for r in rows if matches(r, view, query)]
+    if grouped:
+        seen: set[str] = set()
+        hits = [r for r in hits if not (r["thread"] in seen or seen.add(r["thread"]))]  # rows are newest first
     days: dict[str, dict[str, int]] = {}
     for row in hits:
         day = days.setdefault(row["day"], {"total": 0, "selectable": 0})

@@ -92,6 +92,8 @@
      "uid": "null|num"
     },
     "subject": "str",
+    "thread": "str",
+    "thread_count": "num",
     "time": "str",
     "trigger": "str",
     "uid": "num",
@@ -317,6 +319,7 @@
    }
   ],
   "followups_checked": "str",
+  "parcels": [],
   "proposals": [
    {
     "all_day": "bool",
@@ -366,6 +369,7 @@
    "mails": "num",
    "mails_before": "num",
    "never_opened": "num",
+   "parcels": "num",
    "proposals": "num",
    "rated": "num",
    "to": "str",
@@ -432,6 +436,20 @@
   "suspicious": "bool",
   "text": "str",
   "truncated": "bool"
+ },
+ "friedafetch_mail/mail/thread": {
+  "items": [
+   {
+    "date": "str",
+    "from": "str",
+    "key": "null|str",
+    "message_id": "str",
+    "mine": "bool",
+    "name": "str",
+    "seen": "bool",
+    "subject": "str"
+   }
+  ]
  },
  "friedafetch_mail/mail/timeline": {
   "category": "str",
@@ -521,6 +539,7 @@
       "delete": "bool",
       "flag": "null",
       "from": "str",
+      "in_reply_to": "null",
       "mailbox": "str",
       "message_id": "str",
       "move_to": "null",
@@ -610,6 +629,7 @@
    {
     "date": "str",
     "from": "str",
+    "in_reply_to": "null",
     "mailbox": "str",
     "message_id": "str",
     "name": "str",

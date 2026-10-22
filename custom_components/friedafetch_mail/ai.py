@@ -919,6 +919,7 @@ class AiSorter:
                         "from": sender.get("email"),
                         "name": sender.get("name"),
                         "message_id": summary.get("message_id"),
+                        "in_reply_to": summary.get("in_reply_to"),
                         "held": sorted({str(r.get("type")) for r in held}),
                     }
                 )
@@ -981,6 +982,7 @@ class AiSorter:
                     "from": sender.get("email"),
                     "name": sender.get("name"),
                     "message_id": summary.get("message_id"),
+                    "in_reply_to": summary.get("in_reply_to"),
                     "category": rating.get("category"),
                     "importance": rating.get("importance"),
                     "confidence": rating.get("confidence"),

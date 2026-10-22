@@ -122,6 +122,16 @@ export const STYLE = `
   .fy-row .fy-ic.warn { background: color-mix(in srgb, var(--warning-color, #ffa600) 18%, transparent); }
   .fy-row .fy-subj { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .fy-edit { border: 1px solid var(--divider-color, #e0e0e0); border-radius: 10px; padding: 10px; }
+  .thr { display: inline-flex; align-items: center; gap: 2px; margin-left: 6px; font-size: 12px; color: var(--secondary-text-color); --mdc-icon-size: 14px; }
+  ul.thread { list-style: none; margin: 0 0 14px; padding: 0; display: grid; gap: 4px; }
+  .threadrow { display: grid; gap: 2px; width: 100%; text-align: left; font: inherit; color: inherit; background: none; border: 1px solid var(--divider-color, #e0e0e0); border-radius: 10px; padding: 8px 10px; min-height: 0; cursor: default; }
+  button.threadrow { cursor: pointer; }
+  .threadrow.here { border-color: var(--primary-color); }
+  .threadrow.mine { background: var(--secondary-background-color); }
+  .threadrow.unread strong { font-weight: 700; }
+  .threadrow .tw { display: flex; align-items: center; gap: 6px; --mdc-icon-size: 16px; }
+  .threadrow .tw .muted { margin-left: auto; font-size: 12px; }
+  .threadrow .ts { font-size: 13px; color: var(--secondary-text-color); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .vip { display: inline-flex; color: var(--warning-color, #ffa600); --mdc-icon-size: 14px; margin-left: 4px; }
   @media (max-width: 600px) { .fy-row { flex-wrap: wrap; } .fy-row .tx { flex-basis: calc(100% - 44px); } }
   .ai-cat { border: 1px solid var(--divider-color, #e0e0e0); border-radius: 10px; padding: 8px 10px; display: flex; gap: 10px; align-items: center; }
