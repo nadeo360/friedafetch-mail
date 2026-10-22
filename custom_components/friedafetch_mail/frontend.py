@@ -103,6 +103,7 @@ async def async_setup_frontend(hass: HomeAssistant, version: str) -> None:
         ws_insights_calendars,
         ws_insights_event,
         ws_insights_unsubscribe,
+        ws_insights_parcel,
     ):
         websocket_api.async_register_command(hass, command)
     await panel_custom.async_register_panel(
@@ -757,7 +758,11 @@ async def ws_mail_thread(hass: HomeAssistant, connection: websocket_api.ActiveCo
     sent: list[dict[str, Any]] = []
     mail = link.mail or link.clients.mail
     ids = [r["message_id"] for r in members if r.get("message_id")][:THREAD_REPLIES]
-    box = await mail.async_special_mailbox("sent") if len(ids) and hasattr(mail, "async_special_mailbox") else None
+    try:
+        box = await mail.async_special_mailbox("sent") if ids and hasattr(mail, "async_special_mailbox") else None
+    except MailError as err:  # without the sent mail the conversation shows the mails of the activity
+        _LOGGER.debug("Conversation: the folders could not be listed: %s", err)
+        box = None
     if box:
         try:
             uids: set[int] = set()
@@ -931,7 +936,7 @@ async def ws_insights_dismiss(
     {
         vol.Required("type"): f"{DOMAIN}/insights/restore",
         vol.Optional("entry_id"): str,
-        vol.Required("kind"): vol.In(INSIGHT_KINDS[:3]),
+        vol.Required("kind"): vol.In((*INSIGHT_KINDS[:3], "parcel")),
     }
 )
 @websocket_api.require_admin
@@ -1031,3 +1036,35 @@ async def ws_insights_unsubscribe(
     except Exception as err:  # noqa: BLE001 - UnsubscribeError lives in Frieda's unsubscribe.py
         raise RuleError(f"Unsubscribing failed: {err}") from err
     connection.send_result(msg["id"], result)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/insights/parcel",
+        vol.Optional("entry_id"): str,
+        vol.Required("parcel_id"): vol.All(str, vol.Length(min=1, max=40)),
+        vol.Required("action"): vol.In(("merge", "split", "ignore")),
+        vol.Optional("into"): vol.All(str, vol.Length(min=1, max=40)),
+        vol.Optional("message_id"): vol.All(str, vol.Length(min=1, max=300)),
+        vol.Optional("sender", default=False): bool,
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+@_ws_errors
+async def ws_insights_parcel(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """A parcel corrected by hand: merged into another, a mail split off, or not a parcel (also never from a sender)."""
+    insights = _insights(hass, msg.get("entry_id"))
+    if msg["action"] == "merge":
+        if not msg.get("into"):
+            raise ActionError("Which parcel should it join?")
+        await insights.async_parcel_merge(msg["parcel_id"], msg["into"])
+    elif msg["action"] == "split":
+        if not msg.get("message_id"):
+            raise ActionError("Which mail should be split off?")
+        await insights.async_parcel_split(msg["parcel_id"], msg["message_id"])
+    else:
+        await insights.async_parcel_ignore(msg["parcel_id"], sender=msg["sender"])
+    connection.send_result(msg["id"], await insights.async_get())

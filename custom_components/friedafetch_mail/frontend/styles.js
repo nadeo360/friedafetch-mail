@@ -121,6 +121,13 @@ export const STYLE = `
   .fy-row .fy-ic { display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 10px; flex: none; background: var(--secondary-background-color, #f0f0f0); --mdc-icon-size: 18px; }
   .fy-row .fy-ic.warn { background: color-mix(in srgb, var(--warning-color, #ffa600) 18%, transparent); }
   .fy-row .fy-subj { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fy-where { padding: 4px 0 6px 42px; display: grid; gap: 8px; }
+  .fy-where ul.thread li { display: grid; gap: 2px; border: 1px solid var(--divider-color, #e0e0e0); border-radius: 10px; padding: 8px 10px; }
+  .fy-where .tw { display: flex; gap: 8px; align-items: baseline; }
+  .fy-where .tw .muted { margin-left: auto; font-size: 12px; }
+  .fy-where .ts { font-size: 13px; color: var(--secondary-text-color); }
+  .fy-merge { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
+  @media (max-width: 600px) { .fy-where { padding-left: 0; } }
   .fy-edit { border: 1px solid var(--divider-color, #e0e0e0); border-radius: 10px; padding: 10px; }
   .thr { display: inline-flex; align-items: center; gap: 2px; margin-left: 6px; font-size: 12px; color: var(--secondary-text-color); --mdc-icon-size: 14px; }
   ul.thread { list-style: none; margin: 0 0 14px; padding: 0; display: grid; gap: 4px; }

@@ -2474,7 +2474,7 @@ class FriedaPostfachPanel extends HTMLElement {
       </div>`;
     return [
       `<section class="widget w-full" data-widget="fy-week">${week}</section>`,
-      (fy.parcels || []).length ? `<section class="widget w-full" data-widget="fy-parcels">${this._fyParcels(fy)}</section>` : "",
+      (fy.parcels || []).length || (fy.parcel_ignored || []).length ? `<section class="widget w-full" data-widget="fy-parcels">${this._fyParcels(fy)}</section>` : "",
       `<section class="widget w-full" data-widget="fy-events">${this._fyEvents(fy)}</section>`,
       `<section class="widget w-full" data-widget="fy-replies">${this._fyReplies(fy)}</section>`,
       `<section class="widget w-full" data-widget="fy-rules">${this._fySuggestions(fy)}</section>`,
@@ -2501,13 +2501,51 @@ class FriedaPostfachPanel extends HTMLElement {
           <span class="tx"><strong>${esc(p.shop || p.carrier || p.subject || "–")}</strong><span>${esc(t.fyParcel[p.status] || p.status)}${when ? ` · ${esc(when)}` : ""}</span>
             <span class="muted">${esc(who || p.subject || "")}</span></span>
           ${p.url ? `<button class="secondary small ib" data-action="fy-track" data-url="${esc(p.url)}">${ico(p.link === "shop" ? "shopping-outline" : "open-in-new")}${esc(p.link === "shop" ? t.fyOrderPage : t.fyTrack)}</button>` : ""}
-          <button class="icon" data-action="fy-dismiss" data-kind="package" data-id="${esc(p.id)}" title="${esc(t.fyHide)}" aria-label="${esc(t.fyHide)}: ${esc(p.shop || p.carrier || "")}">${ico("close")}</button></div>`;
+          <button class="icon" data-action="fy-parcel-open" data-id="${esc(p.id)}" aria-expanded="${this._s.fyParcel === p.id}" aria-label="${esc(t.fyWhere)}: ${esc(p.shop || p.carrier || "")}">${ico(this._s.fyParcel === p.id ? "chevron-up" : "information-outline")}</button>
+          <button class="icon" data-action="fy-dismiss" data-kind="package" data-id="${esc(p.id)}" aria-label="${esc(t.fyHide)}: ${esc(p.shop || p.carrier || "")}">${ico("close")}</button></div>
+          ${this._s.fyParcel === p.id ? this._fyParcelWhere(p, fy) : ""}`;
       })
       .join("");
     const open = (fy.parcels || []).filter((p) => p.status !== "delivered").length;
+    const ignored = (fy.parcel_ignored || []).length
+      ? `<div class="subbar"><span class="muted">${esc(fmt(t.fyIgnored, fy.parcel_ignored.join(", ")))}</span><button class="link" data-action="fy-restore" data-kind="parcel">${esc(t.fyIgnoredUndo)}</button></div>`
+      : "";
     return `<div class="card"><div class="chead"><h2>${esc(t.fyParcels)}</h2>${open ? `<span class="badge">${open}</span>` : ""}</div>
       <p class="muted" style="margin:-4px 0 10px">${esc(t.fyParcelsHint)}</p>
-      <div class="ai-cats">${rows}</div></div>`;
+      <div class="ai-cats">${rows}</div>${ignored}</div>`;
+  }
+
+  // "Where from?": the mails a parcel was read from and what each one said; merge, split off, not a parcel
+  _fyParcelWhere(p, fy) {
+    const t = this.t;
+    const s = this._s;
+    const sources = (p.sources || [])
+      .slice()
+      .reverse()
+      .map((x) => {
+        const said = [
+          t.fyParcel[x.status] || x.status,
+          x.number ? fmt(t.fyFoundNumber, x.number) : "",
+          x.order ? fmt(t.fyFoundOrder, x.order) : "",
+          x.eta ? fmt(t.fyFoundEta, fmtShort(x.eta)) : "",
+          x.shop_hint ? fmt(t.fyFoundHint, x.shop_hint) : "",
+        ].filter(Boolean);
+        const split = (p.sources || []).length > 1
+          ? `<button class="link small" data-action="fy-parcel-split" data-id="${esc(p.id)}" data-mid="${esc(x.message_id)}">${esc(t.fySplit)}</button>`
+          : "";
+        return `<li><span class="tw"><strong>${esc(x.subject || "–")}</strong><span class="muted">${esc(fmtShort(x.date))}</span></span><span class="ts">${esc(said.join(" · "))}</span>${split}</li>`;
+      })
+      .join("");
+    const others = (fy.parcels || []).filter((o) => o.id !== p.id);
+    const merge = others.length
+      ? `<label class="fy-merge"><span>${esc(t.fyMergeInto)}</span><select id="fy-merge-${esc(p.id)}">${others
+          .map((o) => `<option value="${esc(o.id)}">${esc([o.shop || o.carrier || o.subject || "–", t.fyParcel[o.status] || o.status].join(" · "))}</option>`)
+          .join("")}</select><button class="secondary small" data-action="fy-parcel-merge" data-id="${esc(p.id)}" ${s.busy ? "disabled" : ""}>${esc(t.fyMerge)}</button></label>`
+      : "";
+    const senders = (p.senders || []).join(", ");
+    return `<div class="fy-where"><p class="muted">${esc(t.fyWhereHint)}</p><ul class="thread">${sources}</ul>${merge}
+      <div class="actionsbar"><button class="secondary small" data-action="fy-parcel-ignore" data-id="${esc(p.id)}">${esc(t.fyNoParcel)}</button>
+        ${senders ? `<button class="secondary small danger" data-action="fy-parcel-ignore" data-id="${esc(p.id)}" data-sender="1" data-who="${esc(senders)}">${esc(fmt(t.fyNeverFrom, senders))}</button>` : ""}</div></div>`;
   }
 
   _fyEvents(fy) {
@@ -2875,6 +2913,23 @@ class FriedaPostfachPanel extends HTMLElement {
           this._render();
         },
         "thread-open": () => this._actOpen(el.dataset.id),
+        "fy-parcel-open": () => {
+          this._s.fyParcel = this._s.fyParcel === el.dataset.id ? null : el.dataset.id;
+          this._render();
+        },
+        "fy-parcel-split": () =>
+          this._fyCall({ type: "friedafetch_mail/insights/parcel", action: "split", parcel_id: el.dataset.id, message_id: el.dataset.mid }),
+        "fy-parcel-merge": () => {
+          const into = this.shadowRoot.querySelector(`#fy-merge-${CSS.escape(el.dataset.id)}`)?.value;
+          this._s.fyParcel = into || null;
+          return this._fyCall({ type: "friedafetch_mail/insights/parcel", action: "merge", parcel_id: el.dataset.id, into });
+        },
+        "fy-parcel-ignore": async () => {
+          const sender = el.dataset.sender === "1";
+          if (sender && !(await this._confirm({ title: fmt(this.t.fyNeverTitle, el.dataset.who), text: this.t.fyNeverText, ok: this.t.fyNeverOk, irreversible: false, icon: "package-variant-remove" }))) return;
+          this._s.fyParcel = null;
+          await this._fyCall({ type: "friedafetch_mail/insights/parcel", action: "ignore", parcel_id: el.dataset.id, sender });
+        },
         "fy-track": () => window.open(el.dataset.url, "_blank", "noopener,noreferrer"),
         // a new rule for mails like this one: the sender as its condition, to be changed in the editor
         "rule-from-mail": () => {

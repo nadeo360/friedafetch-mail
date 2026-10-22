@@ -194,6 +194,16 @@ function derive(data, rows) {
   history.total = history.runs.length;
   history.current = history.current ?? null;
   data["friedafetch_mail/insights"] = insights(data, rows);
+  // what each parcel was read from (the "Where from?" of the panel)
+  const src = (mid, subject, minutes, status, extra = {}) => ({ message_id: mid, subject, date: new Date(Date.now() - minutes * 60000).toISOString(), status, number: null, order: null, eta: null, shop_hint: null, ...extra });
+  const sources = {
+    k1: [src("<k1a@example>", "Ihre Bestellung ist unterwegs", 60 * 20, "in_transit", { order: "4711-2026" }), src("<k1b@example>", "Ihre Sendung kommt heute", 6, "out_for_delivery", { number: "00340434161094000001", eta: new Date().toISOString().slice(0, 10), shop_hint: "SHOP VERSAND" })],
+    k2: [src("<k2a@example>", "Ihre Bestellung ist unterwegs", 60 * 24, "in_transit", { number: "H1001234567890123456" })],
+    k3: [src("<k3a@example>", "Ihr Paket wurde zugestellt", 36, "delivered", { number: "01234567890123" })],
+    k4: [src("<k4a@example>", "Ihre Bestellung ist unterwegs", 48, "in_transit", { order: "12-34567-89012" })],
+  };
+  const senders = { k1: ["dhl.de", "shop.example"], k2: ["myhermes.de"], k3: ["dpd.de"], k4: ["ebay.com"] };
+  for (const parcel of data["friedafetch_mail/insights"].parcels) Object.assign(parcel, { sources: sources[parcel.id], senders: senders[parcel.id] });
 }
 
 // For you: the week, dates the AI read, sent mail without an answer, rule suggestions, newsletters
@@ -234,6 +244,7 @@ function insights(data, rows) {
       { id: "n2", sender: "news@gartenmarkt.example", name: "Gartenmarkt", count: 6, unread: 2, last: ago(0.2), mailbox: "INBOX", uid: 912, subject: "Ihr Wochenangebot", never_opened: false, unsubscribed: null },
     ],
     subscriptions_checked: ago(0.05),
+    parcel_ignored: [],
     vip: { groups: ["Familie"], senders: 1, known: 4, notify: true },
     weekly_day: "sun",
     events_calendar: null,
@@ -261,10 +272,26 @@ function usageWindows(log) {
   return { today: win(1), week: win(7), month: win(30) };
 }
 
+// Hostile text where a mail's content shows up (?xss=1): the panel must show it as text, never run or render it.
+const XSS = [`<img src=x onerror="window.__xss=1" data-xss>`, `"><svg onload="window.__xss=1" data-xss>`, `<script>window.__xss=1</script>`];
+function poison(data, rows) {
+  rows.forEach((r, i) => {
+    r.subject = `${XSS[i % 3]} ${r.subject}`;
+    r.name = `${XSS[(i + 1) % 3]}${r.name}`;
+  });
+  const fy = data["friedafetch_mail/insights"];
+  for (const p of fy.parcels) Object.assign(p, { shop: `${XSS[0]}${p.shop || ""}`, subject: XSS[1] });
+  for (const p of fy.proposals) Object.assign(p, { title: `${XSS[2]}${p.title}`, from: XSS[0], subject: XSS[1] });
+  for (const f of fy.followups) Object.assign(f, { subject: XSS[0], to: [{ name: XSS[1], email: "x@example.com" }] });
+  for (const n of fy.subscriptions) n.name = XSS[2];
+  for (const g of fy.suggestions) Object.assign(g, { name: XSS[0], subjects: [XSS[1]] });
+}
+
 export function install({ data, q }) {
   const rows = makeRows(!!q.get("volume"));
   window.__rows = rows;
   derive(data, rows);
+  if (q.get("xss")) poison(data, rows);
   const ai = data["friedafetch_mail/ai"];
   const live = (topic) => window.__live?.["friedafetch_mail/subscribe"]?.({ entry_id: "e1", topic });
   const rulesList = data["friedafetch_mail/rules/list"];
@@ -281,13 +308,14 @@ export function install({ data, q }) {
         kinds[r.kind] += 1;
         folders[r.folder] = (folders[r.folder] || 0) + 1;
       }
-      let hits = rows.filter((r) => matches(r, view, query));
+      const mails = rows.filter((r) => matches(r, view, query));
+      let hits = mails;
       if (m.threads) {
         const seen = new Set();
-        hits = hits.filter((r) => !seen.has(r.thread) && seen.add(r.thread)); // one line per conversation
+        hits = mails.filter((r) => !seen.has(r.thread) && seen.add(r.thread)); // one line per conversation
       }
-      const days = [];
-      for (const r of hits) {
+      const days = []; // like the backend: days and what can be picked count mails, also per conversation
+      for (const r of mails) {
         let d = days.find((x) => x.day === r.day);
         if (!d) days.push((d = { day: r.day, total: 0, selectable: 0 }));
         d.total += 1;
@@ -297,7 +325,7 @@ export function install({ data, q }) {
       const unsure = rows.filter((r) => r.unsure).length;
       const unread = rows.filter((r) => r.state?.seen === false).length;
       const flagged = rows.filter((r) => r.state?.flagged).length;
-      return structuredClone({ items: hits.slice(offset, offset + (m.limit || 50)), total: hits.length, selectable: hits.filter((r) => r.selectable).length, days, counts: { all: rows.length, unsure, unread, flagged, kinds, folders } });
+      return structuredClone({ items: hits.slice(offset, offset + (m.limit || 50)), total: hits.length, selectable: mails.filter((r) => r.selectable).length, days, counts: { all: rows.length, unsure, unread, flagged, kinds, folders } });
     }
     if (m.type === "friedafetch_mail/mail/thread") {
       const me = find(m.message_id);
@@ -506,7 +534,29 @@ export function install({ data, q }) {
       return fy;
     }
     if (m.type === "friedafetch_mail/insights/restore") {
+      if (m.kind === "parcel") fy.parcel_ignored = [];
       delete fy.dismissed[m.kind];
+      return fy;
+    }
+    if (m.type === "friedafetch_mail/insights/parcel") {
+      const parcel = fy.parcels.find((x) => x.id === m.parcel_id);
+      if (parcel && m.action === "merge") {
+        const into = fy.parcels.find((x) => x.id === m.into);
+        if (into && into !== parcel) {
+          into.sources = [...into.sources, ...parcel.sources].sort((a, b) => (a.date < b.date ? -1 : 1));
+          into.senders = [...new Set([...into.senders, ...parcel.senders])];
+          into.shop ||= parcel.shop;
+          fy.parcels = fy.parcels.filter((x) => x !== parcel);
+        }
+      } else if (parcel && m.action === "split" && parcel.sources.length > 1) {
+        const moving = parcel.sources.filter((x) => x.message_id === m.message_id);
+        parcel.sources = parcel.sources.filter((x) => x.message_id !== m.message_id);
+        fy.parcels.push({ ...parcel, id: `split-${m.message_id}`, sources: moving, status: moving[0].status, number: moving[0].number, subject: moving[0].subject });
+      } else if (parcel && m.action === "ignore") {
+        if (m.sender) fy.parcel_ignored.push(...parcel.senders.filter((d) => !fy.parcel_ignored.includes(d)));
+        fy.parcels = fy.parcels.filter((x) => x !== parcel);
+      }
+      fy.week.parcels = fy.parcels.filter((x) => x.status !== "delivered").length;
       return fy;
     }
     if (m.type === "friedafetch_mail/insights/calendars") {

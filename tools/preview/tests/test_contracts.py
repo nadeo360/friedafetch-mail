@@ -36,6 +36,7 @@ REQUESTS = {
     "friedafetch_mail/insights": {},
     "friedafetch_mail/insights/calendars": {},
     "friedafetch_mail/insights/event": {"proposal_id": "p1"},
+    "friedafetch_mail/insights/parcel": {"parcel_id": "k3", "action": "ignore"},
 }
 
 

@@ -325,3 +325,91 @@ async def test_new_patterns_read_the_shipping_mails_again(hass: HomeAssistant, h
     insights = Insights(hass, "parcels-old", SimpleNamespace(guard=None), MagicMock(), log, {}, language="de")
     await insights.async_load()
     assert insights.packages == [] and insights.parsed == []  # read again with the new patterns
+
+
+# ------------------------------------------------------------------ corrected by hand
+async def test_parcels_merged_split_and_not_a_parcel(hass: HomeAssistant) -> None:
+    insights = await _insights(hass)
+    now = dt_util.now()
+    first = _info(
+        "versand@shop.example", "Ihre Bestellung ist unterwegs", "Shop", "Mit DPD.", now - timedelta(hours=5), "<m1>"
+    )
+    other = _info(
+        "noreply@dhl.de",
+        "Ihr Paket kommt",
+        "DHL",
+        "Sendungsnummer 00340434161094000001",
+        now - timedelta(hours=1),
+        "<m2>",
+    )
+    insights._merge_parcel(first, fire=False)  # noqa: SLF001
+    insights._merge_parcel(other, fire=False)  # noqa: SLF001
+    a, b = sorted(insights.parcels(), key=lambda p: p["updated"])
+    assert [s["message_id"] for s in a["sources"]] == ["<m1>"] and a["senders"] == ["shop.example"]
+
+    await insights.async_parcel_merge(a["id"], b["id"])  # the user: they are the same parcel
+    [merged] = insights.parcels()
+    assert merged["id"] == b["id"] and merged["shop"] == "Shop" and merged["number"] == "00340434161094000001"
+    assert [s["message_id"] for s in merged["sources"]] == ["<m1>", "<m2>"]
+
+    # a later mail with that number still finds the merged parcel
+    again = _info(
+        "noreply@dhl.de", "Ihre Sendung wurde zugestellt", "DHL", "Sendungsnummer 00340434161094000001", now, "<m3>"
+    )
+    insights._merge_parcel(again, fire=False)  # noqa: SLF001
+    [merged] = insights.parcels()
+    assert merged["status"] == "delivered" and len(merged["sources"]) == 3
+
+    await insights.async_parcel_split(merged["id"], "<m1>")  # the shop's mail was about another parcel after all
+    parcels = {p["sources"][0]["message_id"]: p for p in insights.parcels()}
+    assert set(parcels) == {"<m1>", "<m2>"}
+    assert parcels["<m1>"]["shop"] == "Shop" and parcels["<m1>"]["number"] is None
+    assert parcels["<m2>"]["number"] == "00340434161094000001" and parcels["<m2>"]["shop"] is None
+
+    await insights.async_parcel_ignore(parcels["<m1>"]["id"], sender=True)  # this shop never sends parcels
+    assert insights.parcel_ignored == ["shop.example"] and len(insights.parcels()) == 1
+    later = {
+        "message_id": "<m9>",
+        "date": now.isoformat(),
+        "subject": "Versand",
+        "from": [{"email": "info@shop.example"}],
+    }
+    assert insights._parcel_candidate(later) is False  # noqa: SLF001 - its shipping-like mails are not read
+    await insights.async_restore("parcel")
+    assert insights.parcel_ignored == [] and insights._parcel_candidate(later) is True  # noqa: SLF001
+
+
+# ------------------------------------------------------------------ fuzzing: no crash, no runaway pattern
+def test_parser_on_hostile_text() -> None:
+    import time  # noqa: PLC0415
+
+    from hypothesis import given, settings  # noqa: PLC0415
+    from hypothesis import strategies as st  # noqa: PLC0415
+
+    words = st.sampled_from(
+        ["Sendungsnummer", "von", "APPLE", "Zustellung", "23", "Okt", "2026", "1Z999AA10123456784", "1" * 30, "Re:",
+         "zwischen", "10", "und", "14", "Uhr", "Bestellnummer", "W123", ".", "/", "\n", "DHL", "voraussichtlich"]
+    )  # fmt: skip
+
+    @settings(max_examples=150, deadline=None)
+    @given(
+        st.lists(st.one_of(words, st.text(max_size=12)), max_size=400),
+        st.sampled_from(["noreply@dhl.de", "x@shop.example"]),
+    )
+    def run(parts: list[str], sender: str) -> None:
+        parse(_mail(sender, "Ihre Sendung"), " ".join(parts), SENT)
+
+    run()
+    # long, repetitive text (what makes badly built patterns take forever) – each in well under a second
+    for text in (
+        "1" * 20000,
+        "von " * 5000 + "A",
+        ("Zustellung " + "23 " * 50) * 100,
+        "zwischen 1 und " * 2000,
+        "Sendungsnummer " + "0" * 19999,
+        "Okt " * 5000,
+        "Bestellnummer: " + "-" * 20000,
+    ):
+        started = time.perf_counter()
+        parse(_mail("noreply@dhl.de", "Ihre Sendung kommt heute"), text, SENT)
+        assert time.perf_counter() - started < 1.0, text[:40]

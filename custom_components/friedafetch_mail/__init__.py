@@ -45,7 +45,7 @@ STATE_INTERVAL = timedelta(minutes=10)  # read/flagged of the activity's inbox m
 INSIGHTS_INTERVAL = timedelta(hours=3)  # waiting for a reply, subscriptions (the tab "For you")
 WEEKLY_AT = (18, 0)  # the weekly review, unless the daily overview has a time
 
-PLATFORMS = [Platform.SENSOR]
+PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 type PostfachConfigEntry = ConfigEntry[Any]
@@ -137,14 +137,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
     from .ai import AiSorter  # noqa: PLC0415
     from .digest import async_send_digest  # noqa: PLC0415
     from .frontend import async_setup_frontend  # noqa: PLC0415
+    from .health import Health  # noqa: PLC0415
     from .idle import MailWatcher  # noqa: PLC0415
     from .insights import Insights  # noqa: PLC0415
     from .link import AccountLink, MailExtension  # noqa: PLC0415
     from .live import async_notify  # noqa: PLC0415
-    from .rules import (
-        RuleEngine,  # noqa: PLC0415
-        handled_mails,  # noqa: PLC0415
-    )
+    from .rules import RuleEngine, handled_mails  # noqa: PLC0415
+    from .throttle import Throttle  # noqa: PLC0415
 
     await _check_frieda_version(hass)
     core = _core_entry(hass, entry)
@@ -191,6 +190,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
         activity=activity,
     )
     entry.runtime_data = link
+    throttle = link.throttle = Throttle()  # iCloud asked to slow down: the background work pauses
     rules.account = link.label
     from .mailstate import MailState  # noqa: PLC0415
 
@@ -202,8 +202,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
     @callback
     def _sync_state(*_: Any) -> None:
         """Read / flagged of the activity's inbox mails, in the background (after passes, pushes, and regularly)."""
-        if state is not None:
-            entry.async_create_background_task(hass, state.async_sync(), "frieda_postfach_mail_state")
+        if state is not None and not throttle.active():
+            entry.async_create_background_task(hass, _look(), "frieda_postfach_mail_state")
+
+    async def _look() -> None:
+        if state is None:
+            return
+        await state.async_sync()
+        if state.error:
+            throttle.note(state.error)
+        else:
+            throttle.ok()
 
     if state is not None:
         state.on_request = _sync_state
@@ -284,6 +293,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
     for_you.sorter, for_you.rules = sorter, rules
     for_you.account = link.label
     link.insights = extension.insights = for_you
+    link.health = Health(hass, entry.entry_id, link, throttle)
     sorter.is_vip = for_you.vip_now
     sorter.on_event = for_you.add_proposal
 
@@ -320,6 +330,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
 
     @callback
     def _refresh_insights(*_: Any) -> None:
+        if throttle.active():
+            return
+
         async def run() -> None:
             try:
                 await for_you.async_vips(force=True)
@@ -353,10 +366,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
         if not sorter.settings["active"]:
             return None
         try:
-            return await sorter.async_process(trigger)
+            report = await sorter.async_process(trigger)
         except Exception as err:  # noqa: BLE001 - never break the rule automation
             _LOGGER.warning("AI sorting failed: %s", err)
+            throttle.note(err)
             return None
+        throttle.note_all(report.get("errors"))
+        return report
 
     @callback
     def _detach() -> None:
@@ -413,6 +429,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
 
         async def _apply_rules(now: datetime) -> None:
             next_run = dt_util.as_local(now) + interval
+            if throttle.active():
+                rules.note_check("throttled", next_run, throttle.last)  # the next tick after the pause catches up
+                return
             if not rules.has_enabled_rules:
                 rules.note_check("no_enabled_rules", next_run)
                 await rules.async_record_ai("auto", await _ai_after_rules("auto"))
@@ -422,9 +441,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
                 # one history entry per pass: rules first, then the AI sorting (recorded together below)
                 report = await rules.async_run(scope="new", trigger="auto", record=False)
             except Exception as err:  # noqa: BLE001 - keep the timer alive
-                _LOGGER.warning("Automatic inbox rules failed: %s", err)
-                rules.note_check("error", next_run, str(err))
+                if not throttle.note(err):
+                    _LOGGER.warning("Automatic inbox rules failed: %s", err)
+                rules.note_check("throttled" if throttle.active() else "error", next_run, str(err))
                 return
+            if not throttle.note_all(report["errors"]):
+                throttle.ok()
             rules.note_check("error" if report["errors"] else "ran", next_run)
             await rules.async_record(report, await _ai_after_rules("auto"))
             _sync_state()
@@ -437,6 +459,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
         if opts.get(CONF_RULES_PUSH, DEFAULT_RULES_PUSH):
 
             async def _on_new_mail() -> None:
+                if throttle.active():
+                    return  # iCloud asked to slow down: the timer's next pass after the pause picks the mail up
                 # the panel shows the pass right away; rules and the AI rating may take a few seconds
                 rules.begin_pass("push", ai=bool(sorter.settings["active"]))
                 try:
@@ -456,8 +480,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: PostfachConfigEntry) -> 
 
             async def _on_change() -> None:
                 # a mail read, flagged or moved on another device
-                if state is not None:
-                    await state.async_sync()
+                if state is not None and not throttle.active():
+                    await _look()
 
             watcher = MailWatcher(
                 username=core.data[CONF_APPLE_ID],

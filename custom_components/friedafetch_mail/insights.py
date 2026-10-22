@@ -68,6 +68,10 @@ PACKAGE_DAYS = 21  # shipping mails of these days are read; a parcel without new
 PACKAGE_DELIVERED_DAYS = 2  # a delivered parcel stays on the list this long
 PACKAGE_READS = 40  # shipping mails read per look (each once)
 MAX_PARSED = 1000
+SOURCE_FIELDS = (
+    "message_id", "subject", "date", "status", "carrier", "numbers", "order", "eta", "window", "shop", "shop_hint",
+    "domain",
+)  # fmt: skip
 PACKAGE_ORDER = {"out_for_delivery": 0, "pickup": 1, "problem": 2, "in_transit": 3, "delivered": 4}
 WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 AUTOMATED = re.compile(
@@ -167,6 +171,7 @@ class Insights:
         self.weekly_sent: str | None = None  # ISO week of the last weekly review
         self.packages: list[dict[str, Any]] = []
         self.parsed: list[str] = []  # Message-IDs of shipping mails read already (each is read once)
+        self.parcel_ignored: list[str] = []  # sender domains the user said send no parcels
         self._last_uid: int | None = None
         self._validity: int | None = None
         self._vips: set[str] = set()
@@ -188,6 +193,7 @@ class Insights:
         self.weekly_sent = data.get("weekly_sent")
         self.packages = list(data.get("packages") or [])
         self.parsed = list(data.get("parsed") or [])
+        self.parcel_ignored = list(data.get("parcel_ignored") or [])
         if data.get("parser") != shipping.PARSER:
             # the patterns learned more: the shipping mails of the last weeks are read again with them
             self.packages, self.parsed = [], []
@@ -208,6 +214,7 @@ class Insights:
             "packages": self.packages,
             "parsed": self.parsed[-MAX_PARSED:],
             "parser": shipping.PARSER,
+            "parcel_ignored": self.parcel_ignored,
             "last_uid": self._last_uid,
             "validity": self._validity,
         }
@@ -237,6 +244,9 @@ class Insights:
     async def async_restore(self, kind: str) -> None:
         """Show everything of a kind again (the user dismissed too much)."""
         await self.async_load()
+        if kind == "parcel":
+            self.parcel_ignored = []  # their shipping mails are read again from the next look on
+            self._subs_at = 0.0
         self.dismissed.pop(kind, None)
         await self._save()
 
@@ -776,6 +786,8 @@ class Insights:
         when = dt_util.parse_datetime(str(summary.get("date") or ""))
         if not mid or mid in self.parsed or when is None:
             return False
+        if shipping.domain_of(email_of(((summary.get("from") or [{}])[0]).get("email"))) in self.parcel_ignored:
+            return False  # the user said this sender sends no parcels
         return dt_util.now() - when < timedelta(days=PACKAGE_DAYS) and shipping.is_candidate(summary)
 
     async def async_parcels_after_pass(self) -> None:
@@ -881,6 +893,10 @@ class Insights:
             self.packages.append(parcel)
         parcel["keys"] = list(dict.fromkeys([*parcel["keys"], *keys]))
         parcel["mails"] = list(dict.fromkeys([*parcel["mails"], info["message_id"]]))[-10:]
+        # what each mail said: "Where from?" in the panel, and the base for merging and splitting by hand
+        sources = [x for x in parcel.get("sources") or [] if x.get("message_id") != info["message_id"]]
+        sources.append({k: info.get(k) for k in SOURCE_FIELDS})
+        parcel["sources"] = sorted(sources, key=lambda x: str(x.get("date") or ""))[-10:]
         for key in ("carrier", "shop", "order"):
             parcel[key] = parcel[key] or info.get(key)
         if info.get("shop") and not parcel.get("shop_domain"):
@@ -904,7 +920,11 @@ class Insights:
                     "entry_id": self._entry_id,
                     "status": info["status"],
                     "previous": before,
-                    **{k: v for k, v in self.parcel_view(parcel).items() if k not in ("id", "status")},
+                    **{
+                        k: v
+                        for k, v in self.parcel_view(parcel).items()
+                        if k not in ("id", "status", "sources", "senders")
+                    },
                 },
             )
         return True
@@ -921,6 +941,89 @@ class Insights:
                 continue
             keep.append(p)
         self.packages = keep
+
+    # ----------------------------------------------- parcels, corrected by hand
+    @staticmethod
+    def _settle(parcel: dict[str, Any]) -> None:
+        """A parcel from its mails again (after merging or splitting): the newest mail tells the status."""
+        sources = sorted(parcel.get("sources") or [], key=lambda x: str(x.get("date") or ""))
+        if not sources:
+            return
+        keys: list[str] = []
+        for x in sources:
+            keys += [f"{x.get('carrier')}:{n}" for n in x.get("numbers") or []]
+            if x.get("order"):
+                keys.append(f"order:{x.get('domain')}:{x['order']}")
+            keys.append(f"mail:{x.get('message_id')}")
+        first = lambda key: next((x.get(key) for x in sources if x.get(key)), None)  # noqa: E731
+        newest = sources[-1]
+        with_eta = [x for x in sources if x.get("eta")]
+        numbers = [n for x in sources for n in x.get("numbers") or []]
+        shop_source = next((x for x in sources if x.get("shop")), None)
+        parcel.update(
+            keys=list(dict.fromkeys(keys)),
+            mails=[x.get("message_id") for x in sources][-10:],
+            carrier=first("carrier"),
+            number=numbers[0] if numbers else None,
+            shop=shop_source.get("shop") if shop_source else None,
+            shop_domain=shop_source.get("domain") if shop_source else None,
+            order=first("order"),
+            status=newest.get("status"),
+            subject=newest.get("subject") or "",
+            updated=newest.get("date") or "",
+            eta=with_eta[-1].get("eta") if with_eta else None,
+            window=None if newest.get("status") == "delivered" else (with_eta[-1].get("window") if with_eta else None),
+        )
+
+    def _parcel(self, parcel_id: str) -> dict[str, Any]:
+        from .actions import ActionError  # noqa: PLC0415
+
+        parcel = next((p for p in self.packages if p["id"] == parcel_id), None)
+        if parcel is None:
+            raise ActionError("This parcel is no longer on the list")
+        return parcel
+
+    async def async_parcel_merge(self, parcel_id: str, into_id: str) -> None:
+        """Two parcels are one (an update Frieda took for a new parcel)."""
+        await self.async_load()
+        parcel, target = self._parcel(parcel_id), self._parcel(into_id)
+        if parcel is not target:
+            merged = {x.get("message_id"): x for x in [*(target.get("sources") or []), *(parcel.get("sources") or [])]}
+            target["sources"] = sorted(merged.values(), key=lambda x: str(x.get("date") or ""))[-10:]
+            self._settle(target)
+            target["keys"] = list(dict.fromkeys([*target["keys"], *(parcel.get("keys") or [])]))
+            self.packages.remove(parcel)
+        await self._save()
+
+    async def async_parcel_split(self, parcel_id: str, message_id: str) -> None:
+        """One mail of a parcel is about another parcel: it becomes a parcel of its own."""
+        from .actions import ActionError  # noqa: PLC0415
+
+        await self.async_load()
+        parcel = self._parcel(parcel_id)
+        sources = parcel.get("sources") or []
+        moving = [x for x in sources if x.get("message_id") == message_id]
+        if not moving or len(sources) < 2:
+            raise ActionError("This mail cannot be split off")
+        parcel["sources"] = [x for x in sources if x.get("message_id") != message_id]
+        self._settle(parcel)
+        own = {"id": _id("split", message_id), "keys": [], "mails": [], "sources": moving}
+        self._settle(own)
+        own["keys"] = [k for k in own["keys"] if k not in parcel["keys"] or k.startswith("mail:")]
+        parcel["keys"] = [k for k in parcel["keys"] if k not in own["keys"]]
+        self.packages.append(own)
+        await self._save()
+
+    async def async_parcel_ignore(self, parcel_id: str, *, sender: bool) -> None:
+        """Not a parcel; sender: its sender never sends parcels (its shipping-like mails are not read any more)."""
+        await self.async_load()
+        parcel = self._parcel(parcel_id)
+        if sender:
+            for domain in {x.get("domain") for x in parcel.get("sources") or []} | {parcel.get("domain")}:
+                if domain and domain not in self.parcel_ignored:
+                    self.parcel_ignored.append(domain)
+        self.packages.remove(parcel)
+        await self._save()
 
     @staticmethod
     def parcel_view(p: dict[str, Any]) -> dict[str, Any]:
@@ -943,6 +1046,20 @@ class Insights:
             "window": p.get("window"),
             "subject": p.get("subject"),
             "updated": p.get("updated"),
+            "senders": sorted({x.get("domain") for x in p.get("sources") or [] if x.get("domain")}),
+            "sources": [
+                {
+                    "message_id": x.get("message_id"),
+                    "subject": x.get("subject"),
+                    "date": x.get("date"),
+                    "status": x.get("status"),
+                    "number": (x.get("numbers") or [None])[0],
+                    "order": x.get("order"),
+                    "eta": x.get("eta"),
+                    "shop_hint": x.get("shop_hint"),
+                }
+                for x in p.get("sources") or []
+            ],
         }
 
     def parcels(self) -> list[dict[str, Any]]:
@@ -1078,6 +1195,7 @@ class Insights:
             "subscriptions": self.subscriptions,
             "subscriptions_checked": self.subscriptions_checked,
             "parcels": self.parcels(),
+            "parcel_ignored": list(self.parcel_ignored),
             "vip": {
                 "groups": list(self.opts.get(CONF_VIP_GROUPS) or []),
                 "senders": len(parse_list(self.opts.get(CONF_VIP_SENDERS))),

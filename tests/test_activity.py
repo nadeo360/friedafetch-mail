@@ -599,6 +599,8 @@ async def test_one_line_per_conversation_and_its_answers(hass: HomeAssistant, ha
     assert summarize(rows, "all", "", 0, 50)["total"] == 3
     grouped = summarize(rows, "all", "", 0, 50, grouped=True)
     assert grouped["total"] == 2 and [i["uid"] for i in grouped["items"]] == [3, 2]  # the newest of each
+    # picking counts mails, also per conversation: "select" picks every mail of them
+    assert sum(d["total"] for d in grouped["days"]) == 3
 
     ws = await hass_ws_client(hass)
     sent = {

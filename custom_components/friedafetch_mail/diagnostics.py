@@ -102,6 +102,12 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: Any) ->
             "kinds": kinds,
             "oldest": min((i.get("time") or "" for i in activity.items), default=None),
         }
+    if getattr(link, "health", None) is not None:
+        # the reasons without their text (it may carry a server's answer)
+        out["health"] = {
+            "problems": [{"kind": p["kind"], "since": p["since"]} for p in link.health.problems()],
+            "throttle": {k: v for k, v in link.throttle.status().items() if k != "last"},
+        }
     insights = getattr(link, "insights", None)
     if insights is not None:
         # For you: only counts and switches (no addresses, subjects or dates)

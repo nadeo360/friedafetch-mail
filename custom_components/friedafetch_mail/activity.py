@@ -593,19 +593,21 @@ def summarize(
     for row in rows:
         kinds[row["kind"]] += 1
         folders[row["folder"]] = folders.get(row["folder"], 0) + 1
-    hits = [r for r in rows if matches(r, view, query)]
+    mails = [r for r in rows if matches(r, view, query)]
+    hits = mails
     if grouped:
         seen: set[str] = set()
-        hits = [r for r in hits if not (r["thread"] in seen or seen.add(r["thread"]))]  # rows are newest first
+        hits = [r for r in mails if not (r["thread"] in seen or seen.add(r["thread"]))]  # rows are newest first
+    # the days and what can be picked count mails, also in the conversation view: "select" picks every mail of them
     days: dict[str, dict[str, int]] = {}
-    for row in hits:
+    for row in mails:
         day = days.setdefault(row["day"], {"total": 0, "selectable": 0})
         day["total"] += 1
         day["selectable"] += int(row["selectable"])
     return {
         "items": hits[offset : offset + limit],
         "total": len(hits),
-        "selectable": sum(1 for r in hits if r["selectable"]),
+        "selectable": sum(1 for r in mails if r["selectable"]),
         "days": [{"day": d, **v} for d, v in days.items()],
         "counts": {
             "all": len(rows),

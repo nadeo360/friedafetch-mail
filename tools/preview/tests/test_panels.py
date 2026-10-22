@@ -278,3 +278,17 @@ def test_tabs_stay_when_the_connection_comes_back(open_panel) -> None:
     panel.js("await wait(2600);")  # the reload is tried again by itself
     assert panel.js(tabs) == before
     assert "Neu nach dem Zurückkehren" in panel.text(".mlist")
+
+
+def test_hostile_mail_content_is_only_text(open_panel) -> None:
+    """Subjects, names, parcels, dates, replies and newsletters full of HTML: shown as text, nothing runs."""
+    panel = open_panel("postfach", "xss=1")
+    probe = "return { ran: !!window.__xss, nodes: root.querySelectorAll('[data-xss], script').length };"
+    assert panel.js(probe) == {"ran": False, "nodes": 0}
+    assert "<img src=x" in panel.text(".mlist")  # the text itself is shown
+    panel.click('.mlist [data-action="act-open"]', 900)  # the open mail and its timeline
+    assert panel.js(probe) == {"ran": False, "nodes": 0}
+    panel.js("el._setTab('foryou'); await wait(600);")
+    panel.click('[data-action="fy-parcel-open"]', 400)  # "Where from?" with its sources
+    assert panel.js(probe) == {"ran": False, "nodes": 0}
+    assert "<svg" in panel.text('[data-widget="fy-parcels"]')

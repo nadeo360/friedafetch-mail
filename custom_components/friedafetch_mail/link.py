@@ -57,3 +57,5 @@ class AccountLink:
     activity: Any | None = None  # activity.ActivityLog: one line per checked message
     state: Any | None = None  # mailstate.MailState: read/flagged as the mailbox has it now
     insights: Any | None = None  # insights.Insights: the tab "For you"
+    throttle: Any | None = None  # throttle.Throttle: iCloud asked to slow down
+    health: Any | None = None  # health.Health: the problems of the account (problem sensor, repair)

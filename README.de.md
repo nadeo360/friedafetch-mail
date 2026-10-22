@@ -269,6 +269,24 @@ Neben dem Geburtstags-Sensor bekommt jedes Konto diese Sensoren (wenn Mail in Fr
 | KI-Bewertungen diese Stunde | nur mit KI-Sortierung: Bewertungen in der laufenden Stunde, Limit und Modus als Attribute (Diagnose) |
 | Pakete unterwegs | noch nicht zugestellte Pakete; Attribute: wie viele heute kommen, und die Liste mit Versanddienst, Nummer, Shop, Status, voraussichtlichem Tag, Zeitfenster und Verfolgungslink |
 
+Dazu ein binärer Sensor **Problem** (Diagnose), der an ist, solange etwas nicht funktioniert, mit den Gründen im
+Attribut `problems` – jeweils Art, seit wann und ein Detail:
+
+| Art | Wann |
+|---|---|
+| `push` | Push lauscht seit mehr als 15 Minuten nicht (Neuverbindungen beim Neustart von Router oder iCloud sind in Ordnung) |
+| `look` | der Blick auf gelesen/markiert ist fehlgeschlagen |
+| `ai` | die KI-Sortierung ist an und ihre letzte Bewertung schlug fehl (KI-Aufgabe nicht erreichbar, Zeitüberschreitung) |
+| `pass_slow` | ein Durchlauf neuer Mails läuft seit mehr als 10 Minuten |
+| `throttled` | iCloud bittet ums Bremsen; das Attribut `throttle` zeigt, bis wann die Hintergrundarbeit pausiert |
+| `for_you` | die letzte Aktualisierung von *Für dich* schlug fehl |
+
+Ein Problem, das eine Stunde anhält, erscheint auch unter *Einstellungen → Reparaturen*, mit Konto und Gründen; die
+Reparatur verschwindet von selbst, sobald wieder alles funktioniert. Antwortet iCloud mit `[THROTTLED]`, `[LIMIT]` oder
+„too many connections“, pausieren Timer, Push-Durchläufe und Blick 5 Minuten (mit jeder weiteren gedrosselten Antwort
+verdoppelt, bis zu einer Stunde), statt sich sofort neu anzumelden; was in der Zwischenzeit kam, holt der nächste
+Durchlauf ab.
+
 Automationen können auf diese Ereignisse reagieren (die Daten bleiben auf dem Ereignisbus von Home Assistant):
 
 | Ereignis | Wann | Daten |
@@ -328,6 +346,11 @@ Aktivität und den Kontakten ermittelt; davon geht nichts an eine KI, und ohne d
   des Shops. *Verfolgen* öffnet die Seite des Versanddienstes, *Bestellung* die Bestellseite des Shops (Amazon, eBay,
   Apple), wenn kein Versanddienst bekannt ist – nie einen Link aus der Mail. Zugestellte Pakete bleiben zwei Tage stehen. Der Sensor *Pakete unterwegs* und das Ereignis
   `friedafetch_mail_package` machen Automationen möglich.
+  **Woher?** (die ⓘ-Taste eines Pakets) zeigt die Mails, aus denen es zusammengesetzt ist, neueste zuerst, mit dem,
+  was Frieda in jeder erkannt hat (Nummer, Bestellung, voraussichtlicher Tag, genannter Shop). Ist etwas schiefgegangen,
+  korrigierst du es dort: *Als eigenes Paket* nimmt eine Mail heraus, *Gehört zu* + *Zusammenführen* vereint zwei
+  Pakete, *Kein Paket* blendet es aus, und *Nie Pakete von …* übergeht die Domain des Absenders ab dann
+  (*Zurücknehmen* neben *Keine Pakete von* in der Karte).
 - **Wichtige Absender** – Kontaktgruppen (oder alle Kontakte) und Adressen oder Domains, die du nennst. Ihre Mails gehen
   nie unter: Die KI stuft sie mindestens als wichtig ein, und sie werden sofort gemeldet, auch ohne KI-Sortierung.
   In der Aktivität tragen sie einen Stern.
@@ -376,8 +399,11 @@ pytest && ruff check . && ruff format --check .
 
 `tests_imap/` prüft Friedas IMAP-Client und den Blick auf gelesen/markiert gegen einen echten IMAP-Server: Dovecot
 als Prozess deines Benutzers (`brew install dovecot` oder `apt install dovecot-imapd`; ohne ihn übersprungen, die CI
-hat einen eigenen Job). Die Typprüfung ist `basedpyright` (requirements/types.txt); Befunde von vor ihrer Einführung
-stehen in `.basedpyright/baseline.json`.
+hat einen eigenen Job). Seine Zufallsläufe (`test_random.py`) lassen ein anderes Mailprogramm zufällig lesen,
+markieren, verschieben und löschen, während Frieda hinschaut und handelt, und vergleichen jede Zeile der Aktivität mit
+dem, was der Server wirklich hat; `RANDOM_WALKS=25 RANDOM_STEPS=120` macht sie zahlreicher und länger vor einem Release,
+das den Blick berührt, und ein Fehler nennt den Seed, der ihn wiederholt. Die Typprüfung ist `basedpyright`
+(requirements/types.txt); Befunde von vor ihrer Einführung stehen in `.basedpyright/baseline.json`.
 
 ### Releases
 
@@ -386,7 +412,10 @@ Commits hat, die `dev` fehlen, setzt die Version im Manifest, führt ruff und di
 Fast-Forward nach und pusht, wartet, bis jeder CI-Lauf dieses Commits bestanden hat, legt das GitHub-Release mit den
 Notizen an (Deutsch, `---`, Englisch) und prüft danach das Zip, das der Release-Workflow anhängt – Prüfsumme, Version
 und jede Datei gegen den getaggten Quellstand. `--dry-run` prüft und testet nur; `--draft` gibt ein Gerüst für die
-Notizen aus den Commits seit dem letzten Release aus.
+Notizen aus den Commits seit dem letzten Release aus. Ein CI-Lauf, den GitHub fünf Minuten nach dem Ende seines letzten
+Jobs noch als laufend zeigt, zählt nach seinen Jobs (GitHub schließt einen Lauf manchmal nie ab). Bricht das Skript beim
+Warten trotzdem ab, setzt `--resume` dieselbe Version später fort: Es prüft, dass es den Tag noch nicht gibt und `main`
+der gepushte Commit ist, wartet erneut auf die CI, legt das Release an und prüft das Zip.
 
 ## Hinweis zum Einsatz von KI
 

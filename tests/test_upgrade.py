@@ -2,8 +2,8 @@
 
 The stored data below has the shapes older releases wrote (from their code in git): runs without mails or AI part
 (1.0.0), AI ratings and the AI log of the first AI sorting (1.0.4, the kill-switch reason still a plain string), runs
-with mails but without UID or Message-ID (1.0.12), the activity list of 1.0.20 that started empty, and lines of
-1.0.23 without their steps. After the update every answer of the panel must still have the shape of
+with mails but without UID or Message-ID (1.0.12), the activity list of 1.0.20 that started empty, lines of 1.0.23
+without their steps, and the tab "For you" of 1.0.30 and 1.0.33 (parcels without the mails they came from). After the update every answer of the panel must still have the shape of
 tests/contracts/ws.json.
 """
 
@@ -260,3 +260,93 @@ async def test_update_from_1_0_23_gives_the_lines_their_steps(
     answers = await _answers(hass, hass_ws_client, entry)
     assert _contract_problems(answers) == []
     assert [e["kind"] for e in answers["friedafetch_mail/mail/timeline"]["events"]] == ["received", "rated"]
+
+
+async def test_update_from_1_0_30_and_1_0_33(hass: HomeAssistant, hass_storage, hass_ws_client) -> None:
+    """For you of 1.0.30 (no parcels) and 1.0.33 (parcels without their mails), a line without its conversation."""
+    from unittest.mock import AsyncMock, patch  # noqa: PLC0415
+
+    line = {
+        "key": "<7@example.com>",
+        "message_id": "<7@example.com>",
+        "mailbox": "INBOX",
+        "uid": 7,
+        "subject": "Rechnung Oktober",
+        "from": "rechnung@stadtwerke.example",
+        "name": "Stadtwerke",
+        "date": "2026-10-11T08:59:00+02:00",
+        "time": "2026-10-11T09:00:00+02:00",
+        "updated": "2026-10-11T09:00:00+02:00",
+        "trigger": "auto",
+        "rules": [],
+        "move_to": None,
+        "delete": False,
+        "seen": None,
+        "flag": None,
+        "ai": {"category": "Bills & receipts", "importance": 3, "applied": [], "held": None},
+        "state": {
+            "seen": True,
+            "flagged": False,
+            "gone": False,
+            "mailbox": "INBOX",
+            "uid": 7,
+            "searched": None,
+            "checked": "2026-10-20T10:00:00+02:00",
+        },
+        "events": [],
+    }
+    for stored in (
+        # 1.0.30
+        {"dismissed": {"rule": ["abc"]}, "proposals": [], "followups": [], "replied": [], "weekly_sent": None},
+        # 1.0.33: parcels without their mails, read with the first patterns
+        {
+            "packages": [
+                {
+                    "id": "k1",
+                    "keys": ["dhl:00340434161094000001"],
+                    "carrier": "dhl",
+                    "number": "00340434161094000001",
+                    "shop": None,
+                    "order": None,
+                    "status": "in_transit",
+                    "eta": None,
+                    "window": None,
+                    "subject": "Ihre Sendung",
+                    "updated": "2026-10-20T10:00:00+02:00",
+                    "mails": ["<p1@x>"],
+                }
+            ],
+            "parsed": ["<p1@x>"],
+        },
+    ):
+        hass.data.pop("friedafetch_mail_frontend", None)
+        core_key = None
+        entry = await _upgrade(
+            hass, hass_storage, activity={"items": [line], "backfilled": True, "events_filled": True}
+        )
+        core_key = entry.runtime_data.core_entry_id
+        hass_storage[f"friedafetch_mail.insights.{core_key}"] = _stored(f"friedafetch_mail.insights.{core_key}", stored)
+        assert await hass.config_entries.async_reload(entry.entry_id)
+        await hass.async_block_till_done()
+        insights = entry.runtime_data.insights
+        assert insights.packages == []  # read again with the current patterns
+        with patch("custom_components.friedafetch.mail.ICloudMail.async_special_mailbox", AsyncMock(return_value=None)):
+            answers = await _answers(hass, hass_ws_client, entry)
+            ws = await hass_ws_client(hass)
+            for n, (command, extra) in enumerate(
+                [
+                    ("friedafetch_mail/insights", {}),
+                    ("friedafetch_mail/mail/thread", {"message_id": "<7@example.com>"}),
+                ],
+                start=50,
+            ):
+                await ws.send_json({"id": n, "type": command, "entry_id": entry.entry_id, **extra})
+                msg = await ws.receive_json()
+                assert msg["success"], (command, msg)
+                answers[command] = msg["result"]
+        assert _contract_problems(answers) == []
+        assert answers["friedafetch_mail/activity/list"]["items"][0]["thread_count"] == 1
+        await hass.config_entries.async_unload(entry.entry_id)
+        await hass.config_entries.async_remove(entry.entry_id)
+        await hass.config_entries.async_remove(core_key)
+        await hass.async_block_till_done()

@@ -128,6 +128,11 @@
       "parcels": {
         "name": "Parcels on their way"
       }
+    },
+    "binary_sensor": {
+      "problem": {
+        "name": "Problem"
+      }
     }
   },
   "services": {
@@ -174,6 +179,10 @@
     "frieda_too_old": {
       "title": "Frieda is too old for Frieda Postfach",
       "description": "Frieda Postfach needs Frieda {required} or newer; installed is {installed}. Update Frieda in HACS and restart Home Assistant. Until then the panel shows its parts one below the other and some of them are missing."
+    },
+    "health": {
+      "title": "Frieda Postfach ({account}) has had a problem for an hour",
+      "description": "{problems}\n\npush: the IDLE connection is down; look: reading read/flagged fails; ai: the AI task answers with an error; pass_slow: a pass of new mail takes very long; throttled: iCloud asks to slow down, the background work pauses; for_you: looking at sent mail or newsletters fails. This goes away by itself once everything works again. Details: the attributes of the problem sensor and the diagnostics."
     }
   }
 }

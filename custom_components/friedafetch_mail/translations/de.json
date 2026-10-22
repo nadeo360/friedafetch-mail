@@ -128,6 +128,11 @@
       "parcels": {
         "name": "Pakete unterwegs"
       }
+    },
+    "binary_sensor": {
+      "problem": {
+        "name": "Problem"
+      }
     }
   },
   "services": {
@@ -174,6 +179,10 @@
     "frieda_too_old": {
       "title": "Frieda ist zu alt für Frieda Postfach",
       "description": "Frieda Postfach braucht Frieda {required} oder neuer; installiert ist {installed}. Aktualisiere Frieda in HACS und starte Home Assistant neu. Bis dahin zeigt das Panel seine Bereiche untereinander, und einige fehlen."
+    },
+    "health": {
+      "title": "Frieda Postfach ({account}) hat seit einer Stunde ein Problem",
+      "description": "{problems}\n\npush: die IDLE-Verbindung steht nicht; look: gelesen/markiert lässt sich nicht lesen; ai: die KI-Aufgabe antwortet mit einem Fehler; pass_slow: ein Durchgang neuer Mails dauert sehr lange; throttled: iCloud bittet um Pause, die Hintergrundarbeit pausiert; for_you: der Blick auf gesendete Mails oder Newsletter scheitert. Die Meldung verschwindet von selbst, sobald alles wieder läuft. Details: die Attribute des Problem-Sensors und die Diagnosedaten."
     }
   }
 }

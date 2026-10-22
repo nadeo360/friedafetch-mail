@@ -234,7 +234,45 @@ async def test_panel_answers_keep_their_shape(hass: HomeAssistant, hass_ws_clien
     ):
         await link.insights.async_followups(force=True)
         await link.insights.async_subscriptions(force=True)
+    from homeassistant.util import dt as dt_util  # noqa: PLC0415
+
+    from custom_components.friedafetch_mail.packages import parse  # noqa: PLC0415
+
+    shipped = parse(
+        {
+            "from": [{"name": "Shop", "email": "versand@shop.example"}],
+            "subject": "Ihre Bestellung ist unterwegs",
+            "message_id": "<v1@x>",
+        },
+        "Mit DHL, Sendungsnummer 00340434161094000001, Bestellnummer 4711-2026. Zustellung voraussichtlich morgen.",
+        dt_util.now(),
+    )
+    link.insights._merge_parcel(shipped, fire=False)  # noqa: SLF001
+    from_shop = parse(
+        {
+            "from": [{"name": "eBay", "email": "ebay@ebay.com"}],
+            "subject": "Ihre Bestellung ist unterwegs",
+            "message_id": "<e1@x>",
+        },
+        "Bestellnummer: 12-34567-89012",
+        dt_util.now(),
+    )
+    link.insights._merge_parcel(from_shop, fire=False)  # noqa: SLF001 - no carrier, no number: the shop's page
+    from_carrier = parse(
+        {
+            "from": [{"name": "DHL", "email": "noreply@dhl.de"}],
+            "subject": "Ihre Sendung kommt heute",
+            "message_id": "<d1@x>",
+        },
+        "Sendungsnummer JJD000390007827531234 – heute zwischen 10 und 14 Uhr. Paket von BEISPIELSHOP.",
+        dt_util.now(),
+    )
+    link.insights._merge_parcel(from_carrier, fire=False)  # noqa: SLF001 - no shop, no order, a time window
+    link.insights.parcel_ignored.append("ads.example")
     shapes["friedafetch_mail/insights"] = await call("friedafetch_mail/insights")
+    shapes["friedafetch_mail/insights/parcel"] = await call(
+        "friedafetch_mail/insights/parcel", parcel_id=link.insights.packages[0]["id"], action="ignore"
+    )
     calendar = SimpleNamespace(id="home", name="Zuhause", color="#34c759", supports_events=True)
     with patch(f"{CALDAV}.async_calendars", AsyncMock(return_value=[calendar])):
         shapes["friedafetch_mail/insights/calendars"] = await call("friedafetch_mail/insights/calendars")

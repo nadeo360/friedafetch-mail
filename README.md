@@ -252,6 +252,23 @@ Besides the birthday sensor, every account gets these sensors (when mail is enab
 | AI ratings this hour | only with AI sorting: ratings in the current hour, limit and mode as attributes (diagnostic) |
 | Parcels on their way | parcels not yet delivered; attributes: how many arrive today, and the list with carrier, number, shop, status, expected day, time window and tracking link |
 
+And a binary sensor **Problem** (diagnostic) that is on while something does not work, with the reasons as the
+attribute `problems` – each with its kind, since when and a detail:
+
+| Kind | When |
+|---|---|
+| `push` | push has not been listening for more than 15 minutes (reconnects during a router or iCloud restart are fine) |
+| `look` | the read/flagged look failed |
+| `ai` | AI sorting is on and its last rating failed (AI task not reachable, timeout) |
+| `pass_slow` | a pass of new mail has been running for more than 10 minutes |
+| `throttled` | iCloud asked to slow down; the attribute `throttle` shows until when the background work pauses |
+| `for_you` | the last *For you* refresh failed |
+
+A problem that lasts an hour also shows up under *Settings → Repairs*, with the account and the reasons; the repair
+goes away by itself once everything works again. When iCloud answers with `[THROTTLED]`, `[LIMIT]` or “too many
+connections”, the timer, the push passes and the look pause for 5 minutes (doubled with every further throttled
+answer, up to an hour) instead of logging in again at once; mail that arrived meanwhile is picked up by the next pass.
+
 Automations can react to these events (data stays on the Home Assistant event bus):
 
 | Event | When | Data |
@@ -307,6 +324,10 @@ the mailbox, the activity and the contacts; nothing of it goes to an AI, and not
   the shop (“from APPLE”) joins the shop's order. *Track* opens the carrier's own tracking page, *Order* the shop's
   order page (Amazon, eBay, Apple) when no carrier is known – never a link from the mail. Delivered parcels stay for two
   days. The sensor *Parcels on their way* and the event `friedafetch_mail_package` make automations possible.
+  **Where from?** (the ⓘ button of a parcel) lists the mails it was put together from, newest first, with what Frieda
+  read in each (number, order, expected day, the shop it names). If something went wrong you can correct it there:
+  *Make it a parcel of its own* takes a mail out, *Belongs to* + *Merge* joins two parcels, *Not a parcel* hides it,
+  and *Never parcels from …* ignores the sender's domain from then on (*Undo* next to *No parcels from* in the card).
 - **Important senders** – contact groups (or every contact) and addresses or domains you name. Their mail is never lost
   among the rest: the AI rates it at least as important, and it is announced right away also without AI sorting.
   The activity marks them with a star.
@@ -365,7 +386,10 @@ check is `basedpyright` (requirements/types.txt); findings from before it came a
 it, waits until every CI run of that commit has passed, creates the GitHub release with the notes (German, `---`,
 English), and then checks the zip the release workflow attached – checksum, version and every file against the
 tagged source. `--dry-run` only checks and tests; `--draft` prints a notes skeleton from the commits since the last
-release.
+release. A CI run that GitHub still shows as running five minutes after its last job finished counts by its jobs
+(GitHub sometimes never closes a run). If the script stops while waiting anyway, `--resume` continues the same
+version later: it checks that the tag does not exist yet and `main` is the pushed commit, waits for CI again, creates
+the release and checks the zip.
 
 ## About the use of AI
 
