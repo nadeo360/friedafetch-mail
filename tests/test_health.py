@@ -50,9 +50,7 @@ async def test_problem_sensor_and_repair(hass: HomeAssistant, freezer: FrozenDat
     link.state.error = "IMAP operation failed: no answer from the server in time"
     link.throttle.note("NO [THROTTLED]")
     link.rules.current = {"trigger": "push", "started": (dt_util.now() - timedelta(minutes=12)).isoformat(), "ai": True}
-    link.watcher = SimpleNamespace(
-        status=lambda: {"state": "error", "since": (dt_util.now() - timedelta(minutes=20)).isoformat(), "error": "x"}
-    )
+    link.watcher = _watcher("error", (dt_util.now() - timedelta(minutes=20)).isoformat(), "x")
     await _refresh(hass, sensor)
     state = hass.states.get(sensor)
     kinds = {p["kind"] for p in state.attributes["problems"]}
@@ -69,10 +67,15 @@ async def test_problem_sensor_and_repair(hass: HomeAssistant, freezer: FrozenDat
 
     link.state.error = None
     link.rules.current = None
-    link.watcher = SimpleNamespace(status=lambda: {"state": "listening", "since": None, "error": None})
+    link.watcher = _watcher("listening")
     with patch("custom_components.friedafetch_mail.throttle.time.monotonic", lambda: 1e12):
         assert link.health.check() == []
     assert ir.async_get(hass).async_get_issue(DOMAIN, f"health_{link.health._entry_id}") is None  # noqa: SLF001
+
+
+def _watcher(state: str, since: str | None = None, error: str | None = None) -> SimpleNamespace:
+    """A push watcher as the problem sensor and the push sensor read it."""
+    return SimpleNamespace(state=state, status=lambda: {"state": state, "since": since, "error": error})
 
 
 async def _refresh(hass: HomeAssistant, entity_id: str) -> None:
