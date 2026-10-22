@@ -2500,7 +2500,7 @@ class FriedaPostfachPanel extends HTMLElement {
         return `<div class="ai-cat fy-row"><span class="fy-ic ${warn ? "warn" : ""}">${ico(icons[p.status] || "package-variant-closed")}</span>
           <span class="tx"><strong>${esc(p.shop || p.carrier || p.subject || "–")}</strong><span>${esc(t.fyParcel[p.status] || p.status)}${when ? ` · ${esc(when)}` : ""}</span>
             <span class="muted">${esc(who || p.subject || "")}</span></span>
-          ${p.url ? `<button class="secondary small ib" data-action="fy-track" data-url="${esc(p.url)}">${ico("open-in-new")}${esc(t.fyTrack)}</button>` : ""}
+          ${p.url ? `<button class="secondary small ib" data-action="fy-track" data-url="${esc(p.url)}">${ico(p.link === "shop" ? "shopping-outline" : "open-in-new")}${esc(p.link === "shop" ? t.fyOrderPage : t.fyTrack)}</button>` : ""}
           <button class="icon" data-action="fy-dismiss" data-kind="package" data-id="${esc(p.id)}" title="${esc(t.fyHide)}" aria-label="${esc(t.fyHide)}: ${esc(p.shop || p.carrier || "")}">${ico("close")}</button></div>`;
       })
       .join("");

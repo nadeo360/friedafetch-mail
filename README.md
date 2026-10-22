@@ -303,7 +303,9 @@ the mailbox, the activity and the contacts; nothing of it goes to an AI, and not
   tracking number, status (on its way, arrives today with the time window, ready for pick-up, delivered, problem) and
   the expected day. A shipping mail is read once, right after it arrives; tracking numbers count only next to a word
   like “Sendungsnummer”, in a carrier's tracking link or in an unmistakable form, so order numbers are not taken for
-  parcels. *Track* opens the carrier's own tracking page – never a link from the mail. Delivered parcels stay for two
+  parcels. Updates without a number join their parcel (same sender within a week), and a carrier's mail that names
+  the shop (“from APPLE”) joins the shop's order. *Track* opens the carrier's own tracking page, *Order* the shop's
+  order page (Amazon, eBay, Apple) when no carrier is known – never a link from the mail. Delivered parcels stay for two
   days. The sensor *Parcels on their way* and the event `friedafetch_mail_package` make automations possible.
 - **Important senders** – contact groups (or every contact) and addresses or domains you name. Their mail is never lost
   among the rest: the AI rates it at least as important, and it is announced right away also without AI sorting.

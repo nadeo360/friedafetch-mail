@@ -4,7 +4,9 @@ Worked out locally with patterns – no AI. A mail is a candidate by its sender 
 on its way, delivered …); only candidates are read, each once. Tracking numbers count only when the carrier is named
 in the mail or the number stands next to a word like "Sendungsnummer" or in a carrier's tracking link, so order and
 customer numbers are not taken for parcels. The tracking link shown is built from the carrier's own address, never
-taken from the mail (a link in a mail may lead anywhere).
+taken from the mail (a link in a mail may lead anywhere); for a parcel without one, a known shop's own order page.
+
+PARSER bumps when the patterns learn something new: the shipping mails of the last weeks are then read again.
 """
 
 from __future__ import annotations
@@ -13,12 +15,15 @@ import re
 from datetime import date, datetime, timedelta
 from typing import Any
 
+PARSER = 2  # 2: DHL Express waybills, dates with month names and weekdays, shop hints in carrier mails
+
 # carrier id: (name, sender domains, number patterns, tracking link with {n})
 CARRIERS: dict[str, tuple[str, tuple[str, ...], tuple[str, ...], str]] = {
     "dhl": (
         "DHL",
         ("dhl.de", "dhl.com", "deutschepost.de", "dhl.net"),
-        (r"\bJJD\d{18,20}\b", r"\b00340\d{15}\b", r"\b\d{12}\b", r"\b\d{20}\b"),
+        # JJD…, 00340…, 12 or 20 digits (DHL Paket), 10 digits (a DHL Express waybill)
+        (r"\bJJD\d{18,20}\b", r"\b00340\d{15}\b", r"\b\d{12}\b", r"\b\d{20}\b", r"\b\d{10}\b"),
         "https://www.dhl.de/de/privatkunden/pakete-empfangen/verfolgen.html?piececode={n}",
     ),
     "dpd": (
@@ -40,7 +45,8 @@ CARRIERS: dict[str, tuple[str, tuple[str, ...], tuple[str, ...], str]] = {
         "https://gls-group.com/DE/de/paketverfolgung?match={n}",
     ),
     "ups": ("UPS", ("ups.com",), (r"\b1Z[0-9A-Z]{16}\b",), "https://www.ups.com/track?tracknum={n}"),
-    "amazon": ("Amazon", ("amazon.de", "amazon.com"), (r"\bTBA\d{12}\b",), ""),
+    # Amazon's own delivery: only by its number (mails from amazon.de are the shop, not the carrier)
+    "amazon": ("Amazon Logistics", (), (r"\bTBA\d{12}\b",), ""),
 }
 # the carrier is named in the text (for mails from shops)
 _NAMED = {
@@ -53,7 +59,7 @@ _NAMED = {
 }
 _NUMBER_WORDS = re.compile(
     r"(sendungs-?\s?nummer|sendungsnr|tracking-?\s?(nummer|number|id)|paket-?\s?nummer|paketnr|track(ing)? #|"
-    r"sendungsverfolgung|tracking code|parcel number|shipment number)",
+    r"sendungsverfolgung|tracking code|parcel number|shipment number|waybill|frachtbrief|awb|luftfrachtbrief)",
     re.IGNORECASE,
 )
 # a tracking number inside a carrier's link: ?piececode=, ?idc=, /parcel/, ?tracknum=, ?match=
@@ -86,13 +92,45 @@ STATUS = (
     ),
 )
 _ORDER = re.compile(
-    r"(?:bestell(?:ung|nummer|nr)\.?|order)\s*(?:nr\.?|nummer|number|#|:)?\s*:?\s*([A-Z0-9][\w-]{4,})", re.I
+    # an order number has a digit ("Bestellung wurde zugestellt" names none)
+    r"(?:bestell(?:ung|nummer|nr)\.?|order)\s*(?:nr\.?|nummer|number|#|:)?\s*:?\s*((?=[\w-]*\d)[A-Z0-9][\w-]{4,})",
+    re.I,
 )
-_DATE = re.compile(r"\b(\d{1,2})\.(\d{1,2})\.(\d{2,4})?")
+_MONTHS = {
+    "jan": 1, "januar": 1, "january": 1, "feb": 2, "februar": 2, "february": 2, "mär": 3, "märz": 3, "mar": 3,
+    "march": 3, "apr": 4, "april": 4, "mai": 5, "may": 5, "jun": 6, "juni": 6, "june": 6, "jul": 7, "juli": 7,
+    "july": 7, "aug": 8, "august": 8, "sep": 9, "sept": 9, "september": 9, "okt": 10, "oktober": 10, "oct": 10,
+    "october": 10, "nov": 11, "november": 11, "dez": 12, "dezember": 12, "dec": 12, "december": 12,
+}  # fmt: skip
+_MONTH = "|".join(sorted(_MONTHS, key=len, reverse=True))
+_WEEKDAYS = {
+    "montag": 0, "mo": 0, "monday": 0, "mon": 0, "dienstag": 1, "di": 1, "tuesday": 1, "tue": 1, "mittwoch": 2,
+    "mi": 2, "wednesday": 2, "wed": 2, "donnerstag": 3, "do": 3, "thursday": 3, "thu": 3, "freitag": 4, "fr": 4,
+    "friday": 4, "fri": 4, "samstag": 5, "sa": 5, "saturday": 5, "sat": 5, "sonntag": 6, "so": 6, "sunday": 6,
+    "sun": 6,
+}  # fmt: skip
+_WEEKDAY = "|".join(sorted(_WEEKDAYS, key=len, reverse=True))
+# 24.10.(2026), 24/10/2026, 24. Okt (2026), 24 Oct 2026, Oct 24 (2026), and a weekday ("Zustellung: Freitag")
+_DAYS = (
+    ("dmy", re.compile(r"\b(\d{1,2})[./](\d{1,2})[./](\d{2,4})?")),
+    ("d_month", re.compile(rf"\b(\d{{1,2}})\.?\s+({_MONTH})\.?(?:\s+(\d{{4}}))?\b", re.IGNORECASE)),
+    ("month_d", re.compile(rf"\b({_MONTH})\.?\s+(\d{{1,2}})(?:,?\s+(\d{{4}}))?\b", re.IGNORECASE)),
+    ("weekday", re.compile(rf"\b({_WEEKDAY})\b\.?", re.IGNORECASE)),
+)
 _ETA_WORDS = re.compile(
-    r"(voraussichtlich|zustellung|zugestellt|lieferung|liefertermin|ankunft|erwartet|estimated|expected|arriv|deliver)",
+    r"(voraussichtlich|zustell|zugestellt|lieferung|liefertermin|ankunft|erwartet|estimated|expected|arriv|deliver)",
     re.IGNORECASE,
 )
+# a carrier mail names the shop: "… von APPLE gebeten", "shipment … from APPLE"
+_SHOP_HINT = re.compile(r"\b(?:von|from)\s+([A-ZÄÖÜ][A-ZÄÖÜ0-9&\-]+(?:\s[A-ZÄÖÜ][A-ZÄÖÜ0-9&\-]+){0,2})\b")
+# a known shop's own order page (shown when no carrier link can be built); {order} where the shop allows it
+SHOP_PAGES = {
+    "amazon.de": "https://www.amazon.de/gp/your-account/order-details?orderID={order}",
+    "amazon.com": "https://www.amazon.com/gp/your-account/order-details?orderID={order}",
+    "ebay.com": "https://www.ebay.de/mye/myebay/purchase",
+    "ebay.de": "https://www.ebay.de/mye/myebay/purchase",
+    "apple.com": "https://www.apple.com/de/shop/order/list",
+}
 _WINDOW = re.compile(
     r"(?:zwischen\s*)?(\d{1,2})(?:[:.](\d{2}))?\s*(?:uhr\s*)?(?:–|-|bis|and|und)\s*(\d{1,2})(?:[:.](\d{2}))?\s*uhr",
     re.IGNORECASE,
@@ -151,21 +189,40 @@ def _status(subject: str, text: str) -> str | None:
     return None
 
 
+def _first_day(near: str, sent: date) -> date | None:
+    """The first date in a piece of text, in any of the usual forms; a weekday is its next occurrence."""
+    best: tuple[int, date] | None = None
+    for kind, pattern in _DAYS:
+        for m in pattern.finditer(near):
+            try:
+                if kind == "dmy":
+                    year = int(m.group(3)) if m.group(3) else sent.year
+                    day = date(year + (2000 if year < 100 else 0), int(m.group(2)), int(m.group(1)))
+                elif kind == "d_month":
+                    day = date(int(m.group(3) or sent.year), _MONTHS[m.group(2).lower()], int(m.group(1)))
+                elif kind == "month_d":
+                    day = date(int(m.group(3) or sent.year), _MONTHS[m.group(1).lower()], int(m.group(2)))
+                else:
+                    ahead = (_WEEKDAYS[m.group(1).lower()] - sent.weekday()) % 7
+                    day = sent + timedelta(days=ahead)
+            except (ValueError, KeyError):
+                continue
+            if kind != "weekday" and day < sent - timedelta(days=60):
+                day = date(day.year + 1, day.month, day.day)  # "2. Jan" written in December
+            if best is None or m.start() < best[0]:
+                best = (m.start(), day)
+            break
+    return best[1] if best else None
+
+
 def _eta(text: str, sent: date) -> tuple[str | None, str | None]:
     """Expected day (ISO) and time window ('10:00–14:00') near words like 'voraussichtlich' or 'Zustellung'."""
     day: date | None = None
     for m in _ETA_WORDS.finditer(text):
-        near = text[m.start() : m.start() + 120]
-        if (d := _DATE.search(near)) is not None:
-            year = int(d.group(3)) if d.group(3) else sent.year
-            year += 2000 if year < 100 else 0
-            try:
-                day = date(year, int(d.group(2)), int(d.group(1)))
-            except ValueError:
-                continue
-            if day < sent - timedelta(days=2):  # "bestellt am …": not the delivery
-                day = None
-                continue
+        near = text[m.start() : m.start() + 80]
+        found = _first_day(near, sent)
+        if found is not None and found >= sent - timedelta(days=2):  # "bestellt am …" is not the delivery
+            day = found
             break
         for pattern, offset in _RELATIVE:
             if pattern.search(near):
@@ -199,6 +256,7 @@ def parse(summary: dict[str, Any], text: str, sent: datetime) -> dict[str, Any] 
         eta = sent.date().isoformat()  # "kommt heute": the day of the mail
     order = _ORDER.search(whole)
     from_carrier = carrier is not None and any(domain.endswith(d) for d in CARRIERS[carrier][1])
+    hint = _SHOP_HINT.search(text) if from_carrier else None
     return {
         "carrier": carrier,
         "numbers": numbers,
@@ -208,6 +266,7 @@ def parse(summary: dict[str, Any], text: str, sent: datetime) -> dict[str, Any] 
         "order": order.group(1) if order else None,
         "shop": None if from_carrier else (sender.get("name") or domain or None),
         "domain": domain,
+        "shop_hint": hint.group(1).strip() if hint else None,  # the shop a carrier names
         "subject": subject[:160],
         "message_id": summary.get("message_id"),
         "date": sent.isoformat(),
@@ -217,7 +276,19 @@ def parse(summary: dict[str, Any], text: str, sent: datetime) -> dict[str, Any] 
 def tracking_url(carrier: str | None, number: str | None) -> str | None:
     if not carrier or not number or carrier not in CARRIERS or not CARRIERS[carrier][3]:
         return None
+    if carrier == "dhl" and len(number) == 10 and number.isdigit():  # a DHL Express waybill
+        return f"https://www.dhl.com/de-de/home/tracking/tracking-express.html?tracking-id={number}"
     return CARRIERS[carrier][3].format(n=number)
+
+
+def shop_url(domain: str | None, order: str | None) -> str | None:
+    """A known shop's own order page, built from its address (never from the mail)."""
+    for shop, page in SHOP_PAGES.items():
+        if domain and (domain == shop or domain.endswith("." + shop)):
+            if "{order}" in page:
+                return page.format(order=order) if order and re.fullmatch(r"[\w-]{5,40}", order) else None
+            return page
+    return None
 
 
 def carrier_name(carrier: str | None) -> str | None:

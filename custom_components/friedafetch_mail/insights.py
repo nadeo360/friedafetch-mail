@@ -188,6 +188,10 @@ class Insights:
         self.weekly_sent = data.get("weekly_sent")
         self.packages = list(data.get("packages") or [])
         self.parsed = list(data.get("parsed") or [])
+        if data.get("parser") != shipping.PARSER:
+            # the patterns learned more: the shipping mails of the last weeks are read again with them
+            self.packages, self.parsed = [], []
+            self._subs_at = 0.0
         self._last_uid = data.get("last_uid")
         self._validity = data.get("validity")
         self._loaded = True
@@ -203,6 +207,7 @@ class Insights:
             "weekly_sent": self.weekly_sent,
             "packages": self.packages,
             "parsed": self.parsed[-MAX_PARSED:],
+            "parser": shipping.PARSER,
             "last_uid": self._last_uid,
             "validity": self._validity,
         }
@@ -821,13 +826,42 @@ class Insights:
         if changed:
             async_notify(self._hass, self._entry_id, "insights")
 
+    def _same_parcel(self, info: dict[str, Any], keys: list[str]) -> dict[str, Any] | None:
+        """The parcel a mail is about: by number or order; else one a carrier's mail names the shop of; else, for a
+        mail without number or order, the open parcel its sender wrote about in the last days (an update)."""
+        found = next((p for p in self.packages if set(p.get("keys") or []) & set(keys)), None)
+        if found is not None:
+            return found
+        sent = dt_util.parse_datetime(info["date"]) or dt_util.now()
+
+        def recent(p: dict[str, Any], days: int) -> bool:
+            updated = dt_util.parse_datetime(p.get("updated") or "")
+            return p.get("status") != "delivered" and updated is not None and abs(sent - updated) < timedelta(days=days)
+
+        hint = str(info.get("shop_hint") or "").lower()
+        if hint:
+            named = [
+                p
+                for p in self.packages
+                if recent(p, 10)
+                and hint in str(p.get("shop") or "").lower()
+                and (not p.get("number") or p.get("carrier") == info["carrier"])
+            ]
+            if named:
+                return max(named, key=lambda p: p.get("updated") or "")
+        if not info["numbers"] and not info.get("order"):
+            same_sender = [p for p in self.packages if recent(p, 7) and p.get("domain") == info["domain"]]
+            if same_sender:
+                return max(same_sender, key=lambda p: p.get("updated") or "")
+        return None
+
     def _merge_parcel(self, info: dict[str, Any], *, fire: bool) -> bool:
         keys = [f"{info['carrier']}:{n}" for n in info["numbers"]]
         if info.get("order"):
             keys.append(f"order:{info['domain']}:{info['order']}")
         if not keys:
             keys = [f"mail:{info['message_id']}"]
-        parcel = next((p for p in self.packages if set(p.get("keys") or []) & set(keys)), None)
+        parcel = self._same_parcel(info, keys)
         if parcel is None:
             parcel = {
                 "id": _id(*keys),
@@ -836,6 +870,7 @@ class Insights:
                 "number": None,
                 "shop": None,
                 "order": None,
+                "domain": info["domain"],
                 "status": None,
                 "eta": None,
                 "window": None,
@@ -848,6 +883,8 @@ class Insights:
         parcel["mails"] = list(dict.fromkeys([*parcel["mails"], info["message_id"]]))[-10:]
         for key in ("carrier", "shop", "order"):
             parcel[key] = parcel[key] or info.get(key)
+        if info.get("shop") and not parcel.get("shop_domain"):
+            parcel["shop_domain"] = info["domain"]  # the shop's address: its order page
         parcel["number"] = parcel["number"] or (info["numbers"][0] if info["numbers"] else None)
         if info["date"] < parcel["updated"]:
             return False  # an older mail: it only adds what was missing
@@ -887,12 +924,18 @@ class Insights:
 
     @staticmethod
     def parcel_view(p: dict[str, Any]) -> dict[str, Any]:
-        """A parcel as the panel, the sensor and the tool show it (the link built from the carrier's address)."""
+        """A parcel as the panel, the sensor and the tool show it.
+
+        The link is the carrier's tracking page, else the shop's order page – both built from their own addresses.
+        """
+        track = shipping.tracking_url(p.get("carrier"), p.get("number"))
+        shop = None if track else shipping.shop_url(p.get("shop_domain"), p.get("order"))
         return {
             "id": p["id"],
             "carrier": shipping.carrier_name(p.get("carrier")),
             "number": p.get("number"),
-            "url": shipping.tracking_url(p.get("carrier"), p.get("number")),
+            "url": track or shop,
+            "link": "carrier" if track else "shop" if shop else None,
             "shop": p.get("shop"),
             "order": p.get("order"),
             "status": p.get("status"),

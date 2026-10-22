@@ -163,3 +163,165 @@ async def test_new_shipping_mail_of_a_pass_is_read_at_once(hass: HomeAssistant) 
     assert [e.data["status"] for e in events] == ["out_for_delivery"]
     await insights.async_parcels_after_pass()
     mail.async_get_message.assert_awaited_once()  # not read twice
+
+
+# ------------------------------------------------------------------ formats seen in real shipping mails (made up data)
+WED = datetime(2026, 10, 21, 21, 2, tzinfo=dt_util.get_default_time_zone())
+
+DHL_EXPRESS = (
+    "IHRE AKTUALISIERTEN ZUSTELLANGABEN\n\nHallo ANNA BEISPIEL,\n\nSie haben um eine Änderung der Zustellung Ihrer "
+    "DHL Express-Sendung mit Sendungsnr. 1234567890 von BEISPIELSHOP gebeten.\n\nSendungsnr.\n1234567890\n\n"
+    "Voraussichtliches Zustelldatum\n23 Okt 2026\n\nUhrzeit der Zustellung\nbis Tagesende\n\n"
+    "You have requested a delivery change for your DHL Express shipment with waybill number 1234567890 from "
+    "BEISPIELSHOP.\nEstimated Delivery Date\nFri Oct 23 2026"
+)
+SHOP = (
+    "Bestellnummer W1234567890\nhttps://store.shop.example/vieworder/W1234567890\n\nBestellt am 16/10/2026\n\n"
+    "Deine Artikel wurden versendet.\n\n Lieferung  23/10/2026\n   Expressversand\n Sendungsverfolgung\n"
+)
+
+
+def test_a_dhl_express_waybill_and_the_shop_it_names() -> None:
+    info = parse(_mail("donotreply_odd@dhl.com", "DHL On Demand Delivery", "DHL EXPRESS"), DHL_EXPRESS, SENT)
+    assert info["carrier"] == "dhl" and info["numbers"] == ["1234567890"] and info["eta"] == "2026-10-23"
+    assert info["shop_hint"] == "BEISPIELSHOP" and info["shop"] is None
+    assert tracking_url("dhl", "1234567890").startswith("https://www.dhl.com/de-de/home/tracking/tracking-express")
+
+
+def test_dates_with_slashes_month_names_and_weekdays() -> None:
+    shop = parse(
+        _mail("shipping@orders.shop.example", "Versandbenachrichtigung W1234567890", "Beispielshop"), SHOP, SENT
+    )
+    assert (shop["status"], shop["eta"], shop["order"], shop["carrier"]) == (
+        "in_transit",
+        "2026-10-23",
+        "W1234567890",
+        None,
+    )
+    amazon = parse(
+        _mail("versandbestaetigung@amazon.de", "Versendet: „Regal aus Holz…“", "Amazon.de"),
+        "Dein Paket wurde versendet!\nZustellung: Freitag\n\nBestellnr.\n304-1234567-7654321\n",
+        WED,
+    )
+    assert (amazon["eta"], amazon["order"], amazon["carrier"], amazon["shop"]) == (
+        "2026-10-23",
+        "304-1234567-7654321",
+        None,  # amazon.de is the shop, not the carrier
+        "Amazon.de",
+    )
+    ebay = parse(
+        _mail("ebay@ebay.com", "IN ZUSTELLUNG: Regal und 2 weitere(r) Artikel", "eBay"),
+        "Bestellnummer:\n\n12-34567-89012\n\nLieferung ca.:\n\nDi, 20. Okt\n\nVersanddienstleister:\n\nDPD Germany\n",
+        datetime(2026, 10, 20, 8, 38, tzinfo=dt_util.get_default_time_zone()),
+    )
+    assert (ebay["status"], ebay["carrier"], ebay["eta"], ebay["order"]) == (
+        "out_for_delivery",
+        "dpd",
+        "2026-10-20",
+        "12-34567-89012",
+    )
+
+
+async def _insights(hass: HomeAssistant) -> Insights:
+    log = ActivityLog(hass, "parcels-real")
+    await log.async_load()
+    insights = Insights(hass, "parcels-real", SimpleNamespace(guard=None), MagicMock(), log, {}, language="de")
+    await insights.async_load()
+    return insights
+
+
+def _info(sender: str, subject: str, name: str, text: str, when: datetime, mid: str) -> dict[str, Any]:
+    info = parse(_mail(sender, subject, name) | {"message_id": mid}, text, when)
+    assert info is not None
+    return info
+
+
+async def test_updates_join_their_parcel(hass: HomeAssistant) -> None:
+    """Regression: updates without a tracking number became new parcels; a carrier's mail stood apart from the shop's."""
+    insights = await _insights(hass)
+    now = dt_util.now()
+    insights._merge_parcel(  # noqa: SLF001
+        _info(
+            "shipping@orders.shop.example",
+            "Versandbenachrichtigung W1234567890",
+            "Beispielshop Store",
+            SHOP,
+            now - timedelta(hours=2),
+            "<s1>",
+        ),
+        fire=False,
+    )
+    for n, mid in enumerate(("<d1>", "<d2>")):  # two updates of DHL Express about the same waybill
+        insights._merge_parcel(  # noqa: SLF001
+            _info(
+                "donotreply_odd@dhl.com",
+                "DHL On Demand Delivery",
+                "DHL EXPRESS",
+                DHL_EXPRESS,
+                now - timedelta(minutes=30 - n),
+                mid,
+            ),
+            fire=False,
+        )
+    [parcel] = insights.parcels()
+    assert (parcel["shop"], parcel["carrier"], parcel["number"], parcel["link"]) == (
+        "Beispielshop Store",
+        "DHL",
+        "1234567890",
+        "carrier",
+    )
+
+    # eBay: in delivery, then an update without order number, then delivered – one parcel; its link is eBay's page
+    ebay_text = "Bestellnummer:\n\n12-34567-89012\n\nVersanddienstleister:\n\nDPD Germany\n"
+    insights._merge_parcel(
+        _info("ebay@ebay.com", "IN ZUSTELLUNG: Regal", "eBay", ebay_text, now - timedelta(hours=3), "<e1>"), fire=False
+    )  # noqa: SLF001
+    insights._merge_parcel(
+        _info(
+            "ebay@ebay.com",
+            "Ihr Paket ist bald da – Sendung unterwegs",
+            "eBay",
+            "Bald ist es so weit.",
+            now - timedelta(hours=2),
+            "<e2>",
+        ),
+        fire=False,
+    )  # noqa: SLF001
+    ebay = [p for p in insights.parcels() if p["shop"] == "eBay"]
+    assert len(ebay) == 1 and ebay[0]["link"] == "shop" and ebay[0]["url"] == "https://www.ebay.de/mye/myebay/purchase"
+    insights._merge_parcel(
+        _info("ebay@ebay.com", "Ihre Bestellung wurde zugestellt", "eBay", ebay_text, now - timedelta(hours=1), "<e3>"),
+        fire=False,
+    )  # noqa: SLF001
+    assert [p["status"] for p in insights.parcels() if p["shop"] == "eBay"] == ["delivered"]
+    assert len(insights.parcels()) == 2
+
+    # Amazon: the shop's order page with its order number
+    amazon = _info(
+        "versandbestaetigung@amazon.de",
+        "Versendet: „Regal…“",
+        "Amazon.de",
+        "Zustellung: Freitag\nBestellnr.\n304-1234567-7654321",
+        now,
+        "<a1>",
+    )
+    insights._merge_parcel(amazon, fire=False)  # noqa: SLF001
+    [shop] = [p for p in insights.parcels() if p["shop"] == "Amazon.de"]
+    assert shop["url"] == "https://www.amazon.de/gp/your-account/order-details?orderID=304-1234567-7654321"
+
+
+async def test_new_patterns_read_the_shipping_mails_again(hass: HomeAssistant, hass_storage: dict[str, Any]) -> None:
+    hass_storage["friedafetch_mail.insights.parcels-old"] = {
+        "version": 1,
+        "key": "friedafetch_mail.insights.parcels-old",
+        "data": {
+            "packages": [{"id": "x", "keys": ["mail:<1>"], "status": "in_transit"}],
+            "parsed": ["<1>"],
+            "parser": 1,
+        },
+    }
+    log = ActivityLog(hass, "parcels-old")
+    await log.async_load()
+    insights = Insights(hass, "parcels-old", SimpleNamespace(guard=None), MagicMock(), log, {}, language="de")
+    await insights.async_load()
+    assert insights.packages == [] and insights.parsed == []  # read again with the new patterns

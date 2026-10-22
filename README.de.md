@@ -323,8 +323,10 @@ Aktivität und den Kontakten ermittelt; davon geht nichts an eine KI, und ohne d
   Sendungsnummer, Status (unterwegs, kommt heute mit Zeitfenster, liegt zur Abholung bereit, zugestellt, Problem) und
   der voraussichtliche Tag. Eine Versandmail wird einmal gelesen, gleich nach ihrem Eingang; Sendungsnummern zählen nur
   neben einem Wort wie „Sendungsnummer“, in einem Verfolgungslink des Versanddienstes oder in einer unverwechselbaren
-  Form, damit Bestellnummern nicht für Pakete gehalten werden. *Verfolgen* öffnet die Seite des Versanddienstes – nie
-  einen Link aus der Mail. Zugestellte Pakete bleiben zwei Tage stehen. Der Sensor *Pakete unterwegs* und das Ereignis
+  Form, damit Bestellnummern nicht für Pakete gehalten werden. Updates ohne Nummer gehören zu ihrem Paket (gleicher
+  Absender innerhalb einer Woche), und eine Mail des Versanddienstes, die den Shop nennt („von APPLE“), zur Bestellung
+  des Shops. *Verfolgen* öffnet die Seite des Versanddienstes, *Bestellung* die Bestellseite des Shops (Amazon, eBay,
+  Apple), wenn kein Versanddienst bekannt ist – nie einen Link aus der Mail. Zugestellte Pakete bleiben zwei Tage stehen. Der Sensor *Pakete unterwegs* und das Ereignis
   `friedafetch_mail_package` machen Automationen möglich.
 - **Wichtige Absender** – Kontaktgruppen (oder alle Kontakte) und Adressen oder Domains, die du nennst. Ihre Mails gehen
   nie unter: Die KI stuft sie mindestens als wichtig ein, und sie werden sofort gemeldet, auch ohne KI-Sortierung.
