@@ -257,3 +257,24 @@ def test_the_assistant_turns_words_into_a_category(open_panel) -> None:
 
 
 # ------------------------------------------------------------------ tabs
+
+
+def test_tabs_stay_when_the_connection_comes_back(open_panel) -> None:
+    """Regression: back from the background the app reconnects; failed loads dropped the AI tabs and kept old mails."""
+    panel = open_panel("postfach")
+    tabs = "return [...root.querySelectorAll('[role=\"tab\"]')].map((x) => x.textContent.trim());"
+    before = panel.js(tabs)
+    assert "KI-Sortierung" in before and "Für dich" in before
+    panel.js(
+        """const real = el._hass.callWS.bind(el._hass);
+        window.__fail = true;
+        el._hass.callWS = (m) => (window.__fail ? Promise.reject({ code: "not_connected", message: "lost" }) : real(m));
+        window.__rows.unshift({ ...window.__rows[0], key: "<neu@example>", message_id: "<neu@example>", subject: "Neu nach dem Zurückkehren" });
+        el._autoRefresh();"""
+    )
+    panel.js("await wait(400);")
+    assert panel.js(tabs) == before  # what is shown stays while the connection comes back
+    panel.js("window.__fail = false;")
+    panel.js("await wait(2600);")  # the reload is tried again by itself
+    assert panel.js(tabs) == before
+    assert "Neu nach dem Zurückkehren" in panel.text(".mlist")

@@ -43,6 +43,9 @@ const sortTh = (action, sort, key, label, cls = "") => {
 };
 const nextSort = (cur, key, firstDir) => (cur.key === key ? { key, dir: -cur.dir } : { key, dir: firstDir });
 
+// a websocket command this backend does not know (an older Frieda Postfach): that part is left out
+const gone = (err) => err?.code === "unknown_command";
+
 const ACT_PAGE = 50; // mails per page of the activity list; more load while scrolling
 const ASSIST_ROUNDS = 5; // rounds of the category assistant, then the proposal is edited by hand
 const initials = (name) =>
@@ -163,6 +166,7 @@ class FriedaPostfachPanel extends HTMLElement {
     clearInterval(this._timer);
     this.removeEventListener("keydown", this._onKey);
     clearTimeout(this._liveTimer);
+    clearTimeout(this._retryTimer);
     document.removeEventListener("visibilitychange", this._onVisible);
     document.removeEventListener("click", this._onDocClick);
     this._unsubscribe();
@@ -233,21 +237,36 @@ class FriedaPostfachPanel extends HTMLElement {
     this._s.automation = list.automation || null;
   }
 
-  async _autoRefresh() {
+  // Back from the background (or the connection came back): everything again. The app reconnects first, so the
+  // first attempt may fail; it is repeated a few times, and what the panel shows stays until it worked.
+  async _autoRefresh(attempt = 0) {
+    clearTimeout(this._retryTimer);
     if (!this._canRefresh()) return;
+    this._subscribe(); // a subscription lost with the connection
     try {
       await this._reload();
       this._render();
     } catch (err) {
-      /* keep the last state on transient errors */
+      if (attempt < 5) this._retryTimer = setTimeout(() => this._autoRefresh(attempt + 1), 2000 * (attempt + 1));
     }
   }
 
   set hass(hass) {
     const first = !this._hass;
+    const conn = hass?.connection;
     this._hass = hass;
     if (first) this._init();
     if (first) this._subscribe();
+    if (conn && conn !== this._conn) {
+      // after a lost connection (the app in the background, a restart) the panel loads everything again
+      this._conn?.removeEventListener?.("ready", this._onReady);
+      this._onReady ||= () => {
+        this._unsub = null; // the server forgot the old subscription
+        this._autoRefresh();
+      };
+      conn.addEventListener?.("ready", this._onReady);
+      this._conn = conn;
+    }
     const menu = this.shadowRoot.querySelector("ha-menu-button");
     if (menu) {
       menu.hass = hass;
@@ -324,8 +343,12 @@ class FriedaPostfachPanel extends HTMLElement {
       this._loadHistory().catch(() => {}),
       this._ws({ type: "friedafetch_mail/ai", entry_id: entryId })
         .then((ai) => (this._s.ai = ai))
-        .catch(() => (this._s.ai = null)), // older backend or AI sorting unavailable
-      this._loadActivity().catch(() => {}),
+        .catch((err) => {
+          // an older backend has no AI sorting; a connection that is just coming back keeps what is shown
+          if (gone(err)) this._s.ai = null;
+          else throw err;
+        }),
+      this._loadActivity(),
       this._loadInsights(),
     ]);
     this._s.rules = list.rules;
@@ -2038,8 +2061,8 @@ class FriedaPostfachPanel extends HTMLElement {
     const ask = this._s.applyAsk && this._s.applyAsk.ratingId === d.rating_id ? this._s.applyAsk : null;
     const askCat = ask ? (s.ai?.categories || []).find((c) => c.name === ask.category) : null;
     const askHtml = askCat
-      ? `<div class="askline" role="status">${ico("help-circle-outline")}<span>${esc(fmt(t.applyAsk, cat(askCat.name), [askCat.move_to ? `→ ${askCat.move_to}` : "", askCat.mark_seen ? t.aSeen : "", askCat.flag ? t.aFlag : ""].filter(Boolean).join(", ")))}</span>
-          <button class="small" data-action="apply-yes">${esc(t.applyYes)}</button><button class="secondary small" data-action="apply-no">${esc(t.applyNo)}</button></div>`
+      ? `<div class="askline" role="status">${ico("help-circle-outline")}<span>${esc(fmt(t.applyAsk, cat(askCat.name), [askCat.move_to ? `→ ${this._folderName(askCat.move_to)}` : "", askCat.mark_seen ? t.aSeen : "", askCat.flag ? t.aFlag : ""].filter(Boolean).join(", ")))}</span>
+          <span class="askbtns"><button class="small" data-action="apply-yes">${esc(t.applyYes)}</button><button class="secondary small" data-action="apply-no">${esc(t.applyNo)}</button></span></div>`
       : "";
     const acts = item && mid ? `<div class="macts">${this._mailActions([item])}</div>` : "";
     return `<div class="rtop">${acts}<span class="grow"></span>${ruleBtn}${rerate}</div>
@@ -2092,7 +2115,8 @@ class FriedaPostfachPanel extends HTMLElement {
     const again = `<button class="link" data-action="loc-again" data-id="${esc(mid)}" ${l.busy ? "disabled" : ""}>${esc(l.busy ? t.locBusy : t.locAgain)}</button>`;
     const at = fmt(t.locChecked, fmtClock(l.checked));
     if (l.error) return `<div class="loc gone" role="status"><span class="li">${ico("alert-circle-outline")}</span><span class="lt">${esc(fmt(t.locError, l.error))}<small>${esc(at)}</small></span>${again}</div>`;
-    const place = frieda || "INBOX";
+    // the trash has many names (Deleted Messages, Papierkorb …): Frieda's place and the found one compare as "trash"
+    const place = /^(deleted messages|trash|papierkorb|gelöschte objekte|deleted items)$/i.test(frieda || "") ? "trash" : frieda || "INBOX";
     const friedaText = place === "INBOX" ? fmt(t.locFriedaLeft, this._folderName("INBOX")) : fmt(t.locFriedaMoved, this._folderName(place));
     if (!l.found) {
       return `<div class="loc gone" role="status"><span class="li">${ico("help-circle-outline")}</span><span class="lt">${esc(t.locGone)}<small>${esc(at)}</small></span>${again}<span class="note">${esc(fmt(t.locGoneNote, friedaText))}</span></div>`;
@@ -2343,7 +2367,8 @@ class FriedaPostfachPanel extends HTMLElement {
     try {
       this._s.insights = await this._ws({ type: "friedafetch_mail/insights", entry_id: this._s.entryId });
     } catch (err) {
-      this._s.insights = null; // older backend
+      if (gone(err)) this._s.insights = null; // older backend; a connection coming back keeps the tab
+      else throw err;
     }
   }
 

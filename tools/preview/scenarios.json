@@ -32,6 +32,10 @@
   "Ort: nicht mehr gefunden"
  ],
  [
+  "scene=apply",
+  "Nach Korrektur: Aktion ausführen?"
+ ],
+ [
   "scene=runs",
   "Durchgänge"
  ],

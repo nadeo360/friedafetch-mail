@@ -88,6 +88,16 @@ if (scene === "pick" || scene === "rerating") {
   else for (const b of [...root.querySelectorAll('[data-action="act-open"][role="checkbox"]')].slice(0, 3)) { b.click(); await wait(80); }
   if (scene === "rerating") { await click('.actbar [data-action="act-rerate"]', 300); await click('[data-action="confirm-yes"]', 400); }
 }
+if (scene === "apply") {
+  // right after a correction: run the new category's actions? (the question in the mail's header)
+  const row = window.__rows.find((r) => r.kind === "ai");
+  [...root.querySelectorAll('[data-action="act-open"]')].find((x) => x.dataset.id === row.key)?.click();
+  await wait(1200);
+  const cat = el._s.ai.categories.find((c) => c.move_to || c.flag || c.mark_seen) || el._s.ai.categories[0];
+  el._s.applyAsk = { ratingId: row.rating_id, category: cat.name };
+  el._render();
+  await wait(200);
+}
 if (scene === "loc" || scene === "gone") {
   const i = scene === "loc" ? 5 : 7;
   const key = window.__rows[i]?.key;

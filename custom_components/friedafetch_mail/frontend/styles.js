@@ -412,8 +412,9 @@ export const STYLE = `
   .macts .mact .lb { display: none; }
   .macts .mact { padding-inline: 8px; }
   .rtop .macts { gap: 4px; }
-  .askline { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; padding: 8px 10px; border-radius: 10px; background: var(--secondary-background-color); font-size: 13.5px; --mdc-icon-size: 18px; }
-  .askline > span { flex: 1; min-width: 12em; }
+  .askline { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; padding: 8px 10px; border-radius: 10px; background: var(--secondary-background-color); font-size: 13.5px; --mdc-icon-size: 18px; }
+  .askline > span:not(.askbtns) { flex: 1; min-width: 12em; }
+  .askline .askbtns { display: flex; gap: 8px; margin-left: auto; }
   .mtextwrap { margin: 10px 0 16px; }
   .mtext .body { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.55; max-height: 45vh; overflow: auto; padding: 12px 14px; border-radius: 10px; background: var(--secondary-background-color); }
   .mtext .warnline, .mtext .files { display: flex; gap: 6px; align-items: center; --mdc-icon-size: 16px; }
