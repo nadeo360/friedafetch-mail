@@ -144,7 +144,11 @@ die gewählte Mail (auf dem Handy öffnet sich die Mail in einem Blatt über der
   Mail-Änderungen gilt, der Papierkorb nur, wenn Löschen erlaubt ist, und endgültig gelöscht wird nie. Jede Aktion
   steht in Friedas Änderungsprotokoll und im Verlauf der Mail. **Text anzeigen** lädt den Text der Mail (bereinigt,
   ohne sie als gelesen zu markieren). **Regel erstellen** öffnet den Regel-Editor mit dem Absender als Bedingung.
-  Mit Tastatur: j/k nächste/vorige Mail, u gelesen, s markieren, e archivieren, # Papierkorb.
+  Mit Tastatur: j/k nächste/vorige Mail, u gelesen, s markieren, e archivieren, # Papierkorb, z rückgängig,
+  / suchen, 1–5 die Tabs; **?** zeigt alle. Auf einem Touchscreen wischst du eine Mail der Liste nach rechts, um sie
+  als gelesen (oder ungelesen) zu markieren, und nach links, um sie zu archivieren (oder zurück in den Posteingang zu
+  legen). Wie sicher sich die KI war, zeigt eine kleine dreistufige Anzeige neben der Kategorie (sicher, ziemlich
+  sicher, unsicher).
 - **Ansichten** *Ungelesen* und *Markiert* (unter *Im Postfach*) zeigen, was das Postfach gerade so hat.
 - **Auswählen** (oder ⌘/Strg-Klick, ⇧-Klick für einen Bereich) wählt Mails für **Neu bewerten**: alle einer Ansicht,
   einen ganzen Tag (Heute, Gestern, …) oder einzelne; Mails, die eine Regel erledigt hat, sind nicht für die KI.
@@ -167,6 +171,33 @@ die gewählte Mail (auf dem Handy öffnet sich die Mail in einem Blatt über der
 **KI-Sortierung** enthält Modus und Kategorien, **KI-Protokoll** alles, was an eine KI ging. Bei mehreren Konten
 erscheint oben eine Kontoauswahl. Freigaben und Änderungsprotokoll bleiben im Panel von Frieda, dessen Überblick
 auch zeigt, ob Frieda Postfach läuft.
+
+**Rückgängig statt Nachfragen:** Was sich zurücknehmen lässt, passiert sofort, und eine ruhige Leiste unten sagt, was
+geschehen ist, mit **Rückgängig** daneben (oder Taste z) – bei gelesen/ungelesen, markieren, archivieren, zurück in
+den Posteingang und Papierkorb (jede Mail kommt zurück in den Ordner, aus dem sie kam; schon gelesene Mails bleiben
+gelesen), beim Löschen einer Regel (sie kommt mit ihren Treffern an ihren Platz zurück) oder einer KI-Kategorie und
+beim Ausblenden oder Korrigieren in *Für dich*. Die Leiste bleibt etwa acht Sekunden und wartet, solange Zeiger oder
+Fokus auf ihr sind. Nur was sich nicht zurücknehmen lässt, fragt weiter vorher: Listen leeren, Abmelden, Neu bewerten
+(es kostet KI-Anfragen) und Läufe über das ganze Postfach.
+
+## Dashboard-Karte
+
+Eine Karte für jedes Dashboard zeigt die Pakete unterwegs (die heute kommen zuerst, mit Zeitfenster und
+Verfolgungslink), die wichtigen Mails von heute (ein Tippen öffnet sie im Panel) und ob Frieda Postfach funktioniert
+(die Gründe des Sensors *Problem*, sonst *Alles läuft*), unten die Zahl der ungelesenen Mails. Hinzufügen über
+*Dashboard bearbeiten → Karte hinzufügen → Frieda Postfach* oder in YAML:
+
+```yaml
+type: custom:friedafetch-mail-card
+# alles optional:
+device_id: 0123456789abcdef   # das Frieda-Postfach-Gerät eines Kontos (Standard: das erste)
+parcels: true                 # Pakete unterwegs
+important: true               # wichtige Mails von heute
+title: Post
+```
+
+Sie liest nur die Sensoren des Kontos und funktioniert deshalb auch für Benutzer ohne Admin-Rechte (eine Mail im
+Panel öffnen braucht einen Admin).
 
 ## KI-Sortierung
 
@@ -321,8 +352,9 @@ Der Tab **Für dich** im Panel sammelt, was Frieda dir abnimmt. Alles wird in Ho
 Aktivität und den Kontakten ermittelt; davon geht nichts an eine KI, und ohne deinen Klick passiert nichts.
 
 - **Deine Woche** – was angekommen ist (im Vergleich zur Woche davor), was Regeln erledigt haben, wie oft die KI richtig
-  lag (bewertet minus korrigiert), was noch ungelesen ist. Mit *Wochenrückblick am* kommt das an dem Tag auch als
-  Benachrichtigung.
+  lag (bewertet minus korrigiert), was noch ungelesen ist. Kleine Linien zeigen die letzten acht Wochen für Mails,
+  Regeln und Trefferquote (Frieda Postfach behält eine Zusammenfassung jeder abgeschlossenen Woche; die Aktivität
+  selbst behält 30 Tage). Mit *Wochenrückblick am* kommt das an dem Tag auch als Benachrichtigung.
 - **Termine aus Mails** – braucht die KI-Sortierung: Die KI nennt einen Termin oder eine Frist, die sie in einer Mail
   liest, die sie ohnehin bewertet (dieselben Daten, keine zusätzliche Anfrage). Du prüfst Titel und Zeit und trägst
   ihn mit einem Klick in einen Kalender ein; die Benachrichtigung zu einer wichtigen Mail bekommt den Knopf *In
@@ -351,6 +383,8 @@ Aktivität und den Kontakten ermittelt; davon geht nichts an eine KI, und ohne d
   korrigierst du es dort: *Als eigenes Paket* nimmt eine Mail heraus, *Gehört zu* + *Zusammenführen* vereint zwei
   Pakete, *Kein Paket* blendet es aus, und *Nie Pakete von …* übergeht die Domain des Absenders ab dann
   (*Zurücknehmen* neben *Keine Pakete von* in der Karte).
+  Jedes Paket zeigt, wie weit es ist – unterwegs → heute → zugestellt (oder abholbereit → abgeholt) –, und eines, das
+  heute mit Zeitfenster kommt, zeigt das Fenster auf dem Tag mit einer Marke für jetzt.
 - **Wichtige Absender** – Kontaktgruppen (oder alle Kontakte) und Adressen oder Domains, die du nennst. Ihre Mails gehen
   nie unter: Die KI stuft sie mindestens als wichtig ein, und sie werden sofort gemeldet, auch ohne KI-Sortierung.
   In der Aktivität tragen sie einen Stern.

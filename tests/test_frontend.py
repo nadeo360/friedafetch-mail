@@ -16,9 +16,14 @@ async def test_panel_registered_and_removed(hass: HomeAssistant) -> None:
     panels = hass.data[frontend.DATA_PANELS]
     assert "frieda-postfach" in panels and panels["frieda-postfach"].require_admin is True
     assert "friedafetch" in panels  # Frieda keeps its own panel (accounts, approvals, activity)
+    cards = [
+        u for u in hass.data[frontend.DATA_EXTRA_MODULE_URL].urls if u.startswith("/friedafetch_mail_static/card.js")
+    ]
+    assert len(cards) == 1  # the dashboard card, on every dashboard
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
     assert "frieda-postfach" not in hass.data[frontend.DATA_PANELS]
+    assert not [u for u in hass.data[frontend.DATA_EXTRA_MODULE_URL].urls if "card.js" in u]
 
 
 async def test_static_panel_served(hass: HomeAssistant, hass_client) -> None:
@@ -30,6 +35,8 @@ async def test_static_panel_served(hass: HomeAssistant, hass_client) -> None:
     body = await resp.text()
     assert "friedafetch-mail-panel" in body and "friedafetch_mail/rules/run" in body
     assert "friedafetch/approvals" not in body
+    card = await client.get("/friedafetch_mail_static/card.js")
+    assert card.status == 200 and "friedafetch-mail-card" in await card.text()
     for module in ("i18n.js", "styles.js"):  # loaded by panel.js with the same version query
         resp = await client.get(f"/friedafetch_mail_static/{module}?v=1")
         assert resp.status == 200 and "export const" in await resp.text()

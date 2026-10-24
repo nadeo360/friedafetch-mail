@@ -331,6 +331,7 @@ class RuleEngine:
         self.attachment_saver = attachment_saver
         self._store: Store[dict[str, Any]] = Store(hass, STORAGE_VERSION, f"{CORE_DOMAIN}.rules.{entry_id}")
         self._rules: list[Rule] = []
+        self._deleted: tuple[Rule, int] | None = None  # the last deleted rule and its place, for "Undo"
         self._last_uid: dict[str, int] = {}
         self._uidvalidity: dict[str, int] = {}
         self._loaded = False
@@ -452,8 +453,23 @@ class RuleEngine:
     async def async_delete(self, rule_id: str) -> None:
         await self.async_load()
         rule = self._get(rule_id)
+        self._deleted = (rule, self._rules.index(rule))  # for "Undo" in the panel (memory only)
         self._rules.remove(rule)
         await self._save()
+
+    async def async_restore(self, rule_id: str) -> dict[str, Any]:
+        """The last deleted rule back, as it was (id, hits) and at its place."""
+        await self.async_load()
+        deleted = self._deleted
+        if deleted is None or deleted[0].id != rule_id:
+            raise RuleError("This rule can no longer be restored")
+        if len(self._rules) >= MAX_RULES:
+            raise RuleError(f"Too many rules (max {MAX_RULES})")
+        rule, pos = deleted
+        self._deleted = None
+        self._rules.insert(min(pos, len(self._rules)), rule)
+        await self._save()
+        return rule.to_dict()
 
     async def _check_mailboxes(self, rule: Rule) -> None:
         try:

@@ -114,5 +114,10 @@ if (scene === "link") {
   history.replaceState(null, "", `?mail=${encodeURIComponent("<gartenmarkt-rabatt@example>")}&account=e1`);
   el._openLinked(); await wait(600);
 }
+if (q.get("card")) {
+  // the dashboard card instead of the panel
+  el.style.display = "none";
+  window.__card = await (await import("./mock-card.js?v=__BUILD__")).show({ data, rows: window.__rows, q });
+}
 document.title = "ready";
 </script></body></html>

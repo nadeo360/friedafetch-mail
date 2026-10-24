@@ -47,6 +47,8 @@ const nextSort = (cur, key, firstDir) => (cur.key === key ? { key, dir: -cur.dir
 const gone = (err) => err?.code === "unknown_command";
 
 const ACT_PAGE = 50; // mails per page of the activity list; more load while scrolling
+const UNDO_MS = 8000; // how long "Undo" stays after an action (it waits while the pointer or the focus is on it)
+const SWIPE_AT = 80; // px a mail in the list is swiped before it acts
 const ASSIST_ROUNDS = 5; // rounds of the category assistant, then the proposal is edited by hand
 const initials = (name) =>
   String(name || "")
@@ -164,6 +166,7 @@ class FriedaPostfachPanel extends HTMLElement {
 
   disconnectedCallback() {
     clearInterval(this._timer);
+    clearTimeout(this._undoTimer);
     this.removeEventListener("keydown", this._onKey);
     clearTimeout(this._liveTimer);
     clearTimeout(this._retryTimer);
@@ -412,15 +415,20 @@ class FriedaPostfachPanel extends HTMLElement {
   }
 
   // ------------------------------------------------------------ acting on mails (like a mail program)
-  async _mailAct(keys, action) {
+  // undoing: the reverse the backend named for the last action (only the mails that changed, back to their folders)
+  async _mailAct(keys, action, { to = null, undoing = false } = {}) {
     const t = this.t;
     if (!keys.length) return;
     let res = null;
     await this._call(async () => {
-      res = await this._ws({ type: "friedafetch_mail/mail/act", entry_id: this._s.entryId, keys, action });
+      res = await this._ws({ type: "friedafetch_mail/mail/act", entry_id: this._s.entryId, keys, action, ...(to ? { to } : {}) });
       await Promise.all([this._loadActivity().catch(() => {}), this._s.sheet ? this._loadTimeline() : null]);
     });
-    if (res) W.announce(this.shadowRoot, res.failed?.length ? fmt(t.mactFailed, res.failed.length) : fmt(t[`mactDone_${action}`], res.done), 0);
+    if (!res || undoing) return;
+    const text = res.failed?.length ? fmt(t.mactFailed, res.failed.length) : fmt(t[`mactDone_${action}`], res.done);
+    const undo = res.undo;
+    if (undo) this._offerUndo(text, () => this._mailAct(undo.keys, undo.action, { to: undo.to || null, undoing: true }));
+    else W.announce(this.shadowRoot, text, 0);
   }
 
   // The actions for one mail (reading pane) or the picked ones (action bar), as fits their state now
@@ -441,13 +449,42 @@ class FriedaPostfachPanel extends HTMLElement {
     ].join("");
   }
 
-  // Keyboard like a mail program (activity, nothing typed into a field): j/k next/previous mail, u read,
-  // s flag, e archive, # or Delete trash
+  // Keyboard like a mail program (nothing typed into a field): ? the overview, z undo, 1–5 tabs; in the activity
+  // / search, j/k next/previous mail, u read, s flag, e archive, # or Delete trash
   _shortcut(ev) {
-    if (ev.ctrlKey || ev.metaKey || ev.altKey || this._s.confirm || this._s.assist) return;
+    if (ev.ctrlKey || ev.metaKey || ev.altKey || this._s.confirm || this._s.assist || this._s.keys) return;
     const target = ev.composedPath()[0];
     if (target?.closest?.("input, select, textarea, [contenteditable]")) return;
-    if (this._tab(this._tabs()) !== "activity" || this._s.act.runs) return;
+    const tabs = this._tabs();
+    if (ev.key === "?") {
+      ev.preventDefault();
+      this._keysOpen();
+      return;
+    }
+    if (ev.key === "z" && this._undoRun) {
+      ev.preventDefault();
+      this._undoNow();
+      return;
+    }
+    if (/^[1-9]$/.test(ev.key) && W.renderTabs) {
+      const tab = tabs[Number(ev.key) - 1];
+      if (tab) {
+        ev.preventDefault();
+        this._setTab(tab.id);
+        this.shadowRoot.querySelector(`#tab-${tab.id}`)?.focus({ preventScroll: true });
+      }
+      return;
+    }
+    if (this._tab(tabs) !== "activity" || this._s.act.runs) return;
+    if (ev.key === "/") {
+      const q = this.shadowRoot.querySelector("#act-q");
+      if (q) {
+        ev.preventDefault();
+        q.focus();
+        q.select();
+      }
+      return;
+    }
     const a = this._s.act;
     if (ev.key === "j" || ev.key === "k") {
       const i = a.items.findIndex((x) => x.key === a.open);
@@ -553,6 +590,84 @@ class FriedaPostfachPanel extends HTMLElement {
     await this._call(async () => {
       this._s.ai = await this._ws({ type: "friedafetch_mail/ai/usage/clear", entry_id: this._s.entryId });
     });
+  }
+
+  // ------------------------------------------------------------ undo instead of asking first
+  // A calm bar at the bottom after an action that can be taken back ("Archived · Undo"). It lives outside the
+  // redrawn frame, so it keeps its place while the panel renders, and it waits while the pointer or the focus is on it.
+  _undoBar() {
+    let bar = this.shadowRoot.querySelector(".undobar");
+    if (!bar) {
+      bar = document.createElement("div");
+      bar.className = "undobar";
+      bar.setAttribute("role", "status");
+      bar.hidden = true;
+      const hold = () => clearTimeout(this._undoTimer);
+      const resume = () => this._undoLater();
+      bar.addEventListener("pointerenter", hold);
+      bar.addEventListener("focusin", hold);
+      bar.addEventListener("pointerleave", resume);
+      bar.addEventListener("focusout", resume);
+      this.shadowRoot.append(bar);
+    }
+    return bar;
+  }
+
+  _undoLater() {
+    clearTimeout(this._undoTimer);
+    if (this._undoRun) this._undoTimer = setTimeout(() => this._hideUndo(), UNDO_MS);
+  }
+
+  _offerUndo(text, run) {
+    const t = this.t;
+    const bar = this._undoBar();
+    this._undoRun = run;
+    bar.innerHTML = `${ico("check-circle-outline")}<span class="ut">${esc(text)}</span><button class="link" data-undo>${esc(t.undo)}</button><button class="icon" data-undo-close aria-label="${esc(t.undoClose)}">${ico("close")}</button>`;
+    bar.querySelector("[data-undo]").addEventListener("click", () => this._undoNow());
+    bar.querySelector("[data-undo-close]").addEventListener("click", () => this._hideUndo());
+    bar.hidden = false;
+    bar.classList.remove("show");
+    void bar.offsetWidth; // the slide-in starts again for the next action
+    bar.classList.add("show");
+    W.announce(this.shadowRoot, `${text}. ${t.undoKey}`, 0);
+    this._undoLater();
+  }
+
+  _hideUndo() {
+    clearTimeout(this._undoTimer);
+    this._undoRun = null;
+    const bar = this.shadowRoot.querySelector(".undobar");
+    if (bar) bar.hidden = true;
+  }
+
+  async _undoNow() {
+    const run = this._undoRun;
+    this._hideUndo();
+    if (!run) return;
+    await run();
+    if (!this._s.error) W.announce(this.shadowRoot, this.t.undoDone, 0);
+  }
+
+  _keysOpen() {
+    this._s.keys = true;
+    this._render();
+    this.shadowRoot.querySelector('.keys [data-action="keys-close"]')?.focus({ preventScroll: true });
+  }
+
+  _keysClose() {
+    this._s.keys = false;
+    this._render();
+  }
+
+  _renderKeys() {
+    if (!this._s.keys) return "";
+    const t = this.t;
+    return `<div class="modal-backdrop" data-action="keys-close"></div>
+      <div class="modal neutral keys" role="dialog" aria-modal="true" aria-labelledby="keys-title">
+        <div class="modal-head"><span class="modal-icon">${ico("keyboard-outline")}</span><h3 id="keys-title">${esc(t.keysTitle)}</h3></div>
+        <dl class="keylist">${t.keysList.map(([k, v]) => `<div><dt><kbd>${esc(k)}</kbd></dt><dd>${esc(v)}</dd></div>`).join("")}</dl>
+        <div class="modal-actions"><button data-action="keys-close">${esc(t.keysClose)}</button></div>
+      </div>`;
   }
 
   // Confirmation in the panel's own design (window.confirm looks foreign and is not shown by every app).
@@ -986,11 +1101,21 @@ class FriedaPostfachPanel extends HTMLElement {
   async _delete(id) {
     const t = this.t;
     const name = this._s.rules.find((r) => r.id === id)?.name || "";
-    if (!(await this._confirm({ title: t.confirmDeleteTitle, text: fmt(t.confirmDelete, name), ok: t.remove }))) return;
+    let done = false;
     await this._call(async () => {
       await this._ws({ type: "friedafetch_mail/rules/delete", entry_id: this._s.entryId, rule_id: id });
       await this._reload();
+      done = true;
     });
+    if (!done) return;
+    // the rule comes back as it was (same id, hits and place)
+    this._offerUndo(fmt(t.ruleDeleted, name), () =>
+      this._call(async () => {
+        await this._ws({ type: "friedafetch_mail/rules/restore", entry_id: this._s.entryId, rule_id: id });
+        this._s.scrollTo = id;
+        await this._reload();
+      })
+    );
   }
 
   async _toggle(id, enabled) {
@@ -1301,10 +1426,10 @@ class FriedaPostfachPanel extends HTMLElement {
         .map((a) => t[`aiApplied_${a}`] || a)
         .join(", ") || t.tlAppliedSub;
     } else if (e.kind === "acted") {
-      icon = { seen: "email-open-outline", unseen: "email-outline", flag: "flag-outline", unflag: "flag-off-outline", archive: "archive-arrow-down-outline", inbox: "inbox-arrow-down", trash: "delete-outline" }[e.action] || "gesture-tap";
+      icon = { seen: "email-open-outline", unseen: "email-outline", flag: "flag-outline", unflag: "flag-off-outline", archive: "archive-arrow-down-outline", inbox: "inbox-arrow-down", trash: "delete-outline", return: "undo-variant" }[e.action] || "gesture-tap";
       tone = "you";
       title = t[`tlActed_${e.action}`] || e.action;
-      sub = e.mailbox && ["archive", "inbox", "trash"].includes(e.action) ? this._folderName(e.mailbox) : "";
+      sub = e.mailbox && ["archive", "inbox", "trash", "return"].includes(e.action) ? this._folderName(e.mailbox) : "";
     } else if (e.kind === "corrected") {
       icon = e.by === "move" ? "folder-move-outline" : "pencil-outline";
       tone = "you";
@@ -1324,6 +1449,10 @@ class FriedaPostfachPanel extends HTMLElement {
       icon = "calendar-remove-outline";
       tone = "you";
       title = t.tlEventDismissed;
+    } else if (e.kind === "event_restored") {
+      icon = "calendar-refresh-outline";
+      tone = "you";
+      title = t.tlEventRestored;
     } else if (e.kind === "vip_notified") {
       icon = "star-outline";
       tone = "ai";
@@ -1773,6 +1902,7 @@ class FriedaPostfachPanel extends HTMLElement {
   _actOpen(key) {
     const item = this._actItem(key);
     if (!item) return;
+    if (this._s.act.open !== key && !this._actNarrow()) this._enter = "reader";
     this._s.act.open = key;
     this._s.act.jump = true;
     this._openTimeline({ message_id: item.message_id || null, subject: item.subject || "", sender: item.from || "" }, { inline: !this._actNarrow(), hint: item.folder });
@@ -2094,7 +2224,7 @@ class FriedaPostfachPanel extends HTMLElement {
     let meta;
     if (d.rating_id && cats.length && !d.held) {
       const options = [...cats.map((c) => c.name), "other"].map((c) => `<option value="${esc(c)}" ${c === d.category ? "selected" : ""}>${esc(cat(c))}</option>`).join("");
-      meta = `<span class="meta ai">${ico(d.corrected ? "pencil-outline" : "creation")}<select class="catsel" data-action="ai-correct" data-id="${esc(d.rating_id)}" aria-label="${esc(t.actCorrect)}">${options}</select>${imp ? `<span class="rl">· ${esc(imp)}/5</span>` : ""}</span>${d.confidence === "low" && !d.corrected ? `<span class="uns">${esc(t.actUnsureMark)}</span>` : ""}`;
+      meta = `<span class="meta ai">${ico(d.corrected ? "pencil-outline" : "creation")}<select class="catsel" data-action="ai-correct" data-id="${esc(d.rating_id)}" aria-label="${esc(t.actCorrect)}">${options}</select>${imp ? `<span class="rl">· ${esc(imp)}/5</span>` : ""}</span>${d.confidence && !d.corrected ? this._confMeter(d.confidence) : ""}`;
     } else if (item) meta = this._actMeta(item);
     else if (d.held) meta = `<span class="meta held">${ico("shield-check-outline")}<span class="rl">${esc(t.actHeld)}</span></span>`;
     else meta = d.category ? `<span class="meta ai">${ico(d.corrected ? "pencil-outline" : "creation")}<span class="rl">${esc(cat(d.category))}</span></span>` : "";
@@ -2130,6 +2260,84 @@ class FriedaPostfachPanel extends HTMLElement {
         ${body}
       </div>
       <div class="rfoot">${esc(mid ? t.tlFoot : t.tlFootOld)}${!this._actNarrow() && item && !this._account()?.read_only ? `<span class="keys">${esc(t.keysHint)}</span>` : ""}</div>`;
+  }
+
+  // The two actions a swipe does: [read or unread, archive or back to the inbox] as [action, icon, label]
+  _swipeActions(item) {
+    const t = this.t;
+    const st = item?.state || {};
+    const where = st.mailbox || (item?.folder === "INBOX" ? "INBOX" : null);
+    return [
+      st.seen ? ["unseen", "email-outline", t.mactUnseen] : ["seen", "email-open-outline", t.mactSeen],
+      where && where !== "INBOX" ? ["inbox", "inbox-arrow-down", t.mactInbox] : ["archive", "archive-arrow-down-outline", t.mactArchive],
+    ];
+  }
+
+  // Touch only (a mouse selects text); the list keeps scrolling up and down (touch-action: pan-y).
+  _bindRowSwipe(li) {
+    const btn = li.querySelector(".mitem");
+    const key = btn?.dataset.id;
+    if (!key) return;
+    let x0 = 0;
+    let y0 = 0;
+    let dx = 0;
+    let on = false;
+    let id = null;
+    const reset = () => {
+      li.classList.remove("swiping", "sw-l", "sw-r", "sw-go");
+      btn.style.transform = "";
+    };
+    btn.addEventListener("pointerdown", (ev) => {
+      if (ev.pointerType !== "touch" || !ev.isPrimary) return;
+      [x0, y0, dx, on, id] = [ev.clientX, ev.clientY, 0, false, ev.pointerId];
+    });
+    btn.addEventListener("pointermove", (ev) => {
+      if (ev.pointerId !== id) return;
+      const mx = ev.clientX - x0;
+      const my = ev.clientY - y0;
+      if (!on) {
+        if (Math.abs(my) > 10 && Math.abs(my) > Math.abs(mx)) return void (id = null); // scrolling the list
+        if (Math.abs(mx) < 12) return;
+        on = true;
+        const [read, move] = this._swipeActions(this._actItem(key));
+        if (!li.querySelector(".swbg")) {
+          li.insertAdjacentHTML("afterbegin", `<span class="swbg l" aria-hidden="true">${ico(read[1])}<span>${esc(read[2])}</span></span><span class="swbg r" aria-hidden="true"><span>${esc(move[2])}</span>${ico(move[1])}</span>`);
+        }
+        li.classList.add("swiping");
+        btn.setPointerCapture?.(ev.pointerId);
+      }
+      dx = Math.max(-140, Math.min(140, mx));
+      btn.style.transform = `translateX(${dx}px)`;
+      li.classList.toggle("sw-r", dx > 0);
+      li.classList.toggle("sw-l", dx < 0);
+      li.classList.toggle("sw-go", Math.abs(dx) >= SWIPE_AT);
+    });
+    btn.addEventListener("pointerup", (ev) => {
+      if (ev.pointerId !== id) return;
+      id = null;
+      if (!on) return;
+      this._swiped = true; // the click that follows the swipe does not open the mail
+      setTimeout(() => (this._swiped = false), 400);
+      const far = Math.abs(dx) >= SWIPE_AT;
+      reset();
+      if (!far) return;
+      const [read, move] = this._swipeActions(this._actItem(key));
+      this._mailAct([key], (dx > 0 ? read : move)[0]);
+    });
+    btn.addEventListener("pointercancel", (ev) => {
+      if (ev.pointerId !== id) return;
+      id = null;
+      reset();
+    });
+  }
+
+  // The AI's confidence as a quiet three-step meter (sure, fairly sure, unsure)
+  _confMeter(level) {
+    const t = this.t;
+    const n = { low: 1, medium: 2, high: 3 }[level];
+    if (!n) return "";
+    const word = t[`conf_${level}`];
+    return `<span class="conf c-${level}" role="img" aria-label="${esc(fmt(t.confLabel, word))}"><span class="cbar" aria-hidden="true">${[1, 2, 3].map((i) => `<i class="${i <= n ? "on" : ""}"></i>`).join("")}</span><span aria-hidden="true">${esc(word)}</span></span>`;
   }
 
   // Read / flagged as the mailbox has it now (for a mail that left the inbox: as last seen there)
@@ -2421,13 +2629,17 @@ class FriedaPostfachPanel extends HTMLElement {
     }
   }
 
-  async _fyCall(msg, after) {
+  // undoText: the change can be taken back ("Undo" while nothing else changed the lists)
+  async _fyCall(msg, after, undoText = "") {
+    let token = null;
     await this._call(async () => {
       const res = await this._ws({ entry_id: this._s.entryId, ...msg });
       if (res && res.week) this._s.insights = res;
       else await this._loadInsights();
+      token = res?.undo || null;
       if (after) after(res);
     });
+    if (undoText && token && !this._s.error) this._offerUndo(undoText, () => this._fyCall({ type: "friedafetch_mail/insights/undo", token }));
   }
 
   _fyWhen(p) {
@@ -2448,12 +2660,23 @@ class FriedaPostfachPanel extends HTMLElement {
     if (!fy) return `<section class="widget w-full"><div class="card"><p class="muted">${esc(t.loading)}</p></div></section>`;
     const w = fy.week || {};
     const trend = w.mails_before ? Math.round(((w.mails - w.mails_before) / w.mails_before) * 100) : null;
-    const tile = (icon, value, label, sub = "", action = "") =>
-      `<${action ? `button class="fy-tile" data-action="${action}"` : `div class="fy-tile"`}>${ico(icon)}<span class="fy-v">${esc(value)}</span><span class="fy-l">${esc(label)}</span>${sub ? `<span class="fy-s">${esc(sub)}</span>` : ""}</${action ? "button" : "div"}>`;
+    const tile = (icon, value, label, sub = "", action = "", line = "") =>
+      `<${action ? `button class="fy-tile" data-action="${action}"` : `div class="fy-tile"`}>${ico(icon)}${line}<span class="fy-v">${esc(value)}</span><span class="fy-l">${esc(label)}</span>${sub ? `<span class="fy-s">${esc(sub)}</span>` : ""}</${action ? "button" : "div"}>`;
+    // the weeks before and these seven days as a small line (from three known points on; no tooltip, the numbers are read out)
+    const spark = (key, unit = "") => {
+      const points = (w.trend || []).map((x) => x[key]);
+      const known = points.filter((v) => v != null);
+      if (known.length < 3) return "";
+      const [min, max] = [Math.min(...known), Math.max(...known)];
+      const y = (v) => (max === min ? 9 : 16 - ((v - min) / (max - min)) * 13);
+      const xy = points.map((v, i) => (v == null ? null : [2 + (i * 60) / (points.length - 1), y(v)])).filter(Boolean);
+      const [lx, ly] = xy[xy.length - 1];
+      return `<svg class="spark" viewBox="0 0 64 18" role="img" aria-label="${esc(fmt(t.trendLabel, points.length, known.map((v) => `${v}${unit}`).join(", ")))}"><polyline points="${xy.map(([a, b]) => `${a.toFixed(1)},${b.toFixed(1)}`).join(" ")}"/><circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="1.8"/></svg>`;
+    };
     const tiles = [
-      tile("email-multiple-outline", w.mails ?? 0, t.fyMails, trend == null ? "" : fmt(trend >= 0 ? t.fyMore : t.fyLess, Math.abs(trend))),
-      w.by_rules ? tile("filter-check-outline", w.by_rules, t.fyByRules) : "",
-      w.rated ? tile("creation", w.accuracy == null ? "–" : `${w.accuracy} %`, t.fyAccuracy, fmt(t.fyRated, w.rated, w.corrected)) : "",
+      tile("email-multiple-outline", w.mails ?? 0, t.fyMails, trend == null ? "" : fmt(trend >= 0 ? t.fyMore : t.fyLess, Math.abs(trend)), "", spark("mails")),
+      w.by_rules ? tile("filter-check-outline", w.by_rules, t.fyByRules, "", "", spark("rules")) : "",
+      w.rated ? tile("creation", w.accuracy == null ? "–" : `${w.accuracy} %`, t.fyAccuracy, fmt(t.fyRated, w.rated, w.corrected), "", spark("accuracy", " %")) : "",
       tile("email-mark-as-unread", w.unread ?? 0, t.fyUnread),
       fy.followup_days ? tile("reply-outline", w.waiting ?? 0, t.fyWaiting) : "",
       w.parcels ? tile("truck-delivery-outline", w.parcels, t.fyParcelsTile) : "",
@@ -2499,7 +2722,7 @@ class FriedaPostfachPanel extends HTMLElement {
         const warn = p.status === "problem" || p.status === "out_for_delivery" || p.status === "pickup";
         return `<div class="ai-cat fy-row"><span class="fy-ic ${warn ? "warn" : ""}">${ico(icons[p.status] || "package-variant-closed")}</span>
           <span class="tx"><strong>${esc(p.shop || p.carrier || p.subject || "–")}</strong><span>${esc(t.fyParcel[p.status] || p.status)}${when ? ` · ${esc(when)}` : ""}</span>
-            <span class="muted">${esc(who || p.subject || "")}</span></span>
+            <span class="muted">${esc(who || p.subject || "")}</span>${this._parcelSteps(p)}</span>
           ${p.url ? `<button class="secondary small ib" data-action="fy-track" data-url="${esc(p.url)}">${ico(p.link === "shop" ? "shopping-outline" : "open-in-new")}${esc(p.link === "shop" ? t.fyOrderPage : t.fyTrack)}</button>` : ""}
           <button class="icon" data-action="fy-parcel-open" data-id="${esc(p.id)}" aria-expanded="${this._s.fyParcel === p.id}" aria-label="${esc(t.fyWhere)}: ${esc(p.shop || p.carrier || "")}">${ico(this._s.fyParcel === p.id ? "chevron-up" : "information-outline")}</button>
           <button class="icon" data-action="fy-dismiss" data-kind="package" data-id="${esc(p.id)}" aria-label="${esc(t.fyHide)}: ${esc(p.shop || p.carrier || "")}">${ico("close")}</button></div>
@@ -2513,6 +2736,34 @@ class FriedaPostfachPanel extends HTMLElement {
     return `<div class="card"><div class="chead"><h2>${esc(t.fyParcels)}</h2>${open ? `<span class="badge">${open}</span>` : ""}</div>
       <p class="muted" style="margin:-4px 0 10px">${esc(t.fyParcelsHint)}</p>
       <div class="ai-cats">${rows}</div>${ignored}</div>`;
+  }
+
+  // Where a parcel is: on its way → today (or ready for pick-up) → delivered; a problem shows at the middle step
+  _parcelSteps(p) {
+    const t = this.t;
+    const steps = p.status === "pickup" ? [t.pstepTransit, t.pstepPickup, t.pstepPicked] : [t.pstepTransit, t.pstepToday, t.pstepDelivered];
+    const at = { in_transit: 0, out_for_delivery: 1, pickup: 1, problem: 1, delivered: 2 }[p.status] ?? 0;
+    const problem = p.status === "problem";
+    const label = problem ? t.pstepProblem : steps[at];
+    const parts = steps
+      .map((name, i) => `<span class="ps ${i < at || p.status === "delivered" ? "done" : i === at ? "now" : ""}"><i></i><small>${esc(i === at && problem ? t.pstepProblem : name)}</small></span>`)
+      .join("");
+    return `<span class="pstep ${problem ? "warn" : ""}" role="img" aria-label="${esc(fmt(t.pstepLabel, label))}">${parts}</span>${this._parcelWindow(p)}`;
+  }
+
+  // Arriving today with a time window: the window on the day from 6 to 22 o'clock, and where now is
+  _parcelWindow(p) {
+    const m = /^(\d{1,2}):(\d{2})–(\d{1,2}):(\d{2})$/.exec(p.window || "");
+    if (p.status !== "out_for_delivery" || !m) return "";
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    if (p.eta && p.eta !== today) return "";
+    const [from, to] = [6, 22];
+    const pos = (h) => Math.max(0, Math.min(100, ((h - from) / (to - from)) * 100));
+    const a = Number(m[1]) + Number(m[2]) / 60;
+    const b = Number(m[3]) + Number(m[4]) / 60;
+    const clock = now.toLocaleTimeString(this._lang(), { hour: "2-digit", minute: "2-digit" });
+    return `<span class="pwin" role="img" aria-label="${esc(fmt(this.t.windowLabel, p.window, clock))}"><span class="pw" style="left:${pos(a).toFixed(1)}%;width:${Math.max(2, pos(b) - pos(a)).toFixed(1)}%"></span><span class="pn" style="left:${pos(now.getHours() + now.getMinutes() / 60).toFixed(1)}%"></span><small class="p0">${from}</small><small class="p1">${to}</small></span>`;
   }
 
   // "Where from?": the mails a parcel was read from and what each one said; merge, split off, not a parcel
@@ -2726,6 +2977,7 @@ class FriedaPostfachPanel extends HTMLElement {
   }
 
   _setTab(id) {
+    if (this._s.tab !== id) this._enter = "tab";
     this._s.tab = id;
     this._layout.setOpt("tabs", "current", id);
     this._render();
@@ -2817,8 +3069,13 @@ class FriedaPostfachPanel extends HTMLElement {
       `<style>${W.UI_STYLE}${STYLE}</style>
       <div class="toolbar"><ha-menu-button></ha-menu-button><img src="${esc(ICON_URL)}" alt=""><span>${esc(t.title)}</span><span class="grow"></span></div>
       ${ready && tabbed ? W.renderTabs(tabs, tab, t.tabsLabel) : ""}
-      <div class="content widgets" ${ready && tabbed ? `role="tabpanel" id="tabpanel" aria-labelledby="tab-${tab}"` : ""}>${body}</div>${this._renderSheet()}${this._renderConfirm()}${this._renderAssist()}`
+      <div class="content widgets" ${ready && tabbed ? `role="tabpanel" id="tabpanel" aria-labelledby="tab-${tab}"` : ""}>${body}</div>${this._renderSheet()}${this._renderConfirm()}${this._renderKeys()}${this._renderAssist()}`
     );
+    // a short glide where something new comes in: another tab, another mail in the reading pane
+    if (this._enter && !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      this.shadowRoot.querySelector(this._enter === "tab" ? ".content" : ".reader .rbody")?.classList.add("enter");
+    }
+    this._enter = null;
     const menu = this.shadowRoot.querySelector("ha-menu-button");
     if (menu && this._hass) {
       menu.hass = this._hass;
@@ -2890,13 +3147,16 @@ class FriedaPostfachPanel extends HTMLElement {
       );
     }
     root.querySelector(".modal")?.addEventListener("keydown", (ev) => {
-      if (ev.key === "Escape") this._confirmDone(false);
+      if (ev.key !== "Escape") return;
+      if (this._s.keys) this._keysClose();
+      else this._confirmDone(false);
     });
     root.querySelectorAll("[data-action]").forEach((el) => {
       const action = el.dataset.action;
       const handler = {
         "fy-refresh": () => this._fyCall({ type: "friedafetch_mail/insights/refresh" }),
-        "fy-dismiss": () => this._fyCall({ type: "friedafetch_mail/insights/dismiss", kind: el.dataset.kind, item_id: el.dataset.id }),
+        "keys-close": () => this._keysClose(),
+        "fy-dismiss": () => this._fyCall({ type: "friedafetch_mail/insights/dismiss", kind: el.dataset.kind, item_id: el.dataset.id }, null, this.t[`fyDone_${el.dataset.kind}`] || this.t.undoDone),
         "fy-restore": () => this._fyCall({ type: "friedafetch_mail/insights/restore", kind: el.dataset.kind }),
         "fy-event-edit": () => this._fyOpenEditor(el.dataset.id),
         "fy-event-cancel": () => {
@@ -2918,17 +3178,18 @@ class FriedaPostfachPanel extends HTMLElement {
           this._render();
         },
         "fy-parcel-split": () =>
-          this._fyCall({ type: "friedafetch_mail/insights/parcel", action: "split", parcel_id: el.dataset.id, message_id: el.dataset.mid }),
+          this._fyCall({ type: "friedafetch_mail/insights/parcel", action: "split", parcel_id: el.dataset.id, message_id: el.dataset.mid }, null, this.t.fyDone_split),
         "fy-parcel-merge": () => {
           const into = this.shadowRoot.querySelector(`#fy-merge-${CSS.escape(el.dataset.id)}`)?.value;
           this._s.fyParcel = into || null;
-          return this._fyCall({ type: "friedafetch_mail/insights/parcel", action: "merge", parcel_id: el.dataset.id, into });
+          return this._fyCall({ type: "friedafetch_mail/insights/parcel", action: "merge", parcel_id: el.dataset.id, into }, null, this.t.fyDone_merge);
         },
         "fy-parcel-ignore": async () => {
+          // no question first: "Undo" takes it back, and "No parcels from" in the card later on
           const sender = el.dataset.sender === "1";
-          if (sender && !(await this._confirm({ title: fmt(this.t.fyNeverTitle, el.dataset.who), text: this.t.fyNeverText, ok: this.t.fyNeverOk, irreversible: false, icon: "package-variant-remove" }))) return;
           this._s.fyParcel = null;
-          await this._fyCall({ type: "friedafetch_mail/insights/parcel", action: "ignore", parcel_id: el.dataset.id, sender });
+          const text = sender ? fmt(this.t.fyDone_never, el.dataset.who) : this.t.fyDone_ignore;
+          await this._fyCall({ type: "friedafetch_mail/insights/parcel", action: "ignore", parcel_id: el.dataset.id, sender }, null, text);
         },
         "fy-track": () => window.open(el.dataset.url, "_blank", "noopener,noreferrer"),
         // a new rule for mails like this one: the sender as its condition, to be changed in the editor
@@ -3041,10 +3302,10 @@ class FriedaPostfachPanel extends HTMLElement {
         },
         "ai-cat-delete": async () => {
           const e = this._s.aiEdit;
-          const t = this.t;
-          const name = this._s.ai.categories[e.index]?.name || "";
-          if (!(await this._confirm({ title: t.aiCatConfirmDeleteTitle, text: fmt(t.aiCatConfirmDelete, name), ok: t.remove }))) return;
-          this._aiSaveCategories(this._s.ai.categories.filter((_, i) => i !== e.index));
+          const before = this._s.ai.categories;
+          const name = before[e.index]?.name || "";
+          await this._aiSaveCategories(before.filter((_, i) => i !== e.index));
+          if (!this._s.error) this._offerUndo(fmt(this.t.catDeleted, name), () => this._aiSaveCategories(before));
         },
         "confirm-yes": () => this._confirmDone(true),
         "confirm-no": () => this._confirmDone(false),
@@ -3080,6 +3341,7 @@ class FriedaPostfachPanel extends HTMLElement {
           this._render();
         },
         "act-open": (ev) => {
+          if (this._swiped) return; // the end of a swipe, not a click
           const a = this._s.act;
           // like a mail program: Cmd/Ctrl adds one mail, Shift a range; while picking every click selects
           if (a.picking || ev.metaKey || ev.ctrlKey || ev.shiftKey) this._actToggle(el.dataset.id, ev);
@@ -3194,6 +3456,8 @@ class FriedaPostfachPanel extends HTMLElement {
         tr.querySelector('[data-action="aiu-open"], [data-action="aiu-mail"], [data-action="run-open"]')?.click();
       })
     );
+    // touch screens: a mail of the list is swiped right to read/unread and left to archive (or back to the inbox)
+    if (!this._account()?.read_only && !this._s.act.picking) root.querySelectorAll(".mlist li.m").forEach((li) => this._bindRowSwipe(li));
     // list entries that act as buttons (the mails of a run) also answer to Enter and Space
     root.querySelectorAll('li[role="button"][data-action]').forEach((li) =>
       li.addEventListener("keydown", (ev) => {

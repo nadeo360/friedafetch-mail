@@ -312,7 +312,7 @@ class MailForYou(ForYouTool):
                 {k: p[k] for k in ("carrier", "number", "shop", "status", "eta", "window", "url")}
                 for p in data["parcels"]
             ],
-            "week": data["week"],
+            "week": {k: v for k, v in data["week"].items() if k != "trend"},  # the panel's trend lines stay there
             "checked": data.get("followups_checked"),
             "content_notice": UNTRUSTED_NOTICE,
         }

@@ -387,6 +387,7 @@
   ],
   "subscriptions_checked": "str",
   "suggestions": [],
+  "undo": "null",
   "vip": {
    "groups": [],
    "known": "num",
@@ -410,6 +411,14 @@
     {
      "count": "num",
      "sender": "str"
+    }
+   ],
+   "trend": [
+    {
+     "accuracy": "num",
+     "mails": "num",
+     "rules": "num",
+     "week": "str"
     }
    ],
    "unread": "num",
@@ -537,6 +546,7 @@
   ],
   "subscriptions_checked": "str",
   "suggestions": [],
+  "undo": "str",
   "vip": {
    "groups": [],
    "known": "num",
@@ -562,6 +572,143 @@
      "sender": "str"
     }
    ],
+   "trend": [
+    {
+     "accuracy": "num",
+     "mails": "num",
+     "rules": "num",
+     "week": "str"
+    }
+   ],
+   "unread": "num",
+   "waiting": "num"
+  },
+  "weekly_day": "null"
+ },
+ "friedafetch_mail/insights/undo": {
+  "dismissed": {},
+  "error": "null",
+  "events_calendar": "null",
+  "followup_days": "num",
+  "followups": [
+   {
+    "days": "num",
+    "id": "str",
+    "message_id": "str",
+    "more": "num",
+    "sent": "str",
+    "subject": "str",
+    "to": [
+     {
+      "email": "str",
+      "name": "str"
+     }
+    ]
+   }
+  ],
+  "followups_checked": "str",
+  "parcel_ignored": [
+   "str"
+  ],
+  "parcels": [
+   {
+    "carrier": "null|str",
+    "eta": "null|str",
+    "id": "str",
+    "link": "str",
+    "number": "null|str",
+    "order": "null|str",
+    "senders": [
+     "str"
+    ],
+    "shop": "null|str",
+    "sources": [
+     {
+      "date": "str",
+      "eta": "null|str",
+      "message_id": "str",
+      "number": "null|str",
+      "order": "null|str",
+      "shop_hint": "null|str",
+      "status": "str",
+      "subject": "str"
+     }
+    ],
+    "status": "str",
+    "subject": "str",
+    "updated": "str",
+    "url": "str",
+    "window": "null|str"
+   }
+  ],
+  "proposals": [
+   {
+    "all_day": "bool",
+    "created": "str",
+    "end": "str",
+    "from": "str",
+    "id": "str",
+    "kind": "str",
+    "location": "null",
+    "message_id": "str",
+    "rating_id": "str",
+    "start": "str",
+    "status": "str",
+    "subject": "str",
+    "title": "str"
+   }
+  ],
+  "subscriptions": [
+   {
+    "count": "num",
+    "id": "str",
+    "last": "str",
+    "mailbox": "str",
+    "name": "str",
+    "never_opened": "bool",
+    "sender": "str",
+    "subject": "str",
+    "uid": "num",
+    "unread": "num",
+    "unsubscribed": "null"
+   }
+  ],
+  "subscriptions_checked": "str",
+  "suggestions": [],
+  "undo": "null",
+  "vip": {
+   "groups": [],
+   "known": "num",
+   "notify": "bool",
+   "senders": "num"
+  },
+  "week": {
+   "accuracy": "num",
+   "by_ai": "num",
+   "by_rules": "num",
+   "corrected": "num",
+   "from": "str",
+   "mails": "num",
+   "mails_before": "num",
+   "never_opened": "num",
+   "parcels": "num",
+   "proposals": "num",
+   "rated": "num",
+   "to": "str",
+   "top_senders": [
+    {
+     "count": "num",
+     "sender": "str"
+    }
+   ],
+   "trend": [
+    {
+     "accuracy": "num",
+     "mails": "num",
+     "rules": "num",
+     "week": "str"
+    }
+   ],
    "unread": "num",
    "waiting": "num"
   },
@@ -571,7 +718,13 @@
   "action": "str",
   "done": "num",
   "failed": [],
-  "skipped": "num"
+  "skipped": "num",
+  "undo": {
+   "action": "str",
+   "keys": [
+    "str"
+   ]
+  }
  },
  "friedafetch_mail/mail/locate": {
   "checked": "str",
@@ -757,6 +910,33 @@
     "name": "str"
    }
   ]
+ },
+ "friedafetch_mail/rules/restore": {
+  "rule": {
+   "actions": {
+    "attachments_folder": "null",
+    "delete": "bool",
+    "flag": "null",
+    "mark_seen": "null",
+    "move_to": "null",
+    "save_attachments": "bool",
+    "stop": "bool"
+   },
+   "conditions": [
+    {
+     "field": "str",
+     "op": "str",
+     "value": "str"
+    }
+   ],
+   "created": "str",
+   "enabled": "bool",
+   "hits": "num",
+   "id": "str",
+   "mailbox": "str",
+   "match": "str",
+   "name": "str"
+  }
  },
  "friedafetch_mail/rules/run": {
   "actions": [

@@ -599,4 +599,71 @@ export const STYLE = `
     .as-pane .acts button { flex: 1; height: 44px; }
   }
 
+
+  /* ---------------------------------------------------------------- undo instead of asking first */
+  .undobar { position: fixed; z-index: 30; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); display: flex; align-items: center; gap: 10px; width: max-content; max-width: calc(100vw - 32px); box-sizing: border-box; padding: 6px 6px 6px 14px; border-radius: 14px; background: var(--primary-text-color, #212121); color: var(--card-background-color, #fff); box-shadow: 0 8px 28px rgba(0,0,0,.28); font-size: 14px; --mdc-icon-size: 18px; }
+  .undobar[hidden] { display: none; }
+  .undobar.show { animation: frieda-undo-in .2s ease-out; }
+  .undobar .ut { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .undobar button.link { color: inherit; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; padding: 6px 8px; min-height: 36px; }
+  .undobar button.icon { color: inherit; opacity: .8; }
+  @keyframes frieda-undo-in { from { opacity: 0; transform: translate(-50%, 10px); } }
+
+  /* ---------------------------------------------------------------- the overview of the keys */
+  .modal.keys { width: min(440px, calc(100vw - 32px)); }
+  .keylist { display: grid; gap: 6px; margin: 4px 0 16px; }
+  .keylist div { display: grid; grid-template-columns: 92px 1fr; align-items: center; gap: 10px; }
+  .keylist dt, .keylist dd { margin: 0; }
+  .keylist dd { font-size: 14px; }
+  kbd { display: inline-block; min-width: 18px; padding: 2px 7px; border: 1px solid var(--divider-color, #d0d0d0); border-bottom-width: 2px; border-radius: 6px; font: 600 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; text-align: center; background: var(--secondary-background-color, #f5f5f5); color: var(--primary-text-color); }
+
+  /* ---------------------------------------------------------------- swiping a mail on touch screens */
+  .mlist li.m .mitem { touch-action: pan-y; }
+  .mlist li.m.swiping { overflow: hidden; }
+  .mlist li.m.swiping .mitem { position: relative; z-index: 1; background: var(--card-background-color, #fff); border-radius: 8px; }
+  .mlist li.m:not(.swiping) .mitem { transition: transform .18s ease-out; }
+  .swbg { position: absolute; inset: 0; display: none; align-items: center; gap: 8px; padding: 0 18px; border-radius: 10px; font-size: 14px; font-weight: 500; --mdc-icon-size: 20px; }
+  .swbg.l { justify-content: flex-start; background: color-mix(in srgb, var(--primary-color) 16%, transparent); color: var(--primary-color); }
+  .swbg.r { justify-content: flex-end; background: color-mix(in srgb, var(--success-color, #43a047) 18%, transparent); color: var(--frieda-text-ok); }
+  .mlist li.m.sw-r .swbg.l, .mlist li.m.sw-l .swbg.r { display: flex; }
+  .mlist li.m.sw-go .swbg { font-weight: 700; }
+  .mlist li.m.sw-go.sw-r .swbg.l { background: color-mix(in srgb, var(--primary-color) 28%, transparent); }
+  .mlist li.m.sw-go.sw-l .swbg.r { background: color-mix(in srgb, var(--success-color, #43a047) 30%, transparent); }
+
+  /* ---------------------------------------------------------------- parcels: steps and today's window */
+  .pstep { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-top: 6px; max-width: 360px; }
+  .pstep .ps { display: grid; gap: 3px; }
+  .pstep .ps i { display: block; height: 4px; border-radius: 2px; background: var(--divider-color, #e0e0e0); }
+  .pstep .ps.done i, .pstep .ps.now i { background: var(--primary-color); }
+  .pstep .ps.now:not(.done) i { background: linear-gradient(90deg, var(--primary-color) 55%, var(--divider-color, #e0e0e0) 55%); }
+  .pstep.warn .ps.now i { background: var(--warning-color, #ffa600); }
+  .pstep .ps small { font-size: 11px; color: var(--secondary-text-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pstep .ps.now small { color: var(--primary-text-color); font-weight: 600; }
+  .pwin { position: relative; display: block; height: 22px; max-width: 360px; margin-top: 4px; }
+  .pwin::before { content: ""; position: absolute; left: 0; right: 0; top: 4px; height: 6px; border-radius: 3px; background: var(--secondary-background-color, #f0f0f0); }
+  .pwin .pw { position: absolute; top: 4px; height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--primary-color) 55%, transparent); }
+  .pwin .pn { position: absolute; top: 1px; width: 2px; height: 12px; margin-left: -1px; border-radius: 1px; background: var(--primary-text-color); }
+  .pwin small { position: absolute; top: 11px; font-size: 10px; color: var(--secondary-text-color); }
+  .pwin .p0 { left: 0; }
+  .pwin .p1 { right: 0; }
+
+  /* ---------------------------------------------------------------- the week: trend lines */
+  .fy-tile { position: relative; }
+  .spark { position: absolute; top: 10px; right: 10px; width: 64px; height: 18px; overflow: visible; }
+  .spark polyline { fill: none; stroke: var(--primary-color); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; opacity: .75; }
+  .spark circle { fill: var(--primary-color); }
+
+  /* ---------------------------------------------------------------- the AI's confidence */
+  .conf { display: inline-flex; align-items: center; gap: 6px; flex: none; font-size: 12px; color: var(--secondary-text-color); }
+  .conf .cbar { display: inline-flex; gap: 2px; }
+  .conf .cbar i { display: block; width: 10px; height: 4px; border-radius: 2px; background: var(--divider-color, #e0e0e0); }
+  .conf .cbar i.on { background: var(--success-color, #43a047); }
+  .conf.c-medium .cbar i.on { background: var(--primary-color); }
+  .conf.c-low .cbar i.on { background: var(--warning-color, #ffa600); }
+  .conf.c-low { color: var(--frieda-text-warn); }
+
+  /* ---------------------------------------------------------------- a short glide where something new comes in */
+  .enter { animation: frieda-enter .18s ease-out; }
+  @keyframes frieda-enter { from { opacity: 0; transform: translateY(6px); } }
+  @media (prefers-reduced-motion: reduce) { .enter, .undobar.show { animation: none; } .mlist li.m .mitem { transition: none !important; } }
 `;

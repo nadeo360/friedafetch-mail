@@ -55,6 +55,7 @@ STATIC_URL = f"/{DOMAIN}_static"
 WEBCOMPONENT = "friedafetch-mail-panel"
 DATA_FRONTEND: HassKey[bool] = HassKey(f"{DOMAIN}_frontend")
 DATA_VERSION: HassKey[str] = HassKey(f"{DOMAIN}_frontend_version")
+DATA_CARD: HassKey[str] = HassKey(f"{DOMAIN}_card")  # the URL of the dashboard card's script
 
 
 async def async_setup_frontend(hass: HomeAssistant, version: str) -> None:
@@ -74,6 +75,7 @@ async def async_setup_frontend(hass: HomeAssistant, version: str) -> None:
         ws_rules_create,
         ws_rules_update,
         ws_rules_delete,
+        ws_rules_restore,
         ws_rules_run,
         ws_rules_history,
         ws_rules_history_clear,
@@ -100,12 +102,16 @@ async def async_setup_frontend(hass: HomeAssistant, version: str) -> None:
         ws_insights_refresh,
         ws_insights_dismiss,
         ws_insights_restore,
+        ws_insights_undo,
         ws_insights_calendars,
         ws_insights_event,
         ws_insights_unsubscribe,
         ws_insights_parcel,
     ):
         websocket_api.async_register_command(hass, command)
+    # the dashboard card (parcels today, important mail, problems) for every dashboard of the user
+    hass.data[DATA_CARD] = f"{STATIC_URL}/card.js?v={version}"
+    frontend.add_extra_js_url(hass, hass.data[DATA_CARD])
     await panel_custom.async_register_panel(
         hass,
         frontend_url_path=PANEL_URL_PATH,
@@ -125,6 +131,8 @@ def async_remove_frontend(hass: HomeAssistant) -> None:
         return
     hass.data[DATA_FRONTEND] = False
     frontend.async_remove_panel(hass, PANEL_URL_PATH, warn_if_unknown=False)
+    if card := hass.data.pop(DATA_CARD, None):
+        frontend.remove_extra_js_url(hass, card)
 
 
 def _entries(hass: HomeAssistant) -> list[ConfigEntry]:
@@ -273,10 +281,24 @@ async def ws_rules_update(hass: HomeAssistant, connection: websocket_api.ActiveC
 @websocket_api.async_response
 @_ws_errors
 async def ws_rules_delete(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
-    """Delete a rule."""
+    """Delete a rule (the last one deleted can be restored)."""
     rules = _entry(hass, msg.get("entry_id")).runtime_data.rules
     await rules.async_delete(msg["rule_id"])
     connection.send_result(msg["id"], {"deleted": True})
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{DOMAIN}/rules/restore", vol.Optional("entry_id"): str, vol.Required("rule_id"): str}
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+@_ws_errors
+async def ws_rules_restore(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Undo the last deletion: the rule comes back as it was, at its place."""
+    rules = _entry(hass, msg.get("entry_id")).runtime_data.rules
+    connection.send_result(msg["id"], {"rule": await rules.async_restore(msg["rule_id"])})
 
 
 @websocket_api.websocket_command(
@@ -663,6 +685,10 @@ async def ws_mail_locate(hass: HomeAssistant, connection: websocket_api.ActiveCo
         vol.Optional("entry_id"): str,
         vol.Required("keys"): vol.All([str], vol.Length(min=1, max=100)),
         vol.Required("action"): vol.In(ACTIONS),
+        # "return": the folder each mail goes back to (the undo of a move)
+        vol.Optional("to"): vol.All(
+            {vol.All(str, vol.Length(max=200)): vol.All(str, vol.Length(min=1, max=200))}, vol.Length(max=100)
+        ),
     }
 )
 @websocket_api.require_admin
@@ -680,6 +706,7 @@ async def ws_mail_act(hass: HomeAssistant, connection: websocket_api.ActiveConne
             msg["action"],
             read_only=bool(options.get(CONF_READ_ONLY, DEFAULT_READ_ONLY)),
             allow_delete=bool(options.get(CONF_ALLOW_DELETE, DEFAULT_ALLOW_DELETE)),
+            to=msg.get("to"),
         ),
     )
 
@@ -948,6 +975,25 @@ async def ws_insights_restore(
     """Show the dismissed ones of a kind again."""
     insights = _insights(hass, msg.get("entry_id"))
     await insights.async_restore(msg["kind"])
+    connection.send_result(msg["id"], await insights.async_get())
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/insights/undo",
+        vol.Optional("entry_id"): str,
+        vol.Required("token"): vol.All(str, vol.Length(min=1, max=40)),
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+@_ws_errors
+async def ws_insights_undo(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Undo the last dismissal or parcel correction (while nothing else changed the lists)."""
+    insights = _insights(hass, msg.get("entry_id"))
+    await insights.async_undo(msg["token"])
     connection.send_result(msg["id"], await insights.async_get())
 
 

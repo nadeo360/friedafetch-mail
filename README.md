@@ -136,7 +136,10 @@ mail on the right (on phones the mail opens in a sheet over the list that you sw
   hidden folders stay untouched, the hourly limit of mail changes applies, the trash only when deleting is allowed,
   and nothing is ever deleted for good. Each action is in Frieda's change log and in the mail's timeline. **Show
   text** loads the mail's text (cleaned, without marking it read). **Create rule** opens the rule editor with the
-  sender as condition. On a keyboard: j/k next/previous mail, u read, s flag, e archive, # trash.
+  sender as condition. On a keyboard: j/k next/previous mail, u read, s flag, e archive, # trash, z undo, / search,
+  1–5 the tabs; **?** shows them all. On a touch screen you swipe a mail of the list to the right to mark it read
+  (or unread) and to the left to archive it (or put it back into the inbox). The AI's confidence shows as a small
+  three-step meter next to the category (sure, fairly sure, unsure).
 - **Views** *Unread* and *Flagged* (under *In the mailbox*) list what the mailbox has like that now.
 - **Select** (or Cmd/Ctrl-click, Shift-click for a range) picks mails for **Rate again**: all of a view, a whole day
   (Today, Yesterday, …) or single ones; mails handled by a rule are not for the AI. While the batch runs, every mail
@@ -157,6 +160,32 @@ mail on the right (on phones the mail opens in a sheet over the list that you sw
 **AI sorting** holds its mode and the categories, **AI log** everything that went to an AI. With several accounts an
 account picker appears on top. Approvals and the change log stay in Frieda's own panel, whose overview also shows
 whether Frieda Postfach is running.
+
+**Undo instead of asking first:** what can be taken back happens at once, and a calm bar at the bottom says what
+happened with **Undo** next to it (or press z) – for read/unread, flag, archive, back to the inbox and trash (each
+mail goes back to the folder it came from; mails that were read already stay read), deleting a rule (it comes back
+with its hits at its place) or an AI category, and hiding or correcting things in *For you*. The bar stays about eight
+seconds and waits while the pointer or the focus is on it. Only what cannot be undone still asks first: clearing
+lists, unsubscribing, rating again (it costs AI requests) and runs over the whole mailbox.
+
+## Dashboard card
+
+A card for any dashboard shows the parcels on their way (the ones arriving today first, with their time window and
+the tracking link), the important mail of today (a tap opens it in the panel) and whether Frieda Postfach works (the
+*Problem* sensor's reasons, or *All good*), with the number of unread mails at the bottom. Add it with *Edit
+dashboard → Add card → Frieda Postfach*, or in YAML:
+
+```yaml
+type: custom:friedafetch-mail-card
+# all optional:
+device_id: 0123456789abcdef   # the Frieda Postfach device of an account (default: the first one)
+parcels: true                 # parcels on their way
+important: true               # important mail of today
+title: Mail
+```
+
+It reads only the account's own sensors, so it also works for users who are not admins (opening a mail in the panel
+needs an admin).
 
 ## AI sorting
 
@@ -303,7 +332,9 @@ The tab **For you** in the panel collects what Frieda notices for you. Everythin
 the mailbox, the activity and the contacts; nothing of it goes to an AI, and nothing happens without your click.
 
 - **Your week** – what arrived (compared with the week before), what rules handled, how often the AI was right (rated
-  minus corrected), what is still unread. With *Weekly review on* it also comes as a notification on that day.
+  minus corrected), what is still unread. Small lines show the last eight weeks of mails, rules and accuracy
+  (Frieda Postfach keeps a summary of every completed week; the activity itself keeps 30 days). With *Weekly review
+  on* it also comes as a notification on that day.
 - **Dates from e-mails** – needs the AI sorting: the AI names an appointment or deadline it reads in a mail it rates
   anyway (same data, no extra request). You check title and time and add it to a calendar with one click; the
   notification of an important mail gets a button *Add to calendar* (the calendar of the options). Calendars Frieda
@@ -328,6 +359,8 @@ the mailbox, the activity and the contacts; nothing of it goes to an AI, and not
   read in each (number, order, expected day, the shop it names). If something went wrong you can correct it there:
   *Make it a parcel of its own* takes a mail out, *Belongs to* + *Merge* joins two parcels, *Not a parcel* hides it,
   and *Never parcels from …* ignores the sender's domain from then on (*Undo* next to *No parcels from* in the card).
+  Every parcel shows how far it got – on its way → today → delivered (or ready for pick-up → picked up) – and one that
+  arrives today with a time window shows the window on the day with a mark for now.
 - **Important senders** – contact groups (or every contact) and addresses or domains you name. Their mail is never lost
   among the rest: the AI rates it at least as important, and it is announced right away also without AI sorting.
   The activity marks them with a star.

@@ -218,8 +218,14 @@ function insights(data, rows) {
   const rated = ai.ratings.length;
   const corrected = ai.ratings.filter((r) => r.corrected).length;
   data["friedafetch_mail/ai"].status.events = true;
+  const mails = rows.length;
+  const accuracy = rated ? Math.round((100 * (rated - corrected)) / rated) : null;
+  const byRules = rows.filter((r) => r.kind === "rule").length;
+  const trend = [0.7, 0.9, 0.8, 1.1, 0.95, 1.2, 0.85].map((f, i) => ({ week: `2026-W${36 + i}`, mails: Math.round(mails * f), rules: Math.round(byRules * f), accuracy: accuracy == null ? null : Math.min(100, accuracy - 9 + i) }));
+  trend.push({ week: "now", mails, rules: byRules, accuracy });
   return {
-    week: { from: ago(7), to: new Date().toISOString(), mails: rows.length, mails_before: Math.max(1, rows.length - 3), by_rules: rows.filter((r) => r.kind === "rule").length, by_ai: rows.filter((r) => r.kind === "ai").length, rated, corrected, accuracy: rated ? Math.round((100 * (rated - corrected)) / rated) : null, unread: rows.filter((r) => r.state?.seen === false).length, top_senders: [{ sender: "news@gartenmarkt.example", count: 3 }], waiting: 2, proposals: 2, never_opened: 1, parcels: 2 },
+    undo: null,
+    week: { from: ago(7), to: new Date().toISOString(), mails: rows.length, mails_before: Math.max(1, rows.length - 3), by_rules: rows.filter((r) => r.kind === "rule").length, by_ai: rows.filter((r) => r.kind === "ai").length, rated, corrected, accuracy: rated ? Math.round((100 * (rated - corrected)) / rated) : null, unread: rows.filter((r) => r.state?.seen === false).length, top_senders: [{ sender: "news@gartenmarkt.example", count: 3 }], waiting: 2, proposals: 2, never_opened: 1, parcels: 2, trend },
     parcels: [
       { id: "k1", carrier: "DHL", number: "00340434161094000001", url: "https://www.dhl.de/de/privatkunden/pakete-empfangen/verfolgen.html?piececode=00340434161094000001", shop: "Shop Versand", order: "4711-2026", status: "out_for_delivery", eta: day(0), window: "10:00–14:00", subject: "Ihre Sendung kommt heute", updated: ago(0.1), link: "carrier" },
       { id: "k2", carrier: "Hermes", number: "H1001234567890123456", url: "https://www.myhermes.de/empfangen/sendungsverfolgung/sendungsinformation/#H1001234567890123456", shop: "Möbelhaus", order: null, status: "in_transit", eta: day(3), window: null, subject: "Ihre Bestellung ist unterwegs", updated: ago(1), link: "carrier" },
@@ -298,6 +304,8 @@ export function install({ data, q }) {
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   const find = (mid) => rows.find((r) => r.message_id === mid);
 
+  let deletedRule = null; // the last deleted rule, for "Undo"
+  let fyUndo = null; // the last dismissal or parcel correction, for "Undo"
   return async function handle(m) {
     if (m.type === "friedafetch_mail/activity/list") {
       const view = m.view || "all";
@@ -409,20 +417,27 @@ export function install({ data, q }) {
     if (m.type === "friedafetch_mail/mail/act") {
       // read / flag / archive / back / trash, like the real backend (moved mails are found again in the next look)
       await wait(Number(q.get("actslow") || 250));
-      const target = { archive: "Archive", inbox: "INBOX", trash: "Deleted Messages" }[m.action] || null;
+      const common = { archive: "Archive", inbox: "INBOX", trash: "Deleted Messages" }[m.action] || null;
+      const opposite = { seen: "unseen", unseen: "seen", flag: "unflag", unflag: "flag" }[m.action];
+      const undo = {};
       let done = 0;
       for (const key of m.keys) {
         const r = rows.find((x) => x.key === key);
         if (!r) continue;
         r.state = r.state || { seen: true, flagged: false, gone: false, mailbox: "INBOX", uid: r.uid, searched: null, checked: new Date().toISOString() };
+        const target = m.action === "return" ? m.to?.[key] : common;
+        const from = r.state.mailbox || "INBOX";
+        const already = (m.action === "seen" || m.action === "unseen") ? r.state.seen === (m.action === "seen") : (m.action === "flag" || m.action === "unflag") ? !!r.state.flagged === (m.action === "flag") : from === target;
         if (m.action === "seen" || m.action === "unseen") r.state.seen = m.action === "seen";
         if (m.action === "flag" || m.action === "unflag") r.state.flagged = m.action === "flag";
         if (target) Object.assign(r.state, { mailbox: target, uid: 9500 + done });
-        (r.acted ||= []).push({ time: new Date().toISOString(), action: m.action, mailbox: target });
+        (r.acted ||= []).push({ time: new Date().toISOString(), action: m.action, mailbox: target || null });
         done += 1;
+        if (!already) undo[key] = from;
       }
       live("activity");
-      return { action: m.action, done, failed: [], skipped: 0 };
+      const keys = Object.keys(undo);
+      return { action: m.action, done, failed: [], skipped: 0, undo: keys.length ? (opposite ? { action: opposite, keys } : { action: "return", keys, to: undo }) : null };
     }
     if (m.type === "friedafetch_mail/mail/text") {
       await wait(Number(q.get("textslow") || 300));
@@ -511,20 +526,42 @@ export function install({ data, q }) {
       return { rule };
     }
     if (m.type === "friedafetch_mail/rules/delete") {
+      const at = rulesList.rules.findIndex((r) => r.id === m.rule_id);
+      if (at >= 0) deletedRule = [rulesList.rules[at], at];
       rulesList.rules = rulesList.rules.filter((r) => r.id !== m.rule_id);
       return { deleted: true };
+    }
+    if (m.type === "friedafetch_mail/rules/restore") {
+      if (!deletedRule || deletedRule[0].id !== m.rule_id) throw new Error("This rule can no longer be restored");
+      rulesList.rules.splice(deletedRule[1], 0, deletedRule[0]);
+      const rule = deletedRule[0];
+      deletedRule = null;
+      return { rule };
     }
     if (m.type === "friedafetch_mail/rules/history/clear") {
       data["friedafetch_mail/rules/history"].runs = [];
       return { cleared: true };
     }
     const fy = data["friedafetch_mail/insights"];
+    const UNDOABLE = ["parcels", "proposals", "followups", "suggestions", "subscriptions", "dismissed", "parcel_ignored", "week"];
+    const remember = (before) => {
+      fy.undo = `u${Date.now().toString(36)}`;
+      fyUndo = { token: fy.undo, before };
+    };
+    const snapshot = () => structuredClone(Object.fromEntries(UNDOABLE.map((k) => [k, fy[k]])));
+    if (m.type === "friedafetch_mail/insights/undo") {
+      if (!fyUndo || fyUndo.token !== m.token) throw new Error("This can no longer be undone");
+      Object.assign(fy, fyUndo.before);
+      fy.undo = fyUndo = null;
+      return fy;
+    }
     if (m.type === "friedafetch_mail/insights/refresh") {
       await wait(500);
       fy.followups_checked = fy.subscriptions_checked = new Date().toISOString();
       return fy;
     }
     if (m.type === "friedafetch_mail/insights/dismiss") {
+      remember(snapshot());
       const list = { rule: "suggestions", followup: "followups", subscription: "subscriptions", proposal: "proposals", package: "parcels" }[m.kind];
       fy[list] = fy[list].filter((x) => x.id !== m.item_id);
       if (m.kind !== "proposal" && m.kind !== "package") fy.dismissed[m.kind] = (fy.dismissed[m.kind] || 0) + 1;
@@ -539,6 +576,7 @@ export function install({ data, q }) {
       return fy;
     }
     if (m.type === "friedafetch_mail/insights/parcel") {
+      remember(snapshot());
       const parcel = fy.parcels.find((x) => x.id === m.parcel_id);
       if (parcel && m.action === "merge") {
         const into = fy.parcels.find((x) => x.id === m.into);

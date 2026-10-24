@@ -4,6 +4,9 @@ The same guard rails as every Frieda tool: nothing in read-only mode, protected 
 hourly quota of mail changes applies, the trash only when deleting is allowed – and nothing is ever deleted for good
 (a mail already in the trash stays there). Every action is written to Frieda's change log and to the mail's timeline.
 A mail is acted on where it is now (the read/flagged look knows its folder; otherwise it is found by Message-ID).
+
+Every answer carries its undo: the opposite action for exactly the mails that changed, and for moved mails "return"
+with the folder each one came from – so the panel can offer "Undo" instead of asking before it acts.
 """
 
 from __future__ import annotations
@@ -20,7 +23,8 @@ from .locate import async_locate
 
 _LOGGER = logging.getLogger(__name__)
 
-ACTIONS = ("seen", "unseen", "flag", "unflag", "archive", "inbox", "trash")
+ACTIONS = ("seen", "unseen", "flag", "unflag", "archive", "inbox", "trash", "return")
+OPPOSITE = {"seen": "unseen", "unseen": "seen", "flag": "unflag", "unflag": "flag"}
 MAX_MAILS = 100  # per action
 AUDIT_TOOL = {
     "seen": "icloud_mark_mail",
@@ -30,6 +34,7 @@ AUDIT_TOOL = {
     "archive": "icloud_move_mail",
     "inbox": "icloud_move_mail",
     "trash": "icloud_delete_mail",
+    "return": "icloud_move_mail",
 }
 
 
@@ -41,10 +46,23 @@ def _now_iso() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
-async def async_act(link: Any, keys: list[str], action: str, *, read_only: bool, allow_delete: bool) -> dict[str, Any]:
-    """Run one action on the mails of the given activity lines; returns {action, done, failed, skipped}."""
+async def async_act(
+    link: Any,
+    keys: list[str],
+    action: str,
+    *,
+    read_only: bool,
+    allow_delete: bool,
+    to: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Run one action on the mails of the given activity lines; returns {action, done, failed, skipped, undo}.
+
+    "return" moves each mail back to the folder in `to` (the undo of archive, inbox and trash).
+    """
     if action not in ACTIONS:
         raise ActionError(f"Unknown action '{action}'")
+    if action == "return" and not to:
+        raise ActionError("No folders to return the mails to")
     if read_only:
         raise ActionError("Frieda is in read-only mode (options of Frieda)")
     if action == "trash" and not allow_delete:
@@ -59,22 +77,28 @@ async def async_act(link: Any, keys: list[str], action: str, *, read_only: bool,
     if not lines:
         raise ActionError("No mails chosen")
 
-    target: str | None = None
+    common: str | None = None
     trash = await mail.async_special_mailbox("trash")
     if action == "archive":
-        target = await mail.async_special_mailbox("archive") or "Archive"
+        common = await mail.async_special_mailbox("archive") or "Archive"
     elif action == "inbox":
-        target = "INBOX"
+        common = "INBOX"
     elif action == "trash":
-        target = trash
+        common = trash
 
     now = _now_iso()
-    out: dict[str, Any] = {"action": action, "done": 0, "failed": [], "skipped": 0}
-    groups: dict[str, list[tuple[dict[str, Any], int]]] = {}
+    out: dict[str, Any] = {"action": action, "done": 0, "failed": [], "skipped": 0, "undo": None}
+    groups: dict[tuple[str, str | None], list[tuple[dict[str, Any], int]]] = {}
     for item in lines:
+        target = (to or {}).get(item["key"]) if action == "return" else common
+        if action == "return" and not target:
+            out["skipped"] += 1
+            continue
         place = activity.where(item)
         if place is None and item.get("message_id"):
-            found = await async_locate(mail, guard, item["message_id"], [item.get("mailbox") or "INBOX"])
+            # a mail Frieda just moved is looked for in its new folder first
+            hints = [(item.get("state") or {}).get("last_mailbox"), item.get("mailbox") or "INBOX"]
+            found = await async_locate(mail, guard, item["message_id"], [h for h in dict.fromkeys(hints) if h])
             activity.set_location(item["key"], found["mailbox"], found["uid"], now)
             place = activity.where(item)
         if place is None:
@@ -83,16 +107,18 @@ async def async_act(link: Any, keys: list[str], action: str, *, read_only: bool,
         if place[0] == target or (action == "trash" and place[0] == trash):
             out["skipped"] += 1  # there already (and nothing is deleted for good)
             continue
-        groups.setdefault(place[0], []).append((item, place[1]))
+        groups.setdefault((place[0], target), []).append((item, place[1]))
 
     count = sum(len(g) for g in groups.values())
     if count and guard is not None:
         guard.check_quota(QUOTA_MAIL_MODIFY, count)
-        for box in groups:
+        for box, target in groups:
             guard.check_mailbox_writable(box)
-        if target:
-            guard.check_mailbox_writable(target)
-    for box, members in groups.items():
+            if target:
+                guard.check_mailbox_writable(target)
+    already = {item["key"] for item in lines if _unchanged(item, action)}  # read/flagged so already: no undo for them
+    undo: dict[str, str] = {}
+    for (box, target), members in groups.items():
         uids = [uid for _, uid in members]
         try:
             if action in ("seen", "unseen"):
@@ -110,11 +136,28 @@ async def async_act(link: Any, keys: list[str], action: str, *, read_only: bool,
             guard.consume(QUOTA_MAIL_MODIFY, len(uids))
         for item, uid in members:
             out["done"] += 1
+            if item["key"] not in already:
+                undo[item["key"]] = box
             _after(activity, item, box, uid, action, target, now)
+    if undo:
+        if action in OPPOSITE:
+            out["undo"] = {"action": OPPOSITE[action], "keys": list(undo)}
+        else:  # moved: each one back to where it was
+            out["undo"] = {"action": "return", "keys": list(undo), "to": undo}
     await _audit(link, action, lines, out)
     if out["done"] and link.state is not None:
         link.state.request()  # the look confirms flags and finds moved mails in their new folder
     return out
+
+
+def _unchanged(item: dict[str, Any], action: str) -> bool:
+    """Read/flagged as the action wants already (as last seen): its undo must not change it back."""
+    state = item.get("state") or {}
+    if action in ("seen", "unseen"):
+        return state.get("seen") is (action == "seen")
+    if action in ("flag", "unflag"):
+        return state.get("flagged") is (action == "flag")
+    return False
 
 
 def _after(activity: Any, item: dict[str, Any], box: str, uid: int, action: str, target: str | None, now: str) -> None:

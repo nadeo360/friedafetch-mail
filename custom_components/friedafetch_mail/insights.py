@@ -17,10 +17,13 @@ Everything is worked out locally from the activity, the mailbox and the contacts
 from __future__ import annotations
 
 import asyncio
+import copy
 import hashlib
+import json
 import logging
 import re
 import time
+import uuid
 from collections import Counter
 from collections.abc import Awaitable, Callable
 from datetime import date, datetime, timedelta
@@ -52,6 +55,9 @@ from .live import async_notify
 _LOGGER = logging.getLogger(__name__)
 
 STORAGE_VERSION = 1
+TREND_WEEKS = 8  # points of the trend lines in "Your week": the weeks before and these seven days
+KEEP_WEEKS = 12  # completed weeks kept (the activity itself keeps 30 days)
+UNDO_FIELDS = ("packages", "proposals", "followups", "dismissed", "parcel_ignored")  # what a dismissal may change
 SUGGEST_DAYS = 30  # rule suggestions look at the activity of these days
 SUGGEST_MIN = 3  # mails of a sender moved to the same folder
 SUGGEST_SHARE = 0.8  # of all mails of that sender
@@ -172,6 +178,8 @@ class Insights:
         self.packages: list[dict[str, Any]] = []
         self.parsed: list[str] = []  # Message-IDs of shipping mails read already (each is read once)
         self.parcel_ignored: list[str] = []  # sender domains the user said send no parcels
+        self.weeks: dict[str, dict[str, Any]] = {}  # ISO week -> its numbers (for the trend lines)
+        self._undo: dict[str, Any] | None = None  # the last dismissal or parcel correction, for "Undo" (memory only)
         self._last_uid: int | None = None
         self._validity: int | None = None
         self._vips: set[str] = set()
@@ -194,6 +202,7 @@ class Insights:
         self.packages = list(data.get("packages") or [])
         self.parsed = list(data.get("parsed") or [])
         self.parcel_ignored = list(data.get("parcel_ignored") or [])
+        self.weeks = dict(data.get("weeks") or {})
         if data.get("parser") != shipping.PARSER:
             # the patterns learned more: the shipping mails of the last weeks are read again with them
             self.packages, self.parsed = [], []
@@ -213,6 +222,7 @@ class Insights:
             "weekly_sent": self.weekly_sent,
             "packages": self.packages,
             "parsed": self.parsed[-MAX_PARSED:],
+            "weeks": dict(sorted(self.weeks.items())[-KEEP_WEEKS:]),
             "parser": shipping.PARSER,
             "parcel_ignored": self.parcel_ignored,
             "last_uid": self._last_uid,
@@ -223,9 +233,39 @@ class Insights:
         await self._store.async_save(self._data())
         async_notify(self._hass, self._entry_id, "insights")
 
+    # ---------------------------------------------------- undo
+    def _snapshot(self) -> dict[str, Any]:
+        self._prune_parcels()  # old parcels go first, so that showing the list later does not count as a change
+        return copy.deepcopy({f: getattr(self, f) for f in UNDO_FIELDS})
+
+    def _remember(self, before: dict[str, Any]) -> None:
+        """The state before a dismissal or a correction; "Undo" brings it back while nothing else changed it."""
+        after = json.dumps(self._snapshot(), sort_keys=True, default=str)
+        self._undo = {"token": uuid.uuid4().hex[:12], "before": before, "after": after}
+
+    async def async_undo(self, token: str) -> None:
+        from .actions import ActionError  # noqa: PLC0415
+
+        await self.async_load()
+        undo = self._undo
+        if undo is None or undo["token"] != token:
+            raise ActionError("This can no longer be undone")
+        if json.dumps(self._snapshot(), sort_keys=True, default=str) != undo["after"]:
+            self._undo = None
+            raise ActionError("This can no longer be undone: the list has changed since")
+        now_open = {p["id"] for p in undo["before"]["proposals"] if p.get("status") == "open"}
+        for proposal in self.proposals:
+            if proposal["id"] in now_open and proposal.get("status") == "dismissed":
+                self._step(proposal, "event_restored")  # the timeline says it is back
+        for field, value in undo["before"].items():
+            setattr(self, field, value)
+        self._undo = None
+        await self._save()
+
     async def async_dismiss(self, kind: str, item_id: str) -> None:
         """Not shown again: a rule suggestion, a reply that is not expected, a subscription, a proposal."""
         await self.async_load()
+        before = self._snapshot()
         if kind == "package":
             self.packages = [p for p in self.packages if p["id"] != item_id]
         elif kind == "proposal":
@@ -239,6 +279,7 @@ class Insights:
                 ids.append(item_id)
             if kind == "followup":
                 self.followups = [f for f in self.followups if f["id"] != item_id]
+        self._remember(before)
         await self._save()
 
     async def async_restore(self, kind: str) -> None:
@@ -986,6 +1027,7 @@ class Insights:
     async def async_parcel_merge(self, parcel_id: str, into_id: str) -> None:
         """Two parcels are one (an update Frieda took for a new parcel)."""
         await self.async_load()
+        before = self._snapshot()
         parcel, target = self._parcel(parcel_id), self._parcel(into_id)
         if parcel is not target:
             merged = {x.get("message_id"): x for x in [*(target.get("sources") or []), *(parcel.get("sources") or [])]}
@@ -993,6 +1035,7 @@ class Insights:
             self._settle(target)
             target["keys"] = list(dict.fromkeys([*target["keys"], *(parcel.get("keys") or [])]))
             self.packages.remove(parcel)
+        self._remember(before)
         await self._save()
 
     async def async_parcel_split(self, parcel_id: str, message_id: str) -> None:
@@ -1000,6 +1043,7 @@ class Insights:
         from .actions import ActionError  # noqa: PLC0415
 
         await self.async_load()
+        before = self._snapshot()
         parcel = self._parcel(parcel_id)
         sources = parcel.get("sources") or []
         moving = [x for x in sources if x.get("message_id") == message_id]
@@ -1012,17 +1056,20 @@ class Insights:
         own["keys"] = [k for k in own["keys"] if k not in parcel["keys"] or k.startswith("mail:")]
         parcel["keys"] = [k for k in parcel["keys"] if k not in own["keys"]]
         self.packages.append(own)
+        self._remember(before)
         await self._save()
 
     async def async_parcel_ignore(self, parcel_id: str, *, sender: bool) -> None:
         """Not a parcel; sender: its sender never sends parcels (its shipping-like mails are not read any more)."""
         await self.async_load()
+        before = self._snapshot()
         parcel = self._parcel(parcel_id)
         if sender:
             for domain in {x.get("domain") for x in parcel.get("sources") or []} | {parcel.get("domain")}:
                 if domain and domain not in self.parcel_ignored:
                     self.parcel_ignored.append(domain)
         self.packages.remove(parcel)
+        self._remember(before)
         await self._save()
 
     @staticmethod
@@ -1069,6 +1116,40 @@ class Insights:
         return sorted(listed, key=lambda p: (PACKAGE_ORDER.get(p["status"] or "", 9), p["eta"] or "9999", p["updated"]))
 
     # --------------------------------------------------------------- the week
+    def _numbers(self, start: float, end: float) -> dict[str, Any]:
+        """Mails, mails the rules acted on and the AI's accuracy between two times (for a week of the trend)."""
+        lines = [i for i in self._activity.items if start <= _ts(i.get("time")) < end]
+        ratings = [r for r in (self.sorter.ratings if self.sorter else []) if start <= _ts(r.get("time")) < end]
+        corrected = sum(1 for r in ratings if r.get("corrected") and r.get("corrected") != r.get("category"))
+        return {
+            "mails": len(lines),
+            "rules": sum(1 for i in lines if i.get("rules")),
+            "accuracy": round(100 * (len(ratings) - corrected) / len(ratings)) if ratings else None,
+        }
+
+    def trend(self, now: datetime) -> list[dict[str, Any]]:
+        """The completed calendar weeks before (kept, since the activity forgets after 30 days) and these 7 days.
+
+        A completed week is noted once while the activity still holds all of it; a week before Frieda Postfach knew
+        anything (the first one) is left out instead of being shown too low.
+        """
+        monday = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+        oldest = min((_ts(i.get("time")) for i in self._activity.items), default=now.timestamp())
+        changed = False
+        for back in range(1, 5):  # the activity's 30 days hold up to four completed weeks
+            start = monday - timedelta(weeks=back)
+            key = "{}-W{:02d}".format(*start.isocalendar()[:2])
+            if key in self.weeks or start.timestamp() < oldest - 86400 or now - start > timedelta(days=29):
+                continue
+            self.weeks[key] = self._numbers(start.timestamp(), (start + timedelta(weeks=1)).timestamp())
+            changed = True
+        if changed:
+            self.weeks = dict(sorted(self.weeks.items())[-KEEP_WEEKS:])
+            self._store.async_delay_save(self._data, 30)
+        points = [{"week": k, **v} for k, v in sorted(self.weeks.items())[-(TREND_WEEKS - 1) :]]
+        end = now.timestamp()
+        return [*points, {"week": "now", **self._numbers(end - 7 * 86400, end + 1)}]
+
     def week(self, now: datetime | None = None) -> dict[str, Any]:
         """The last seven days, and the seven before for comparison."""
         now = now or dt_util.now()
@@ -1102,6 +1183,7 @@ class Insights:
             "proposals": len(self.open_proposals()),
             "never_opened": sum(1 for s in self.subscriptions if s.get("never_opened") and not s.get("unsubscribed")),
             "parcels": sum(1 for p in self.packages if p.get("status") != "delivered"),
+            "trend": self.trend(now),
         }
 
     def week_text(self, week: dict[str, Any]) -> tuple[str, str]:
@@ -1205,5 +1287,6 @@ class Insights:
             "weekly_day": str(self.opts.get(CONF_WEEKLY_DAY) or "") or None,
             "events_calendar": self.opts.get(CONF_EVENTS_CALENDAR) or None,
             "dismissed": {k: len(v) for k, v in self.dismissed.items() if v},
+            "undo": self._undo["token"] if self._undo else None,
             "error": self.error,
         }

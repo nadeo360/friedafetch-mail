@@ -233,7 +233,8 @@ class ImportantSensor(_StatusSensor):
         return {
             "threshold": ai.important_from,
             "mails": [
-                {k: r.get(k) for k in ("time", "from", "subject", "category", "importance", "reason")}
+                # the Message-ID lets the dashboard card open the mail in the panel
+                {k: r.get(k) for k in ("time", "from", "subject", "category", "importance", "reason", "message_id")}
                 for r in ai.important_today()[:MAX_LISTED]
             ],
         }
