@@ -98,5 +98,13 @@
  [
   "update=1",
   "Hinweis: neue Version"
+ ],
+ [
+  "card=1",
+  "Dashboard-Karte"
+ ],
+ [
+  "card=1&problem=1",
+  "Dashboard-Karte: Problem"
  ]
 ]
