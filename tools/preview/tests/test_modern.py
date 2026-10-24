@@ -92,7 +92,7 @@ def test_the_keyboard_overview_tabs_and_search(open_panel) -> None:
     panel.js("root.querySelector('.mlist [data-action=\"act-open\"]').focus();")
     panel.page.keyboard.press("?")
     panel.js("await wait(200);")
-    assert panel.count(".modal.keys kbd") == 10
+    assert panel.count(".modal.keys kbd") == 11
     panel.page.keyboard.press("Escape")
     panel.js("await wait(200);")
     assert panel.count(".modal.keys") == 0

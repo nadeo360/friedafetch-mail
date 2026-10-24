@@ -44,13 +44,15 @@ from .const import (
 )
 from .live import SIGNAL_PANEL
 from .locate import async_locate
-from .rules import RuleError, RuleNotFound
+from .rules import Condition, RuleError, RuleNotFound
 from .timeline import build_timeline
 
 _LOGGER = logging.getLogger(__name__)
 
 PANEL_URL_PATH = "frieda-postfach"
 TEXT_CHARS = 4000  # of a mail's text in the reading pane
+PREVIEW_MAILS = 300  # newest mails of the activity a rule draft is tried on
+PREVIEW_LISTED = 8
 STATIC_URL = f"/{DOMAIN}_static"
 WEBCOMPONENT = "friedafetch-mail-panel"
 DATA_FRONTEND: HassKey[bool] = HassKey(f"{DOMAIN}_frontend")
@@ -76,6 +78,7 @@ async def async_setup_frontend(hass: HomeAssistant, version: str) -> None:
         ws_rules_update,
         ws_rules_delete,
         ws_rules_restore,
+        ws_rules_preview,
         ws_rules_run,
         ws_rules_history,
         ws_rules_history_clear,
@@ -285,6 +288,64 @@ async def ws_rules_delete(hass: HomeAssistant, connection: websocket_api.ActiveC
     rules = _entry(hass, msg.get("entry_id")).runtime_data.rules
     await rules.async_delete(msg["rule_id"])
     connection.send_result(msg["id"], {"deleted": True})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/rules/preview",
+        vol.Optional("entry_id"): str,
+        vol.Required("conditions"): vol.All(
+            [
+                {
+                    vol.Required("field"): str,
+                    vol.Required("op"): str,
+                    vol.Required("value"): vol.All(str, vol.Length(max=500)),
+                }
+            ],
+            vol.Length(min=1, max=20),
+        ),
+        vol.Optional("match", default="all"): vol.In(("all", "any")),
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+@_ws_errors
+async def ws_rules_preview(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Which of the newest mails of the activity a rule draft would catch (while it is being written).
+
+    The activity knows sender and subject, not the recipients: conditions on To/Cc are not tried here ("unknown").
+    """
+    conditions = [Condition(c["field"], c["op"], c["value"]) for c in msg["conditions"]]
+    for condition in conditions:
+        condition.validate()  # also the regex safety check of real rules
+    link = _entry(hass, msg.get("entry_id")).runtime_data
+    await link.activity.async_load()
+    lines = list(reversed(link.activity.items))[:PREVIEW_MAILS]
+    unknown = any(c.field in ("to", "cc") for c in conditions)
+    hits = []
+    for line in lines:
+        summary = {
+            "subject": line.get("subject") or "",
+            "from": [{"name": line.get("name") or "", "email": line.get("from") or ""}],
+            "to": [],
+            "cc": [],
+        }
+        results = (c.matches(summary) for c in conditions)
+        if all(results) if msg["match"] == "all" else any(results):
+            hits.append(line)
+    connection.send_result(
+        msg["id"],
+        {
+            "checked": len(lines),
+            "total": len(hits),
+            "unknown": unknown,
+            "matches": [
+                {k: h.get(k) for k in ("key", "subject", "from", "name", "time")} for h in hits[:PREVIEW_LISTED]
+            ],
+        },
+    )
 
 
 @websocket_api.websocket_command(

@@ -140,6 +140,17 @@ mail on the right (on phones the mail opens in a sheet over the list that you sw
   1–5 the tabs; **?** shows them all. On a touch screen you swipe a mail of the list to the right to mark it read
   (or unread) and to the left to archive it (or put it back into the inbox). The AI's confidence shows as a small
   three-step meter next to the category (sure, fairly sure, unsure).
+- **Reading:** the text shows what is new; the quoted history of a reply (“On … wrote:”, Outlook headers, lines with
+  `>`) and the signature fold away under *Show quoted text* and *Signature*. Web links appear as small chips with
+  their real destination (the host in bold) before you open them; anything but http/https stays plain text. A
+  conversation reads like messages – your own answers on the right, the others' on the left. Every AI category has
+  one colour, the same in the list, the reading pane, the categories and the charts.
+- **⌘K / Ctrl+K** opens the command palette: one search for the tabs, actions (new rule, refresh *For you*, new AI
+  category, the keys), rules, categories and mails (searched on the server, all of the activity). Arrow keys, Enter,
+  Esc.
+- **On the phone** the tabs sit at the bottom within reach of the thumb, the open mail fills the screen and closes
+  with the back gesture (or a swipe from the left edge or down), a long press on a mail starts picking it, and pulling
+  the list down loads it again.
 - **Views** *Unread* and *Flagged* (under *In the mailbox*) list what the mailbox has like that now.
 - **Select** (or Cmd/Ctrl-click, Shift-click for a range) picks mails for **Rate again**: all of a view, a whole day
   (Today, Yesterday, …) or single ones; mails handled by a rule are not for the AI. While the batch runs, every mail
@@ -153,11 +164,16 @@ mail on the right (on phones the mail opens in a sheet over the list that you sw
 - **One status line** says how new mail is picked up: *instant via push* (with the timer as a safety net),
   *checking every N min* (push off), *push interrupted* (the timer keeps going) or *automation off*.
 - A rule table (position, switch, name, conditions, actions, hits) that expands per rule, **+** for a new rule, and a
-  ⋮ menu per rule for edit, dry run with only this rule, order, copy and delete.
+  ⋮ menu per rule for edit, dry run with only this rule, order, copy and delete. Drag a rule by its handle to change
+  the order (the menu's up/down stays for keyboards).
+- **The editor** says the rule in one sentence (“If the subject contains “Invoice”, then: Archive.”) and shows a
+  **live preview** while you type: how many of the last 300 mails of the activity it would catch, with the first
+  ones. The activity knows sender and subject; conditions on To/Cc are named as not checked.
 - **Run** opens a menu: dry run or real run over the whole mailbox, or new mail only; the per-message report appears
   above the rules.
 
-**AI sorting** holds its mode and the categories, **AI log** everything that went to an AI. With several accounts an
+**AI sorting** holds its mode, an **overview** (the categories of the last ratings as a ring with the corrections
+per category, and the accuracy per week) and the categories; **AI log** everything that went to an AI. With several accounts an
 account picker appears on top. Approvals and the change log stay in Frieda's own panel, whose overview also shows
 whether Frieda Postfach is running.
 
@@ -333,8 +349,9 @@ the mailbox, the activity and the contacts; nothing of it goes to an AI, and not
 
 - **Your week** – what arrived (compared with the week before), what rules handled, how often the AI was right (rated
   minus corrected), what is still unread. Small lines show the last eight weeks of mails, rules and accuracy
-  (Frieda Postfach keeps a summary of every completed week; the activity itself keeps 30 days). With *Weekly review
-  on* it also comes as a notification on that day.
+  (Frieda Postfach keeps a summary of every completed week; the activity itself keeps 30 days). *Handled without
+  you* counts what rules and the AI sorted (with a rough time at 10 seconds per mail). With *Weekly review on* it
+  also comes as a notification on that day.
 - **Dates from e-mails** – needs the AI sorting: the AI names an appointment or deadline it reads in a mail it rates
   anyway (same data, no extra request). You check title and time and add it to a calendar with one click; the
   notification of an important mail gets a button *Add to calendar* (the calendar of the options). Calendars Frieda

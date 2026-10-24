@@ -125,6 +125,9 @@ async def test_panel_answers_keep_their_shape(hass: HomeAssistant, hass_ws_clien
     rule_id = shapes["friedafetch_mail/rules/list"]["rules"][0]["id"]
     await call("friedafetch_mail/rules/delete", rule_id=rule_id)  # and "Undo": back as it was
     shapes["friedafetch_mail/rules/restore"] = await call("friedafetch_mail/rules/restore", rule_id=rule_id)
+    shapes["friedafetch_mail/rules/preview"] = await call(
+        "friedafetch_mail/rules/preview", conditions=[{"field": "subject", "op": "contains", "value": "Rechnung"}]
+    )
     shapes["friedafetch_mail/rules/history"] = await call("friedafetch_mail/rules/history")
     shapes["friedafetch_mail/ai"] = await call("friedafetch_mail/ai")
     shapes["friedafetch_mail/activity/list"] = await call("friedafetch_mail/activity/list")

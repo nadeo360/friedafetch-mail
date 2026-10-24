@@ -443,7 +443,8 @@ export function install({ data, q }) {
       await wait(Number(q.get("textslow") || 300));
       const r = find(m.message_id);
       if (!r) return { found: false };
-      const text = `Hallo,\n\nhier ist der Text zu „${r.subject}“ – Beispieltext der Vorschau.\n\nViele Grüße\n${r.name}`;
+      // with a link, a signature and the quoted history, as replies have them (folded away in the panel)
+      const text = `Hallo,\n\nhier ist der Text zu „${r.subject}“ – Beispieltext der Vorschau. Mehr unter https://www.example.com/termine/2026?ref=mail.\n\nViele Grüße\n${r.name}\n-- \n${r.name} · Beispielweg 1 · 12345 Musterstadt\n\nAm 20.10.2026 um 09:12 schrieb Erika Mustermann <erika@example.com>:\n> Hallo, kurze Frage vorab.\n> Passt dir Samstag?${q.get("xss") ? `\nhttps://evil.example/"><img src=x onerror="window.__xss=1" data-xss> javascript:window.__xss=1 https://ok.example/a"onmouseover="window.__xss=1` : ""}`;
       return { found: true, mailbox: r.state?.mailbox || "INBOX", text, truncated: false, attachments: r.kind === "ai" && r.ai.category.startsWith("Rechnungen") ? ["Rechnung.pdf"] : [], suspicious: false };
     }
     if (m.type === "friedafetch_mail/ai/apply") {
@@ -522,7 +523,13 @@ export function install({ data, q }) {
     }
     if (m.type === "friedafetch_mail/rules/update") {
       const rule = rulesList.rules.find((r) => r.id === m.rule_id);
-      Object.assign(rule, m.changes);
+      const { position, ...changes } = m.changes;
+      Object.assign(rule, changes);
+      if (position != null) {
+        // like the backend: the rule moves to its new place
+        rulesList.rules = rulesList.rules.filter((r) => r !== rule);
+        rulesList.rules.splice(Math.max(0, Math.min(rulesList.rules.length, position)), 0, rule);
+      }
       return { rule };
     }
     if (m.type === "friedafetch_mail/rules/delete") {
@@ -530,6 +537,32 @@ export function install({ data, q }) {
       if (at >= 0) deletedRule = [rulesList.rules[at], at];
       rulesList.rules = rulesList.rules.filter((r) => r.id !== m.rule_id);
       return { deleted: true };
+    }
+    if (m.type === "friedafetch_mail/rules/preview") {
+      // like the backend: sender and subject of the newest mails (To/Cc are not known to the activity)
+      const test = (c, r) => {
+        const v = String(c.value || "").trim().toLowerCase();
+        const hay = { subject: [r.subject || ""], from: [`${r.name || ""} <${r.from || ""}>`], to: [], cc: [], any: [r.subject || "", `${r.name || ""} <${r.from || ""}>`] }[c.field] || [];
+        return hay.some((h) => {
+          const x = h.toLowerCase();
+          if (c.op === "contains") return x.includes(v);
+          if (c.op === "equals") return x === v;
+          if (c.op === "starts_with") return x.startsWith(v);
+          if (c.op === "ends_with") return x.endsWith(v);
+          if (c.op === "domain") return (x.match(/@([^>\s]+)/)?.[1] || "") === v.replace(/^@/, "") || (x.match(/@([^>\s]+)/)?.[1] || "").endsWith(`.${v.replace(/^@/, "")}`);
+          if (c.op === "regex") {
+            try {
+              return new RegExp(c.value, "i").test(h);
+            } catch (err) {
+              throw new Error("Invalid regular expression");
+            }
+          }
+          return false;
+        });
+      };
+      const lines = rows.slice(0, 300);
+      const hits = lines.filter((r) => (m.match === "any" ? m.conditions.some((c) => test(c, r)) : m.conditions.every((c) => test(c, r))));
+      return { checked: lines.length, total: hits.length, unknown: m.conditions.some((c) => c.field === "to" || c.field === "cc"), matches: hits.slice(0, 8).map((r) => ({ key: r.key, subject: r.subject, from: r.from, name: r.name, time: r.time })) };
     }
     if (m.type === "friedafetch_mail/rules/restore") {
       if (!deletedRule || deletedRule[0].id !== m.rule_id) throw new Error("This rule can no longer be restored");

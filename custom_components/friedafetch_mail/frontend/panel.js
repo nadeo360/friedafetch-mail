@@ -47,6 +47,61 @@ const nextSort = (cur, key, firstDir) => (cur.key === key ? { key, dir: -cur.dir
 const gone = (err) => err?.code === "unknown_command";
 
 const ACT_PAGE = 50; // mails per page of the activity list; more load while scrolling
+const PULL_AT = 70; // px the list is pulled down before it reloads (phones)
+const HOLD_MS = 500; // a long press picks a mail (phones)
+// Calm colours for the AI categories, the same in the list, the reading pane and the charts
+const CAT_COLORS = ["#5b8def", "#d97757", "#3fa66b", "#9a6dd7", "#c99a16", "#2f9fa3", "#c75b8f", "#7d8b99"];
+const catColor = (name) => {
+  if (!name || name === "other") return "var(--secondary-text-color)";
+  let h = 0;
+  for (const ch of String(name)) h = (h * 31 + ch.codePointAt(0)) >>> 0;
+  return CAT_COLORS[h % CAT_COLORS.length];
+};
+// A mail's text in three parts: what is new, what it quotes (a reply's history) and the signature
+const QUOTE_START = [
+  /^(am|on)\s.{4,160}(schrieb|wrote)[^:]{0,60}:\s*$/i,
+  /^-{2,}\s*(original message|ursprüngliche nachricht|original-nachricht)\s*-{0,}\s*$/i,
+  /^_{8,}\s*$/,
+];
+export function splitMail(text) {
+  const lines = String(text || "").split("\n");
+  let quote = -1;
+  for (let i = 0; i < lines.length && quote < 0; i++) {
+    const line = lines[i].trim();
+    const two = `${line} ${(lines[i + 1] || "").trim()}`; // "Am …, schrieb" broken over two lines
+    if (QUOTE_START.some((re) => re.test(line))) quote = i;
+    else if (/^(am|on)\s/i.test(line) && QUOTE_START[0].test(two)) quote = i;
+    else if (/^(von|from):\s/i.test(line) && lines.slice(i + 1, i + 5).some((l) => /^(gesendet|sent|datum|date):\s/i.test(l.trim()))) quote = i;
+    else if (/^>/.test(line) && lines.slice(i).every((l) => !l.trim() || /^>/.test(l.trim()))) quote = i;
+  }
+  const head = quote < 0 ? lines : lines.slice(0, quote);
+  const sig = head.findIndex((l) => l === "-- " || l === "--");
+  const trim = (part) => part.join("\n").replace(/^\n+|\s+$/g, "");
+  return {
+    main: trim(sig < 0 ? head : head.slice(0, sig)),
+    signature: sig < 0 ? "" : trim(head.slice(sig + 1)),
+    quoted: quote < 0 ? "" : trim(lines.slice(quote)),
+  };
+}
+// Text with its web links as chips that name the real destination (only http/https; everything else stays text)
+const linkify = (text, t) =>
+  String(text || "")
+    .split(/(https?:\/\/[^\s<>"')\]]+)/g)
+    .map((part, i) => {
+      if (i % 2 === 0) return esc(part);
+      let url;
+      try {
+        url = new URL(part.replace(/[.,;:!?]+$/, ""));
+      } catch (err) {
+        return esc(part);
+      }
+      if (!/^https?:$/.test(url.protocol)) return esc(part);
+      const rest = part.slice(url.href.length - (url.href.endsWith("/") && !part.endsWith("/") ? 1 : 0));
+      const path = `${url.pathname}${url.search}`.replace(/^\/$/, "");
+      const shown = path.length > 24 ? `${path.slice(0, 22)}…` : path;
+      return `<a class="lchip" href="${esc(url.href)}" target="_blank" rel="noopener noreferrer nofollow" aria-label="${esc(fmt(t.linkTo, url.hostname, url.href))}">${ico("link-variant")}<strong>${esc(url.hostname)}</strong>${shown ? `<span>${esc(shown)}</span>` : ""}</a>${esc(rest)}`;
+    })
+    .join("");
 const UNDO_MS = 8000; // how long "Undo" stays after an action (it waits while the pointer or the focus is on it)
 const SWIPE_AT = 80; // px a mail in the list is swiped before it acts
 const ASSIST_ROUNDS = 5; // rounds of the category assistant, then the proposal is edited by hand
@@ -160,6 +215,21 @@ class FriedaPostfachPanel extends HTMLElement {
     this._timer = setInterval(() => this._autoRefresh(), 60000);
     this._onKey = (ev) => this._shortcut(ev);
     this.addEventListener("keydown", this._onKey);
+    // a key the panel handled is not also one of Home Assistant's own shortcuts (e: entities, c: commands, …)
+    this._onKeyStop = (ev) => ev.defaultPrevented && ev.stopPropagation();
+    this.addEventListener("keydown", this._onKeyStop);
+    // ⌘K / Ctrl+K also when the focus is outside the panel (after a click on an empty spot)
+    this._onWinKey = (ev) => {
+      if ((ev.metaKey || ev.ctrlKey) && String(ev.key).toLowerCase() === "k" && !ev.composedPath().includes(this) && this.isConnected) this._shortcut(ev);
+    };
+    window.addEventListener("keydown", this._onWinKey);
+    this._onPop = () => {
+      // the phone's back gesture closes the open mail first
+      if (!this._sheetBack) return;
+      this._sheetBack = false;
+      if (this._s.sheet && !this._s.sheet.inline) this._closeTimeline();
+    };
+    window.addEventListener("popstate", this._onPop);
     this._subscribe();
     this._openLinked(); // the panel may come back from Home Assistant's cache with a new link
   }
@@ -167,7 +237,11 @@ class FriedaPostfachPanel extends HTMLElement {
   disconnectedCallback() {
     clearInterval(this._timer);
     clearTimeout(this._undoTimer);
+    this._paletteClose();
     this.removeEventListener("keydown", this._onKey);
+    this.removeEventListener("keydown", this._onKeyStop);
+    window.removeEventListener("keydown", this._onWinKey);
+    window.removeEventListener("popstate", this._onPop);
     clearTimeout(this._liveTimer);
     clearTimeout(this._retryTimer);
     document.removeEventListener("visibilitychange", this._onVisible);
@@ -452,7 +526,14 @@ class FriedaPostfachPanel extends HTMLElement {
   // Keyboard like a mail program (nothing typed into a field): ? the overview, z undo, 1–5 tabs; in the activity
   // / search, j/k next/previous mail, u read, s flag, e archive, # or Delete trash
   _shortcut(ev) {
-    if (ev.ctrlKey || ev.metaKey || ev.altKey || this._s.confirm || this._s.assist || this._s.keys) return;
+    if ((ev.metaKey || ev.ctrlKey) && !ev.altKey && String(ev.key).toLowerCase() === "k" && !this._s.confirm && !this._s.assist) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (this._pal) this._paletteClose();
+      else this._paletteOpen();
+      return;
+    }
+    if (ev.ctrlKey || ev.metaKey || ev.altKey || this._s.confirm || this._s.assist || this._s.keys || this._pal) return;
     const target = ev.composedPath()[0];
     if (target?.closest?.("input, select, textarea, [contenteditable]")) return;
     const tabs = this._tabs();
@@ -552,11 +633,11 @@ class FriedaPostfachPanel extends HTMLElement {
         const who = m.mine ? fmt(t.threadYou, m.name || m.from || "–") : m.name || m.from || "–";
         const body = `<span class="tw">${m.mine ? ico("reply") : ""}<strong>${esc(who)}</strong><span class="muted">${esc(fmtShort(m.date))}</span></span><span class="ts">${esc(m.subject || "–")}</span>`;
         return m.key && !me
-          ? `<li><button class="threadrow ${m.seen === false ? "unread" : ""}" data-action="thread-open" data-id="${esc(m.key)}">${body}</button></li>`
-          : `<li><div class="threadrow ${me ? "here" : ""} ${m.mine ? "mine" : ""}" ${me ? 'aria-current="true"' : ""}>${body}</div></li>`;
+          ? `<li class="${m.mine ? "mine" : ""}"><button class="threadrow ${m.seen === false ? "unread" : ""} ${m.mine ? "mine" : ""}" data-action="thread-open" data-id="${esc(m.key)}">${body}</button></li>`
+          : `<li class="${m.mine ? "mine" : ""}"><div class="threadrow ${me ? "here" : ""} ${m.mine ? "mine" : ""}" ${me ? 'aria-current="true"' : ""}>${body}</div></li>`;
       })
       .join("");
-    return `<h3 class="sect">${esc(fmt(t.thread, x.data.items.length))}</h3><ul class="thread">${rows}</ul>`;
+    return `<h3 class="sect">${esc(fmt(t.thread, x.data.items.length))}</h3><ul class="thread chat">${rows}</ul>`;
   }
 
   _textHtml(mid) {
@@ -570,10 +651,18 @@ class FriedaPostfachPanel extends HTMLElement {
     const files = (d.attachments || []).filter(Boolean);
     return `<div class="mtext">
         ${d.suspicious ? `<p class="warnline">${ico("alert-outline")}<span>${esc(t.textSuspicious)}</span></p>` : ""}
-        <div class="body">${esc(d.text || t.textEmpty)}</div>
+        ${this._mailBody(d.text || t.textEmpty)}
         ${d.truncated ? `<p class="muted">${esc(t.textTruncated)}</p>` : ""}
         ${files.length ? `<p class="muted files">${ico("paperclip")}<span>${esc(files.join(", "))}</span></p>` : ""}
       </div>`;
+  }
+
+  _mailBody(text) {
+    const t = this.t;
+    const part = splitMail(text);
+    return `<div class="body">${linkify(part.main || text, t)}</div>
+      ${part.signature ? `<details class="fold sig"><summary>${ico("signature-freehand")}${esc(t.sigShow)}</summary><div class="body">${linkify(part.signature, t)}</div></details>` : ""}
+      ${part.quoted ? `<details class="fold"><summary>${ico("format-quote-open")}${esc(t.quoteShow)}</summary><div class="body quoted">${linkify(part.quoted, t)}</div></details>` : ""}`;
   }
 
   async _aiClear() {
@@ -646,6 +735,152 @@ class FriedaPostfachPanel extends HTMLElement {
     if (!run) return;
     await run();
     if (!this._s.error) W.announce(this.shadowRoot, this.t.undoDone, 0);
+  }
+
+  // ------------------------------------------------------------ the command palette (⌘K / Ctrl+K)
+  _paletteOpen() {
+    if (this._pal) return;
+    const t = this.t;
+    const host = document.createElement("div");
+    host.className = "palette-host";
+    host.innerHTML = `<div class="modal-backdrop pal-back"></div>
+      <div class="modal palette" role="dialog" aria-modal="true" aria-label="${esc(t.palTitle)}">
+        <div class="palin">${ico("magnify")}<input id="pal-q" type="text" role="combobox" aria-expanded="true" aria-controls="pal-list" aria-autocomplete="list" autocomplete="off" spellcheck="false" placeholder="${esc(t.palPlaceholder)}" aria-label="${esc(t.palTitle)}"></div>
+        <ul id="pal-list" role="listbox" aria-label="${esc(t.palTitle)}"></ul>
+        <p class="palfoot">${esc(t.palHint)}</p>
+      </div>`;
+    this.shadowRoot.append(host);
+    const frame = this.shadowRoot.querySelector("[data-frame]");
+    if (frame) frame.inert = true;
+    this._pal = { host, q: "", sel: 0, items: [], mails: [], opener: this.shadowRoot.activeElement };
+    const input = host.querySelector("#pal-q");
+    input.addEventListener("input", () => {
+      this._pal.q = input.value;
+      this._pal.sel = 0;
+      this._pal.mails = [];
+      this._paletteFill();
+      clearTimeout(this._palTimer);
+      this._palTimer = setTimeout(() => this._paletteMails(), 250);
+    });
+    input.addEventListener("keydown", (ev) => {
+      const p = this._pal;
+      if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+        ev.preventDefault();
+        p.sel = (p.sel + (ev.key === "ArrowDown" ? 1 : -1) + p.items.length) % Math.max(1, p.items.length);
+        this._paletteFill();
+      } else if (ev.key === "Enter") {
+        ev.preventDefault();
+        this._paletteRun(p.items[p.sel]);
+      } else if (ev.key === "Escape") {
+        ev.preventDefault();
+        this._paletteClose();
+      }
+      ev.stopPropagation(); // typing here is not a shortcut of the panel (nor of Home Assistant)
+    });
+    host.querySelector(".pal-back").addEventListener("click", () => this._paletteClose());
+    this._paletteFill();
+    input.focus();
+  }
+
+  _paletteClose() {
+    const p = this._pal;
+    if (!p) return;
+    clearTimeout(this._palTimer);
+    p.host.remove();
+    this._pal = null;
+    const frame = this.shadowRoot.querySelector("[data-frame]");
+    if (frame) frame.inert = false;
+    p.opener?.focus?.({ preventScroll: true });
+  }
+
+  // Everything the palette offers for the words typed so far: places, actions, rules, categories (mails come later)
+  _paletteEntries(q) {
+    const t = this.t;
+    const s = this._s;
+    const has = (...words) => !q || words.some((w) => String(w || "").toLowerCase().includes(q));
+    const out = [];
+    for (const tab of this._tabs()) if (has(tab.label, t.palGo)) out.push({ group: t.palGo, icon: tab.icon, label: tab.label, run: () => this._setTab(tab.id) });
+    const actions = [
+      [t.palNewRule, "filter-plus-outline", () => (this._setTab("rules"), (this._s.editing = this._blankRule()), (this._s.focusEditor = true), this._render())],
+      s.insights && [t.palRefresh, "refresh", () => (this._setTab("foryou"), this._fyCall({ type: "friedafetch_mail/insights/refresh" }))],
+      s.ai?.status?.active && [t.palNewCat, "shape-plus-outline", () => (this._setTab("ai"), (this._s.aiEdit = { index: -1, data: { name: "", description: "", move_to: null, mark_seen: false, flag: false } }), this._render())],
+      s.ai?.status?.active && [t.palAssist, "creation", () => (this._setTab("ai"), this._assistOpen())],
+      [t.palKeys, "keyboard-outline", () => this._keysOpen()],
+    ].filter(Boolean);
+    for (const [label, icon, run] of actions) if (has(label, t.palActions)) out.push({ group: t.palActions, icon, label, run });
+    for (const rule of s.rules) {
+      if (!q || !has(rule.name, ...rule.conditions.map((c) => c.value))) continue;
+      out.push({
+        group: t.palRules,
+        icon: "filter-outline",
+        label: rule.name,
+        run: () => {
+          this._s.expanded.add(rule.id);
+          this._s.scrollTo = rule.id;
+          this._setTab("rules");
+        },
+      });
+    }
+    (s.ai?.categories || []).forEach((c, i) => {
+      if (!q || !has(c.name, c.description)) return;
+      out.push({ group: t.palCats, icon: "shape-outline", color: catColor(c.name), label: c.name, run: () => (this._setTab("ai"), (this._s.aiEdit = { index: i, data: { ...c } }), this._render()) });
+    });
+    return out.slice(0, 14);
+  }
+
+  _paletteFill() {
+    const p = this._pal;
+    if (!p) return;
+    const t = this.t;
+    const q = p.q.trim().toLowerCase();
+    const mails = p.mails.map((m) => ({
+      group: t.palMails,
+      icon: "email-outline",
+      label: m.subject || "–",
+      hint: m.name || m.from || "",
+      run: () => {
+        this._setTab("activity");
+        if (this._actItem(m.key)) this._actOpen(m.key);
+        else this._openTimeline({ message_id: m.message_id || null, subject: m.subject || "", sender: m.from || "" });
+      },
+    }));
+    p.items = [...this._paletteEntries(q), ...mails];
+    p.sel = Math.min(p.sel, Math.max(0, p.items.length - 1));
+    let group = null;
+    const html = p.items
+      .map((it, i) => {
+        const head = it.group !== group ? `<li class="palgroup" role="presentation">${esc((group = it.group))}</li>` : "";
+        return `${head}<li id="pal-opt-${i}" role="option" aria-selected="${i === p.sel}" data-i="${i}">${it.color ? `<i class="cdot" style="--cat:${it.color}"></i>` : ico(it.icon)}<span class="pl">${esc(it.label)}</span>${it.hint ? `<small>${esc(it.hint)}</small>` : ""}</li>`;
+      })
+      .join("");
+    const list = p.host.querySelector("#pal-list");
+    list.innerHTML = html || `<li class="palnone" role="presentation">${esc(t.palNone)}</li>`;
+    list.querySelectorAll('[role="option"]').forEach((li) => li.addEventListener("click", () => this._paletteRun(p.items[Number(li.dataset.i)])));
+    const input = p.host.querySelector("#pal-q");
+    if (p.items.length) input.setAttribute("aria-activedescendant", `pal-opt-${p.sel}`);
+    else input.removeAttribute("aria-activedescendant");
+    list.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
+  }
+
+  // Mails are searched on the server (all of the activity, not only the loaded ones)
+  async _paletteMails() {
+    const p = this._pal;
+    const q = p?.q.trim();
+    if (!p || q.length < 2) return;
+    try {
+      const res = await this._ws({ type: "friedafetch_mail/activity/list", entry_id: this._s.entryId, query: q, limit: 6 });
+      if (this._pal !== p || p.q.trim() !== q) return;
+      p.mails = res.items || [];
+      this._paletteFill();
+    } catch (err) {
+      /* the other entries stay */
+    }
+  }
+
+  _paletteRun(item) {
+    if (!item) return;
+    this._paletteClose();
+    item.run();
   }
 
   _keysOpen() {
@@ -954,7 +1189,7 @@ class FriedaPostfachPanel extends HTMLElement {
       .map((c, i) => {
         if (edit && edit.index === i) return editor(edit);
         const acts = [c.move_to ? `→ ${c.move_to}` : "", c.mark_seen ? t.aSeen : "", c.flag ? t.aFlag : ""].filter(Boolean);
-        return `<div class="ai-cat"><span class="tx"><strong>${esc(c.name)}</strong><span class="muted">${esc(c.description)}</span></span>
+        return `<div class="ai-cat"><i class="cdot big" style="--cat:${catColor(c.name)}" aria-hidden="true"></i><span class="tx"><strong>${esc(c.name)}</strong><span class="muted">${esc(c.description)}</span></span>
           <span>${acts.map((a) => `<span class="chip">${esc(a)}</span>`).join("")}</span>
           <button class="icon" data-action="ai-cat-edit" data-index="${i}" ${edit ? "disabled" : ""} title="${esc(t.edit)}" aria-label="${esc(t.edit)}: ${esc(c.name)}">${ico("pencil-outline")}</button></div>`;
       })
@@ -965,12 +1200,59 @@ class FriedaPostfachPanel extends HTMLElement {
         ${W.cardMenu([(ai.ratings || []).length && { action: "ai-clear", icon: "delete-sweep-outline", label: t.aiClear, danger: true, disabled: s.busy }], t)}</div>
       <div class="mode ${warn ? "warn" : ""}"><span class="ic" aria-hidden="true">${act ? "✦" : "👁"}</span><span class="tx"><strong>${esc(act ? t.aiAct : t.aiObserve)}</strong><span class="muted">${esc(sub.join(" · "))}</span>${warn ? `<span class="muted">${esc(warn)}</span>` : ""}</span></div>
       ${acc && !acc.rules_auto ? `<p class="muted" style="margin:-4px 0 10px">${esc(t.aiManualOnly)}</p>` : ""}
+      ${this._aiStats(ai)}
       <div class="with-add"><h3 class="muted">${esc(t.aiCategories)}</h3><button class="round small" data-action="ai-cat-new" ${edit ? "disabled" : ""} title="${esc(t.aiNewCategory)}" aria-label="${esc(t.aiNewCategory)}">+</button>
         <button class="secondary small ib" data-action="assist-open" ${edit || s.busy ? "disabled" : ""}>${ico("creation")}${esc(t.assistOpen)}</button></div>
       <p class="muted" style="margin:-4px 0 8px">${esc(t.aiCategoriesHint)}</p>
       <div class="ai-cats">${catRows}${edit && edit.index < 0 ? editor(edit) : ""}</div>
       ${this._renderCheck(st)}
     </div>`;
+  }
+
+  // What the AI decided lately: its categories (with the corrections) and how often it was right per week.
+  // Plain SVG with an accessible name, no tooltips.
+  _aiStats(ai) {
+    const t = this.t;
+    const ratings = (ai.ratings || []).filter((r) => r.category);
+    if (ratings.length < 3) return "";
+    const counts = new Map();
+    for (const r of ratings) {
+      const final = r.corrected || r.category;
+      const c = counts.get(final) || { n: 0, wrong: 0 };
+      c.n += 1;
+      counts.set(final, c);
+      if (r.corrected && r.corrected !== r.category) {
+        const o = counts.get(r.category) || { n: 0, wrong: 0 };
+        o.wrong += 1;
+        counts.set(r.category, o);
+      }
+    }
+    const cat = (c) => (c === "other" ? t.aiOther : c);
+    const list = [...counts].filter(([, c]) => c.n || c.wrong).sort((a, b) => b[1].n - a[1].n);
+    const total = list.reduce((n, [, c]) => n + c.n, 0);
+    let at = 0;
+    const R = 15.9155;
+    const rings = list
+      .filter(([, c]) => c.n)
+      .map(([name, c]) => {
+        const share = (c.n / total) * 100;
+        const ring = `<circle r="${R}" cx="21" cy="21" fill="none" stroke="${catColor(name)}" stroke-width="6" stroke-dasharray="${Math.max(share - 0.8, 0.4).toFixed(2)} ${(100 - share + 0.8).toFixed(2)}" stroke-dashoffset="${(25 - at).toFixed(2)}"></circle>`;
+        at += share;
+        return ring;
+      })
+      .join("");
+    const label = list.map(([name, c]) => `${cat(name)}: ${c.n}${c.wrong ? `, ${fmt(t.aiStatsCorr, c.wrong)}` : ""}`).join("; ");
+    const donut = `<svg class="aidonut" viewBox="0 0 42 42" role="img" aria-label="${esc(`${fmt(t.aiStatsCats, ratings.length)}: ${label}`)}"><circle r="${R}" cx="21" cy="21" fill="none" stroke="var(--divider-color, #e0e0e0)" stroke-width="6"></circle>${rings}<text x="21" y="21" text-anchor="middle" dominant-baseline="central">${esc(ratings.length)}</text></svg>`;
+    const legend = list
+      .map(([name, c]) => `<li><i class="cdot" style="--cat:${catColor(name)}"></i><span class="nm">${esc(cat(name))}</span><span class="n">${esc(c.n)}</span>${c.wrong ? `<span class="wrong">${esc(fmt(t.aiStatsCorr, c.wrong))}</span>` : ""}</li>`)
+      .join("");
+    const weeks = (this._s.insights?.week?.trend || []).filter((w) => w.accuracy != null);
+    const bars = weeks.length >= 2
+      ? `<div class="aiweeks"><h4>${esc(t.aiStatsWeeks)}</h4><div class="bars" role="img" aria-label="${esc(fmt(t.aiStatsWeeksLabel, weeks.map((w) => `${w.week === "now" ? t.aiStatsNow : fmt(t.aiStatsWeek, Number(w.week.replace(/^\d+-W/, "")))} ${w.accuracy} %`).join(", ")))}">${weeks
+          .map((w) => `<span class="bar ${w.week === "now" ? "now" : ""}"><i style="height:${Math.max(4, w.accuracy)}%"></i><small>${esc(w.week === "now" ? t.aiStatsNow : w.week.replace(/^\d+-W/, ""))}</small></span>`)
+          .join("")}</div></div>`
+      : "";
+    return `<div class="aistats"><h3 class="muted">${esc(t.aiStats)}</h3><div class="aistats-row"><div class="aicats">${donut}<ul class="legend">${legend}</ul></div>${bars}</div></div>`;
   }
 
   // Accuracy check: your corrected mails go to the AI again – with the current categories, optionally another entity.
@@ -1248,6 +1530,11 @@ class FriedaPostfachPanel extends HTMLElement {
   // ------------------------------------------------------------ timeline of one message
   // key: { message_id, subject, sender } – the Message-ID links everything; subject and sender find older entries
   async _openTimeline(key, { inline = false, hint = null } = {}) {
+    if (!inline && !this._sheetBack && window.matchMedia?.("(max-width: 600px)").matches) {
+      // on phones the open mail is a page of its own: the back gesture (or button) closes it
+      window.history.pushState({ ...(window.history.state || {}), friedaMail: true }, "");
+      this._sheetBack = true;
+    }
     this._s.sheet = { key, data: null, loading: true, error: null, inline };
     this._render();
     await this._loadTimeline();
@@ -1299,10 +1586,47 @@ class FriedaPostfachPanel extends HTMLElement {
     let y0 = null;
     let t0 = 0;
     let dy = 0;
+    // from the left edge to the right: back, like in a mail app
+    let x0 = null;
+    let dx = 0;
     sheet.addEventListener(
       "touchstart",
       (ev) => {
-        if (ev.touches.length !== 1) return;
+        if (ev.touches.length === 1 && ev.touches[0].clientX < 28) {
+          x0 = ev.touches[0].clientX;
+          dx = 0;
+          sheet.style.transition = "none";
+        }
+      },
+      { passive: true }
+    );
+    sheet.addEventListener(
+      "touchmove",
+      (ev) => {
+        if (x0 === null) return;
+        dx = Math.max(0, ev.touches[0].clientX - x0);
+        if (dx > 0) {
+          ev.preventDefault();
+          sheet.style.transform = `translateX(${dx}px)`;
+        }
+      },
+      { passive: false }
+    );
+    const back = () => {
+      if (x0 === null) return;
+      x0 = null;
+      sheet.style.transition = "transform .2s ease-out";
+      if (dx > 100) {
+        sheet.style.transform = "translateX(100%)";
+        setTimeout(() => this._closeTimeline(), 180);
+      } else sheet.style.transform = "";
+    };
+    sheet.addEventListener("touchend", back);
+    sheet.addEventListener("touchcancel", back);
+    sheet.addEventListener(
+      "touchstart",
+      (ev) => {
+        if (ev.touches.length !== 1 || x0 !== null) return;
         if (body?.contains(ev.target) && body.scrollTop > 0) return; // the list scrolls first
         y0 = ev.touches[0].clientY;
         t0 = Date.now();
@@ -1314,7 +1638,7 @@ class FriedaPostfachPanel extends HTMLElement {
     sheet.addEventListener(
       "touchmove",
       (ev) => {
-        if (y0 === null) return;
+        if (y0 === null || x0 !== null) return;
         dy = Math.max(0, ev.touches[0].clientY - y0);
         if (dy > 0) {
           ev.preventDefault(); // drag the sheet instead of the page
@@ -1342,6 +1666,10 @@ class FriedaPostfachPanel extends HTMLElement {
   _closeTimeline() {
     if (!this._s.sheet) return;
     this._s.sheet = null;
+    if (this._sheetBack) {
+      this._sheetBack = false;
+      window.history.back(); // takes back the step the open mail added
+    }
     this._render();
   }
 
@@ -1747,8 +2075,9 @@ class FriedaPostfachPanel extends HTMLElement {
               </div>
             </div>`;
         const search = [r.name, r.mailbox, ...conds, r.actions.move_to || ""].join(" ").toLowerCase();
-        return `<tr class="rrow ${open ? "open" : ""} ${r.enabled ? "" : "off"}" data-rule-id="${esc(r.id)}" data-search="${esc(search)}">
-            <td class="c-pos num">${i + 1}</td>
+        const drag = !sorted && !f && !s.editing && s.rules.length > 1;
+        return `<tr class="rrow ${open ? "open" : ""} ${r.enabled ? "" : "off"}" data-rule-id="${esc(r.id)}" data-search="${esc(search)}" ${drag ? `draggable="true" data-pos="${i}"` : ""}>
+            <td class="c-pos num">${drag ? `<span class="grip" aria-hidden="true">${ico("drag-vertical")}</span>` : ""}${i + 1}</td>
             <td class="c-on"><input type="checkbox" class="switch" data-action="toggle" data-id="${esc(r.id)}" ${r.enabled ? "checked" : ""} title="${esc(t.enabled)}" aria-label="${esc(t.enabled)}: ${esc(r.name)}"></td>
             <td class="c-name"><button class="rname" data-action="expand" data-id="${esc(r.id)}" aria-expanded="${open}" ${editingThis ? "disabled" : ""}>${ico("chevron-right")}<span class="nm"><strong>${esc(r.name)}</strong>${multiBox ? `<small>${esc(r.mailbox)}</small>` : ""}</span></button></td>
             <td class="c-cond dim" data-action="expand" data-id="${esc(r.id)}" title="${esc(conds.join("\n"))}"><span class="ctext">${esc(conds[0] || "")}</span>${n > 1 ? `<span class="more">+${n - 1}</span>` : ""}</td>
@@ -1793,8 +2122,10 @@ class FriedaPostfachPanel extends HTMLElement {
       <div class="row"><label for="f-name">${esc(t.name)}</label><input type="text" id="f-name" class="grow" value="${esc(e.name)}"></div>
       <div class="row"><label for="f-mailbox">${esc(t.mailbox)}</label><select id="f-mailbox">${boxes.map((b) => opt(b, b, e.mailbox)).join("")}</select></div>
       <div class="row"><label for="f-match">${esc(t.match)}</label><select id="f-match">${opt("all", t.all, e.match)}${opt("any", t.any, e.match)}</select></div>
+      <p class="rsentence" id="rule-sentence" aria-live="polite">${esc(this._ruleSentence(e))}</p>
       <div class="with-add"><h3 class="muted">${esc(t.conditions)}</h3><button class="round small" data-action="add-cond" title="${esc(t.addCondition)}" aria-label="${esc(t.addCondition)}">+</button></div>
       ${conds}
+      <div class="rpreview" id="rule-preview" aria-live="polite"></div>
       <h3 class="muted">${esc(t.actions)}</h3>
       <div class="row"><label for="f-move">${esc(t.moveTo)}</label><select id="f-move">${opt("", t.noMove, a.move_to || "")}${this._s.mailboxes.map((b) => opt(b, b, a.move_to || "")).join("")}</select></div>
       <div class="row"><label for="f-seen">${esc(t.markSeen)}</label><select id="f-seen">${opt("", t.unchanged, tri(a.mark_seen))}${opt("true", t.seen, tri(a.mark_seen))}${opt("false", t.unseen, tri(a.mark_seen))}</select></div>
@@ -1806,6 +2137,72 @@ class FriedaPostfachPanel extends HTMLElement {
       <div class="row"><label></label><label class="opt"><input type="checkbox" class="switch" id="f-enabled" ${e.enabled ? "checked" : ""}><span>${esc(t.enabled)}</span></label></div>
       <div class="actionsbar"><button data-action="save" ${this._s.busy ? "disabled" : ""}>${esc(t.save)}</button><button class="secondary" data-action="cancel">${esc(t.cancel)}</button></div>
     </div>`;
+  }
+
+  // The rule in one sentence: "If the sender contains …, then: move to Archive."
+  _ruleSentence(e) {
+    const t = this.t;
+    const conds = (e.conditions || []).filter((c) => String(c.value || "").trim()).map((c) => this._condText(c));
+    const plain = (x) => x.replace(/<[^>]*>/g, "").replace(/&(amp|lt|gt|quot|#39);/g, (m, k) => ({ amp: "&", lt: "<", gt: ">", quot: '"', "#39": "'" })[k]).trim();
+    const acts = this._actionChips(e.actions || {})
+      .split("</span>")
+      .map(plain)
+      .filter(Boolean);
+    if (e.actions?.stop === false) acts.push(t.rsStop);
+    return fmt(t.rsIf, conds.join(e.match === "any" ? t.rsOr : t.rsAnd) || "…", acts.join(", ") || t.rsNothing);
+  }
+
+  // While the editor is open: the sentence follows every change, the preview asks the server a moment later
+  _ruleLive() {
+    const root = this.shadowRoot;
+    const e = this._s.editing ? this._readForm() : null;
+    if (!e) return;
+    const sentence = root.querySelector("#rule-sentence");
+    if (sentence) sentence.textContent = this._ruleSentence(e);
+    const conditions = (e.conditions || []).filter((c) => String(c.value || "").trim());
+    const box = root.querySelector("#rule-preview");
+    if (box && this._previewCache?.ask === JSON.stringify([conditions, e.match])) box.innerHTML = this._previewCache.html;
+    clearTimeout(this._previewTimer);
+    this._previewTimer = setTimeout(() => this._rulePreview(e), 350);
+  }
+
+  async _rulePreview(e) {
+    const t = this.t;
+    const box = this.shadowRoot.querySelector("#rule-preview");
+    const conditions = (e.conditions || []).filter((c) => String(c.value || "").trim());
+    if (!box) return;
+    if (!conditions.length) return void (box.innerHTML = "");
+    const ask = JSON.stringify([conditions, e.match]);
+    if (this._previewCache?.ask === ask) return void (box.innerHTML = this._previewCache.html); // a redraw: same answer
+    this._previewAsk = ask;
+    if (!box.innerHTML) box.innerHTML = `<p class="muted">${esc(t.rpChecking)}</p>`;
+    let res;
+    try {
+      res = await this._ws({ type: "friedafetch_mail/rules/preview", entry_id: this._s.entryId, conditions, match: e.match || "all" });
+    } catch (err) {
+      if (this._previewAsk === ask) box.innerHTML = `<p class="muted">${esc(fmt(t.rpError, err.message || err))}</p>`;
+      return;
+    }
+    if (this._previewAsk !== ask || !this.shadowRoot.contains(box)) return;
+    const rows = res.matches
+      .map((m) => `<li><strong>${esc(m.name || m.from || "–")}</strong><span>${esc(m.subject || "–")}</span><small>${esc(fmtShort(m.time))}</small></li>`)
+      .join("");
+    box.innerHTML = `<h4>${ico("eye-outline")}${esc(t.rpTitle)}</h4>
+      <p class="muted">${esc(res.total ? fmt(t.rpSome, res.total, res.checked) : fmt(t.rpNone, res.checked))}</p>
+      ${rows ? `<ul>${rows}</ul>` : ""}${res.total > res.matches.length ? `<p class="muted">${esc(fmt(t.rpMore, res.total - res.matches.length))}</p>` : ""}
+      ${res.unknown ? `<p class="muted note">${ico("information-outline")}<span>${esc(t.rpUnknown)}</span></p>` : ""}`;
+    this._previewCache = { ask, html: box.innerHTML };
+  }
+
+  // Drag a rule to its new place (the menu's up/down stays for keyboards)
+  async _moveTo(id, position) {
+    const t = this.t;
+    const name = this._s.rules.find((r) => r.id === id)?.name || "";
+    await this._call(async () => {
+      await this._ws({ type: "friedafetch_mail/rules/update", entry_id: this._s.entryId, rule_id: id, changes: { position } });
+      await this._reload();
+    });
+    if (!this._s.error) W.announce(this.shadowRoot, fmt(t.ruleMoved, name, position + 1), 0);
   }
 
   _renderReport() {
@@ -2016,7 +2413,8 @@ class FriedaPostfachPanel extends HTMLElement {
     const moved = item.folder !== "INBOX";
     const unsure = `${item.vip ? `<span class="vip" role="img" aria-label="${esc(t.actVip)}">${ico("star")}</span>` : ""}${item.unsure ? `<span class="uns">${esc(t.actUnsureMark)}</span>` : ""}`;
     const where = full || moved ? `<span class="mv">${ico(full ? this._folderIcon(item.folder) : "arrow-right")}${esc(this._folderName(item.folder))}</span>` : "";
-    return `<span class="meta ${cls}">${ico(icon)}<span class="rl">${esc(label)}</span></span>${unsure}${where}`;
+    const dot = item.kind === "ai" && ai.category ? `<i class="cdot" style="--cat:${catColor(ai.category)}" aria-hidden="true"></i>` : "";
+    return `<span class="meta ${cls}">${ico(icon)}${dot}<span class="rl">${esc(label)}</span></span>${unsure}${where}`;
   }
 
   _actViews() {
@@ -2224,7 +2622,7 @@ class FriedaPostfachPanel extends HTMLElement {
     let meta;
     if (d.rating_id && cats.length && !d.held) {
       const options = [...cats.map((c) => c.name), "other"].map((c) => `<option value="${esc(c)}" ${c === d.category ? "selected" : ""}>${esc(cat(c))}</option>`).join("");
-      meta = `<span class="meta ai">${ico(d.corrected ? "pencil-outline" : "creation")}<select class="catsel" data-action="ai-correct" data-id="${esc(d.rating_id)}" aria-label="${esc(t.actCorrect)}">${options}</select>${imp ? `<span class="rl">· ${esc(imp)}/5</span>` : ""}</span>${d.confidence && !d.corrected ? this._confMeter(d.confidence) : ""}`;
+      meta = `<span class="meta ai">${ico(d.corrected ? "pencil-outline" : "creation")}<i class="cdot" style="--cat:${catColor(d.category)}" aria-hidden="true"></i><select class="catsel" data-action="ai-correct" data-id="${esc(d.rating_id)}" aria-label="${esc(t.actCorrect)}">${options}</select>${imp ? `<span class="rl">· ${esc(imp)}/5</span>` : ""}</span>${d.confidence && !d.corrected ? this._confMeter(d.confidence) : ""}`;
     } else if (item) meta = this._actMeta(item);
     else if (d.held) meta = `<span class="meta held">${ico("shield-check-outline")}<span class="rl">${esc(t.actHeld)}</span></span>`;
     else meta = d.category ? `<span class="meta ai">${ico(d.corrected ? "pencil-outline" : "creation")}<span class="rl">${esc(cat(d.category))}</span></span>` : "";
@@ -2262,6 +2660,95 @@ class FriedaPostfachPanel extends HTMLElement {
       <div class="rfoot">${esc(mid ? t.tlFoot : t.tlFootOld)}${!this._actNarrow() && item && !this._account()?.read_only ? `<span class="keys">${esc(t.keysHint)}</span>` : ""}</div>`;
   }
 
+  _bindPull(scroller) {
+    const t = this.t;
+    let y0 = null;
+    let dy = 0;
+    let tip = null;
+    const page = () => (scroller.scrollHeight > scroller.clientHeight + 4 ? scroller.scrollTop : document.scrollingElement?.scrollTop || 0);
+    scroller.addEventListener(
+      "touchstart",
+      (ev) => {
+        if (ev.touches.length !== 1 || page() > 0 || this._s.act.picking) return;
+        y0 = ev.touches[0].clientY;
+        dy = 0;
+      },
+      { passive: true }
+    );
+    scroller.addEventListener(
+      "touchmove",
+      (ev) => {
+        if (y0 === null) return;
+        dy = ev.touches[0].clientY - y0;
+        if (dy <= 0) return;
+        if (!tip) {
+          tip = document.createElement("div");
+          tip.className = "ptr";
+          tip.setAttribute("aria-hidden", "true");
+          scroller.prepend(tip);
+        }
+        const far = dy >= PULL_AT;
+        tip.style.height = `${Math.min(dy, PULL_AT + 20) * 0.6}px`;
+        tip.innerHTML = `${ico(far ? "arrow-up" : "arrow-down")}<span>${esc(far ? t.ptrRelease : t.ptrPull)}</span>`;
+      },
+      { passive: true }
+    );
+    const end = async () => {
+      if (y0 === null) return;
+      y0 = null;
+      const far = dy >= PULL_AT;
+      if (!far) {
+        tip?.remove();
+        tip = null;
+        return;
+      }
+      if (tip) tip.innerHTML = `<span class="spinner"></span><span>${esc(t.ptrLoading)}</span>`;
+      W.announce(this.shadowRoot, t.ptrLoading, 0);
+      await this._loadActivity().catch(() => {});
+      tip?.remove();
+      tip = null;
+      this._render();
+    };
+    scroller.addEventListener("touchend", end);
+    scroller.addEventListener("touchcancel", end);
+  }
+
+  _bindRuleDrag(tr) {
+    const id = tr.dataset.ruleId;
+    const body = tr.closest("tbody");
+    const clear = () => body.querySelectorAll(".drop-before, .drop-after").forEach((n) => n.classList.remove("drop-before", "drop-after"));
+    tr.addEventListener("dragstart", (ev) => {
+      if (ev.target.closest?.("button, input, select, details")) return ev.preventDefault();
+      ev.dataTransfer.effectAllowed = "move";
+      ev.dataTransfer.setData("text/plain", id);
+      this._dragRule = id;
+      tr.classList.add("dragging");
+    });
+    tr.addEventListener("dragend", () => {
+      tr.classList.remove("dragging");
+      clear();
+      this._dragRule = null;
+    });
+    tr.addEventListener("dragover", (ev) => {
+      if (!this._dragRule || this._dragRule === id) return;
+      ev.preventDefault();
+      const r = tr.getBoundingClientRect();
+      clear();
+      tr.classList.add(ev.clientY < r.top + r.height / 2 ? "drop-before" : "drop-after");
+    });
+    tr.addEventListener("drop", (ev) => {
+      ev.preventDefault();
+      const moving = this._dragRule;
+      const before = tr.classList.contains("drop-before");
+      clear();
+      if (!moving || moving === id) return;
+      const from = this._s.rules.findIndex((x) => x.id === moving);
+      let to = Number(tr.dataset.pos) + (before ? 0 : 1);
+      if (from < to) to -= 1;
+      if (to !== from) this._moveTo(moving, Math.max(0, Math.min(this._s.rules.length - 1, to)));
+    });
+  }
+
   // The two actions a swipe does: [read or unread, archive or back to the inbox] as [action, icon, label]
   _swipeActions(item) {
     const t = this.t;
@@ -2287,14 +2774,32 @@ class FriedaPostfachPanel extends HTMLElement {
       li.classList.remove("swiping", "sw-l", "sw-r", "sw-go");
       btn.style.transform = "";
     };
+    let hold = null;
+    const canPick = () => this._s.ai?.status?.active && this._actItem(key)?.selectable;
     btn.addEventListener("pointerdown", (ev) => {
       if (ev.pointerType !== "touch" || !ev.isPrimary) return;
       [x0, y0, dx, on, id] = [ev.clientX, ev.clientY, 0, false, ev.pointerId];
+      clearTimeout(hold);
+      if (canPick()) {
+        // a long press picks the mail (and starts picking), like a mail app
+        hold = setTimeout(() => {
+          hold = null;
+          id = null;
+          this._swiped = true;
+          setTimeout(() => (this._swiped = false), 600);
+          navigator.vibrate?.(10);
+          this._actToggle(key);
+        }, HOLD_MS);
+      }
     });
     btn.addEventListener("pointermove", (ev) => {
       if (ev.pointerId !== id) return;
       const mx = ev.clientX - x0;
       const my = ev.clientY - y0;
+      if (hold && Math.hypot(mx, my) > 10) {
+        clearTimeout(hold);
+        hold = null;
+      }
       if (!on) {
         if (Math.abs(my) > 10 && Math.abs(my) > Math.abs(mx)) return void (id = null); // scrolling the list
         if (Math.abs(mx) < 12) return;
@@ -2313,6 +2818,8 @@ class FriedaPostfachPanel extends HTMLElement {
       li.classList.toggle("sw-go", Math.abs(dx) >= SWIPE_AT);
     });
     btn.addEventListener("pointerup", (ev) => {
+      clearTimeout(hold);
+      hold = null;
       if (ev.pointerId !== id) return;
       id = null;
       if (!on) return;
@@ -2325,6 +2832,8 @@ class FriedaPostfachPanel extends HTMLElement {
       this._mailAct([key], (dx > 0 ? read : move)[0]);
     });
     btn.addEventListener("pointercancel", (ev) => {
+      clearTimeout(hold);
+      hold = null;
       if (ev.pointerId !== id) return;
       id = null;
       reset();
@@ -2676,6 +3185,7 @@ class FriedaPostfachPanel extends HTMLElement {
     const tiles = [
       tile("email-multiple-outline", w.mails ?? 0, t.fyMails, trend == null ? "" : fmt(trend >= 0 ? t.fyMore : t.fyLess, Math.abs(trend)), "", spark("mails")),
       w.by_rules ? tile("filter-check-outline", w.by_rules, t.fyByRules, "", "", spark("rules")) : "",
+      (w.by_rules || 0) + (w.by_ai || 0) ? tile("timer-sand-complete", (w.by_rules || 0) + (w.by_ai || 0), t.fyHandled, fmt(t.fyHandledSub, w.by_rules || 0, w.by_ai || 0, Math.round((((w.by_rules || 0) + (w.by_ai || 0)) * 10) / 60))) : "",
       w.rated ? tile("creation", w.accuracy == null ? "–" : `${w.accuracy} %`, t.fyAccuracy, fmt(t.fyRated, w.rated, w.corrected), "", spark("accuracy", " %")) : "",
       tile("email-mark-as-unread", w.unread ?? 0, t.fyUnread),
       fy.followup_days ? tile("reply-outline", w.waiting ?? 0, t.fyWaiting) : "",
@@ -3458,6 +3968,18 @@ class FriedaPostfachPanel extends HTMLElement {
     );
     // touch screens: a mail of the list is swiped right to read/unread and left to archive (or back to the inbox)
     if (!this._account()?.read_only && !this._s.act.picking) root.querySelectorAll(".mlist li.m").forEach((li) => this._bindRowSwipe(li));
+    // phones: pull the list down to load it again
+    const scroller = root.querySelector(".lscroll");
+    if (scroller && window.matchMedia?.("(pointer: coarse)").matches) this._bindPull(scroller);
+    // the rule editor: its sentence and preview follow every change
+    const editor = root.querySelector("#editor");
+    if (editor) {
+      editor.addEventListener("input", () => this._ruleLive());
+      editor.addEventListener("change", () => this._ruleLive());
+      this._ruleLive();
+    }
+    // drag a rule to its place
+    root.querySelectorAll("tr.rrow[draggable]").forEach((tr) => this._bindRuleDrag(tr));
     // list entries that act as buttons (the mails of a run) also answer to Enter and Space
     root.querySelectorAll('li[role="button"][data-action]').forEach((li) =>
       li.addEventListener("keydown", (ev) => {

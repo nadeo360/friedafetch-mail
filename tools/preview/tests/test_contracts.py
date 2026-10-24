@@ -38,6 +38,7 @@ REQUESTS = {
     "friedafetch_mail/insights/event": {"proposal_id": "p1"},
     "friedafetch_mail/insights/parcel": {"parcel_id": "k3", "action": "ignore"},
     "friedafetch_mail/rules/restore": {"rule_id": "<deleted>"},
+    "friedafetch_mail/rules/preview": {"conditions": [{"field": "subject", "op": "contains", "value": "Ratenkredit"}]},
     "friedafetch_mail/insights/undo": {"token": "<undo>"},
 }
 # what a request needs to have happened just before ("Undo" needs something done): JS returning the placeholder's value

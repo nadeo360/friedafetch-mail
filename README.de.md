@@ -149,6 +149,17 @@ die gewählte Mail (auf dem Handy öffnet sich die Mail in einem Blatt über der
   als gelesen (oder ungelesen) zu markieren, und nach links, um sie zu archivieren (oder zurück in den Posteingang zu
   legen). Wie sicher sich die KI war, zeigt eine kleine dreistufige Anzeige neben der Kategorie (sicher, ziemlich
   sicher, unsicher).
+- **Lesen:** Der Text zeigt, was neu ist; der zitierte Verlauf einer Antwort („Am … schrieb …:“, Outlook-Köpfe,
+  Zeilen mit `>`) und die Signatur klappen weg unter *Zitierten Text anzeigen* und *Signatur*. Weblinks erscheinen als
+  kleine Chips mit ihrem echten Ziel (der Host fett), bevor du sie öffnest; alles außer http/https bleibt reiner Text.
+  Eine Unterhaltung liest sich wie Nachrichten – deine Antworten rechts, die der anderen links. Jede KI-Kategorie hat
+  eine Farbe, gleich in Liste, Lesebereich, Kategorien und Diagrammen.
+- **⌘K / Strg+K** öffnet die Befehlspalette: eine Suche für Tabs, Aktionen (neue Regel, *Für dich* neu nachsehen,
+  neue KI-Kategorie, die Tasten), Regeln, Kategorien und Mails (auf dem Server gesucht, die ganze Aktivität).
+  Pfeiltasten, Enter, Esc.
+- **Auf dem Handy** liegen die Tabs unten in Daumennähe, die geöffnete Mail füllt den Bildschirm und schließt mit der
+  Zurück-Geste (oder einem Wischen vom linken Rand oder nach unten), langes Drücken auf eine Mail beginnt das Auswählen,
+  und die Liste lädt neu, wenn du sie nach unten ziehst.
 - **Ansichten** *Ungelesen* und *Markiert* (unter *Im Postfach*) zeigen, was das Postfach gerade so hat.
 - **Auswählen** (oder ⌘/Strg-Klick, ⇧-Klick für einen Bereich) wählt Mails für **Neu bewerten**: alle einer Ansicht,
   einen ganzen Tag (Heute, Gestern, …) oder einzelne; Mails, die eine Regel erledigt hat, sind nicht für die KI.
@@ -165,10 +176,16 @@ die gewählte Mail (auf dem Handy öffnet sich die Mail in einem Blatt über der
   mit), *Prüfung alle N Min.* (Push aus), *Push gestört* (der Takt läuft weiter) oder *Automatik aus*.
 - Eine Regeltabelle (Position, Schalter, Name, Bedingungen, Aktionen, Treffer) zum Aufklappen, **+** für eine neue
   Regel und ein ⋮-Menü pro Regel für Bearbeiten, Probelauf nur mit dieser Regel, Reihenfolge, Kopieren und Löschen.
+  Eine Regel lässt sich am Griff an ihren Platz ziehen (Hoch/Runter im Menü bleibt für die Tastatur).
+- **Der Editor** sagt die Regel in einem Satz („Wenn Betreff enthält „Rechnung“, dann: Archiv.“) und zeigt beim Tippen
+  eine **Live-Vorschau**: auf wie viele der letzten 300 Mails der Aktivität sie zuträfe, mit den ersten davon. Die
+  Aktivität kennt Absender und Betreff; Bedingungen auf An/Cc werden als nicht geprüft genannt.
 - **Ausführen** öffnet ein Menü: Probelauf oder echter Lauf über das ganze Postfach oder nur neue Mails; der Bericht
   pro Mail erscheint über den Regeln.
 
-**KI-Sortierung** enthält Modus und Kategorien, **KI-Protokoll** alles, was an eine KI ging. Bei mehreren Konten
+**KI-Sortierung** enthält den Modus, einen **Überblick** (die Kategorien der letzten Bewertungen als Ring mit den
+Korrekturen je Kategorie und die Treffsicherheit je Woche) und die Kategorien; **KI-Protokoll** alles, was an eine KI
+ging. Bei mehreren Konten
 erscheint oben eine Kontoauswahl. Freigaben und Änderungsprotokoll bleiben im Panel von Frieda, dessen Überblick
 auch zeigt, ob Frieda Postfach läuft.
 
@@ -354,7 +371,8 @@ Aktivität und den Kontakten ermittelt; davon geht nichts an eine KI, und ohne d
 - **Deine Woche** – was angekommen ist (im Vergleich zur Woche davor), was Regeln erledigt haben, wie oft die KI richtig
   lag (bewertet minus korrigiert), was noch ungelesen ist. Kleine Linien zeigen die letzten acht Wochen für Mails,
   Regeln und Trefferquote (Frieda Postfach behält eine Zusammenfassung jeder abgeschlossenen Woche; die Aktivität
-  selbst behält 30 Tage). Mit *Wochenrückblick am* kommt das an dem Tag auch als Benachrichtigung.
+  selbst behält 30 Tage). *Ohne dich erledigt* zählt, was Regeln und KI sortiert haben (mit einer groben Zeit bei
+  10 Sekunden je Mail). Mit *Wochenrückblick am* kommt das an dem Tag auch als Benachrichtigung.
 - **Termine aus Mails** – braucht die KI-Sortierung: Die KI nennt einen Termin oder eine Frist, die sie in einer Mail
   liest, die sie ohnehin bewertet (dieselben Daten, keine zusätzliche Anfrage). Du prüfst Titel und Zeit und trägst
   ihn mit einem Klick in einen Kalender ein; die Benachrichtigung zu einer wichtigen Mail bekommt den Knopf *In

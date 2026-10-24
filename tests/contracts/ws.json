@@ -911,6 +911,20 @@
    }
   ]
  },
+ "friedafetch_mail/rules/preview": {
+  "checked": "num",
+  "matches": [
+   {
+    "from": "str",
+    "key": "str",
+    "name": "str",
+    "subject": "str",
+    "time": "str"
+   }
+  ],
+  "total": "num",
+  "unknown": "bool"
+ },
  "friedafetch_mail/rules/restore": {
   "rule": {
    "actions": {
