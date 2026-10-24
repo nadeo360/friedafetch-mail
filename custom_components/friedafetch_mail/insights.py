@@ -57,7 +57,19 @@ _LOGGER = logging.getLogger(__name__)
 STORAGE_VERSION = 1
 TREND_WEEKS = 8  # points of the trend lines in "Your week": the weeks before and these seven days
 KEEP_WEEKS = 12  # completed weeks kept (the activity itself keeps 30 days)
-UNDO_FIELDS = ("packages", "proposals", "followups", "dismissed", "parcel_ignored")  # what a dismissal may change
+UNDO_FIELDS = ("packages", "proposals", "followups", "subscriptions", "dismissed", "parcel_ignored")
+UNSUB_GRACE = timedelta(days=3)  # a sender may still send for a few days after unsubscribing
+SECOND_LEVEL = {
+    "co.uk",
+    "org.uk",
+    "com.au",
+    "co.at",
+    "or.at",
+    "co.jp",
+    "com.br",
+    "co.nz",
+    "com.tr",
+}  # what a dismissal may change
 SUGGEST_DAYS = 30  # rule suggestions look at the activity of these days
 SUGGEST_MIN = 3  # mails of a sender moved to the same folder
 SUGGEST_SHARE = 0.8  # of all mails of that sender
@@ -101,6 +113,13 @@ def _imap_date(day: date) -> str:
 
 def _id(*parts: Any) -> str:
     return hashlib.sha1("\x1f".join(str(p) for p in parts).encode(), usedforsecurity=False).hexdigest()[:12]
+
+
+def _site(address: str) -> str:
+    """The sender's site: shop@nudient.com and support@nudient.com are one newsletter, mails.x.example.com is x.example.com."""
+    labels = shipping.domain_of(address).split(".")
+    keep = 3 if ".".join(labels[-2:]) in SECOND_LEVEL else 2
+    return ".".join(labels[-keep:]) if len(labels) >= 2 else address.lower()
 
 
 def email_of(value: Any) -> str:
@@ -279,6 +298,8 @@ class Insights:
                 ids.append(item_id)
             if kind == "followup":
                 self.followups = [f for f in self.followups if f["id"] != item_id]
+            if kind == "subscription":
+                self.subscriptions = [x for x in self.subscriptions if x["id"] != item_id]
         self._remember(before)
         await self._save()
 
@@ -745,28 +766,60 @@ class Insights:
                 email = str(sender.get("email") or "").lower()
                 if not email:
                     continue
+                site = _site(email)
                 sub = per_sender.setdefault(
-                    email,
-                    {"id": _id("sub", email), "sender": email, "name": "", "count": 0, "unread": 0, "last": ""},
+                    site,
+                    {
+                        "id": _id("sub", site),
+                        "site": site,
+                        "sender": email,
+                        "senders": [],
+                        "name": "",
+                        "count": 0,
+                        "unread": 0,
+                        "last": "",
+                        "dates": [],
+                    },
                 )
+                if email not in sub["senders"]:
+                    sub["senders"].append(email)
                 sub["count"] += 1
                 sub["unread"] += not s.get("seen")
                 when = str(s.get("date") or "")
+                sub["dates"].append(when)
                 if when >= sub["last"]:
-                    sub.update(last=when, name=sender.get("name") or sub["name"], mailbox=folder, uid=s["uid"])
+                    # the newest mail is the one to unsubscribe with
+                    sub.update(
+                        last=when, sender=email, name=sender.get("name") or sub["name"], mailbox=folder, uid=s["uid"]
+                    )
                     sub["subject"] = str(s.get("subject") or "")[:120]
         await self._read_parcels(candidates, fire=False)
         dismissed = set(self.dismissed.get("subscription") or [])
         out = []
         for sub in per_sender.values():
             sub["never_opened"] = sub["unread"] == sub["count"]
-            sub["unsubscribed"] = self.unsubscribed.get(sub["sender"])
-            if sub["id"] not in dismissed:
+            marks = [self.unsubscribed.get(k) for k in (sub["site"], *sub["senders"])]
+            sub["unsubscribed"] = max((m for m in marks if m), default=None)
+            dates = sub.pop("dates")
+            # still sending after unsubscribing (a few days are normal): shown, to unsubscribe again
+            since = dt_util.parse_datetime(sub["unsubscribed"] or "")
+            sub["after"] = (
+                sum(1 for d in dates if (w := dt_util.parse_datetime(d)) is not None and w > since + UNSUB_GRACE)
+                if since is not None
+                else 0
+            )
+            old_ids = {_id("sub", e) for e in sub["senders"]}  # hidden before 1.0.38: by address
+            if sub["id"] not in dismissed and not old_ids & dismissed:
                 out.append(sub)
         return sorted(out, key=lambda s: (-(s["unread"] / s["count"]), -s["count"]))
 
-    async def async_unsubscribe(self, sender: str, *, read_only: bool, allow_send: bool) -> dict[str, Any]:
-        """Unsubscribe from a newsletter with the newest mail of its sender (as Frieda's icloud_unsubscribe)."""
+    async def async_unsubscribe(
+        self, sender: str, *, read_only: bool, allow_send: bool, done: bool = False
+    ) -> dict[str, Any]:
+        """Unsubscribe from a newsletter with the newest mail of its sender (as Frieda's icloud_unsubscribe).
+
+        done: the user unsubscribed on the newsletter's page (the "manual" way): only note it.
+        """
         from homeassistant.util.ssl import client_context  # noqa: PLC0415
 
         from custom_components.friedafetch.guard import QUOTA_MAIL_SEND  # noqa: PLC0415
@@ -776,9 +829,16 @@ class Insights:
         from .actions import ActionError  # noqa: PLC0415
 
         await self.async_load()
-        sub = next((s for s in self.subscriptions if s["sender"] == sender.lower()), None)
+        sub = next(
+            (s for s in self.subscriptions if sender.lower() in (s["sender"], *s.get("senders", []), s.get("site"))),
+            None,
+        )
         if sub is None or "uid" not in sub:
             raise ActionError("This newsletter was not found (look again)")
+        if done:
+            self._mark_unsubscribed(sub)
+            await self._save()
+            return {"sender": sub["sender"], "method": "done"}
         if read_only:
             raise ActionError("Frieda is in read-only mode (options of Frieda)")
         guard = self._clients.guard
@@ -804,8 +864,7 @@ class Insights:
             )
         if guard is not None:
             guard.consume(QUOTA_MAIL_SEND)
-        self.unsubscribed[sub["sender"]] = _now_iso()
-        sub["unsubscribed"] = self.unsubscribed[sub["sender"]]
+        self._mark_unsubscribed(sub)
         audit = getattr(self._clients, "audit", None)
         if audit is not None:
             try:
@@ -820,6 +879,14 @@ class Insights:
                 _LOGGER.debug("Audit logging of unsubscribing failed: %s", err)
         await self._save()
         return {"sender": sub["sender"], **result}
+
+    def _mark_unsubscribed(self, sub: dict[str, Any]) -> None:
+        now = _now_iso()
+        for key in (sub.get("site"), sub["sender"]):
+            if key:
+                self.unsubscribed[key] = now
+        sub["unsubscribed"] = now
+        sub["after"] = 0
 
     # ---------------------------------------------------------------- parcels
     def _parcel_candidate(self, summary: dict[str, Any]) -> bool:

@@ -1120,6 +1120,7 @@ async def ws_insights_event(
         vol.Required("type"): f"{DOMAIN}/insights/unsubscribe",
         vol.Optional("entry_id"): str,
         vol.Required("sender"): vol.All(str, vol.Length(min=3, max=300)),
+        vol.Optional("done", default=False): bool,  # unsubscribed on the newsletter's page: only note it
     }
 )
 @websocket_api.require_admin
@@ -1137,6 +1138,7 @@ async def ws_insights_unsubscribe(
             msg["sender"],
             read_only=bool(options.get(CONF_READ_ONLY, DEFAULT_READ_ONLY)),
             allow_send=bool(options.get(CONF_ALLOW_SEND_MAIL, DEFAULT_ALLOW_SEND_MAIL)),
+            done=msg["done"],
         )
     except (ActionError, PolicyError, MailError):
         raise

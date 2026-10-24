@@ -386,7 +386,10 @@ Aktivität und den Kontakten ermittelt; davon geht nichts an eine KI, und ohne d
   Editor damit ausgefüllt.
 - **Abos** – Newsletter der letzten 30 Tage, die am seltensten gelesenen zuerst. *Abmelden* arbeitet wie Friedas
   `icloud_unsubscribe`: Ein-Klick-Link, sonst die Abmelde-Mail (braucht *E-Mails senden erlauben*), sonst öffnet sich
-  die Seite für dich.
+  die Seite für dich – und Frieda fragt danach, ob es dort geklappt hat. Ein Eintrag pro Absender-Website (shop@ und
+  support@ eines Shops sind ein Newsletter). Zwei Tabs trennen sie: *Abonniert* und *Abgemeldet*; einer, der drei Tage nach der
+  Abmeldung noch schreibt, kommt mit Hinweis und *Erneut abmelden* zurück. Ausblenden (das Auge) nimmt ihn sofort von
+  der Liste.
 - **Pakete** – ohne KI aus Versandmails erkannt: Versanddienst (DHL, DPD, Hermes, GLS, UPS, Amazon Logistics),
   Sendungsnummer, Status (unterwegs, kommt heute mit Zeitfenster, liegt zur Abholung bereit, zugestellt, Problem) und
   der voraussichtliche Tag. Eine Versandmail wird einmal gelesen, gleich nach ihrem Eingang; Sendungsnummern zählen nur

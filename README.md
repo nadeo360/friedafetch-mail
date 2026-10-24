@@ -363,7 +363,9 @@ the mailbox, the activity and the contacts; nothing of it goes to an AI, and not
   80 % of the cases over 30 days, and that no rule handles yet. *Create rule* opens the editor with it filled in.
 - **Subscriptions** – newsletters of the last 30 days, the least read first. *Unsubscribe* works like Frieda's
   `icloud_unsubscribe`: one-click link, else the unsubscribe e-mail (needs *Allow sending e-mails*), else the page
-  opens for you.
+  opens for you – and Frieda asks afterwards whether it worked there. One entry per sender site (shop@ and support@ of
+  a shop are one newsletter). Two tabs keep them apart: *Subscribed* and *Unsubscribed*; one that still sends three days after
+  unsubscribing comes back with a note and *Unsubscribe again*. Hiding (the eye) takes it off the list at once.
 - **Parcels** – recognised in shipping mails without AI: carrier (DHL, DPD, Hermes, GLS, UPS, Amazon Logistics),
   tracking number, status (on its way, arrives today with the time window, ready for pick-up, delivered, problem) and
   the expected day. A shipping mail is read once, right after it arrives; tracking numbers count only next to a word

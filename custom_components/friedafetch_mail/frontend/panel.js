@@ -2628,11 +2628,11 @@ class FriedaPostfachPanel extends HTMLElement {
     else meta = d.category ? `<span class="meta ai">${ico(d.corrected ? "pencil-outline" : "creation")}<span class="rl">${esc(cat(d.category))}</span></span>` : "";
     const canRerate = mid && s.ai?.status?.active && (!item || item.selectable);
     const rerate = canRerate
-      ? `<button class="secondary small ib" data-action="tl-rerate" ${s.busy || this._batchBusy() ? "disabled" : ""}>${ico("refresh")}${esc(t.rerate)}</button>`
+      ? `<button class="secondary small ib" data-action="tl-rerate" aria-label="${esc(t.rerate)}" ${s.busy || this._batchBusy() ? "disabled" : ""}>${ico("refresh")}<span class="lb">${esc(t.rerate)}</span></button>`
       : "";
     const who = name && address && name !== address ? `<strong>${esc(name)}</strong><small>${esc(address)}</small>` : `<strong>${esc(name || address || "–")}</strong>`;
     const ruleBtn = address.includes("@")
-      ? `<button class="secondary small ib" data-action="rule-from-mail" data-from="${esc(address)}" data-name="${esc(name)}">${ico("filter-plus-outline")}${esc(t.ruleFromMail)}</button>`
+      ? `<button class="secondary small ib" data-action="rule-from-mail" data-from="${esc(address)}" data-name="${esc(name)}" aria-label="${esc(t.ruleFromMail)}">${ico("filter-plus-outline")}<span class="lb">${esc(t.ruleFromMail)}</span></button>`
       : "";
     const ask = this._s.applyAsk && this._s.applyAsk.ratingId === d.rating_id ? this._s.applyAsk : null;
     const askCat = ask ? (s.ai?.categories || []).find((c) => c.name === ask.category) : null;
@@ -3390,25 +3390,46 @@ class FriedaPostfachPanel extends HTMLElement {
     const t = this.t;
     const s = this._s;
     const acc = this._account();
-    const list = fy.subscriptions || [];
+    const all = fy.subscriptions || [];
+    // unsubscribed ones move into their own folded list – unless they keep sending after a few days
+    const list = all.filter((n) => !n.unsubscribed || n.after > 0);
+    const gone = all.filter((n) => n.unsubscribed && !(n.after > 0));
+    const unsubBtn = (n, label = t.fyUnsub) =>
+      `<button class="secondary small ib" data-action="fy-unsub" data-sender="${esc(n.sender)}" data-name="${esc(n.name || n.sender)}" ${s.busy || acc?.read_only ? "disabled" : ""}>${ico("email-remove-outline")}${esc(label)}</button>`;
+    const who = (n) => [fmt(t.fySubCount, n.count, n.unread), (n.senders || []).length > 1 ? fmt(t.fySenders, n.senders.length) : n.sender].join(" · ");
     const rows = list
       .map(
-        (n) => `<div class="ai-cat fy-row"><span class="fy-ic ${n.never_opened ? "warn" : ""}">${ico(n.never_opened ? "email-off-outline" : "newspaper-variant-outline")}</span>
-          <span class="tx"><strong>${esc(n.name || n.sender)}</strong><span class="muted">${esc(fmt(t.fySubCount, n.count, n.unread))} · ${esc(n.sender)}</span></span>
-          ${n.never_opened ? `<span class="chip hot">${esc(t.fyNeverOpenedChip)}</span>` : ""}
-          ${
-            n.unsubscribed
-              ? `<span class="chip">${esc(fmt(t.fyUnsubscribed, fmtShort(n.unsubscribed)))}</span>`
-              : `<button class="secondary small ib" data-action="fy-unsub" data-sender="${esc(n.sender)}" data-name="${esc(n.name || n.sender)}" ${s.busy || acc?.read_only ? "disabled" : ""}>${ico("email-remove-outline")}${esc(t.fyUnsub)}</button>`
-          }
-          <button class="icon" data-action="fy-dismiss" data-kind="subscription" data-id="${esc(n.id)}" title="${esc(t.fyHide)}" aria-label="${esc(t.fyHide)}: ${esc(n.name || n.sender)}">${ico("eye-off-outline")}</button></div>`
+        (n) => `<div class="ai-cat fy-row fy-sub"><span class="fy-ic ${n.never_opened || n.after ? "warn" : ""}">${ico(n.never_opened ? "email-off-outline" : "newspaper-variant-outline")}</span>
+          <span class="tx"><strong>${esc(n.name || n.sender)}</strong><span class="muted">${esc(who(n))}</span>
+            ${n.after ? `<span class="warnline small">${ico("alert-outline")}<span>${esc(fmt(t.fyStillSending, n.after))}</span></span>` : ""}</span>
+          ${n.never_opened && !n.after ? `<span class="chip hot">${esc(t.fyNeverOpenedChip)}</span>` : ""}
+          ${unsubBtn(n, n.after ? t.fyAgain : t.fyUnsub)}
+          <button class="icon" data-action="fy-dismiss" data-kind="subscription" data-id="${esc(n.id)}" aria-label="${esc(t.fyHide)}: ${esc(n.name || n.sender)}">${ico("eye-off-outline")}</button></div>`
       )
       .join("");
+    // two tabs: what you get, and what you unsubscribed from
+    const view = gone.length && s.subsView === "gone" ? "gone" : "on";
+    const tabs = gone.length
+      ? `<div class="segs fy-subtabs" role="group" aria-label="${esc(t.fySubs)}">
+          <button class="seg ${view === "on" ? "on" : ""}" aria-pressed="${view === "on"}" data-action="fy-subs-view" data-v="on">${ico("newspaper-variant-outline")}${esc(t.fySubsOn)}<span class="n">${list.length}</span></button>
+          <button class="seg ${view === "gone" ? "on" : ""}" aria-pressed="${view === "gone"}" data-action="fy-subs-view" data-v="gone">${ico("email-check-outline")}${esc(t.fySubsGone)}<span class="n">${gone.length}</span></button>
+        </div>`
+      : "";
+    const goneList = gone.length
+      ? `<div class="ai-cats fy-gone">${gone
+          .map(
+            (n) => `<div class="ai-cat fy-row fy-sub done"><span class="fy-ic">${ico("email-check-outline")}</span>
+              <span class="tx"><strong>${esc(n.name || n.sender)}</strong><span class="muted">${esc(who(n))}</span></span>
+              <span class="chip">${esc(fmt(t.fyUnsubscribed, fmtShort(n.unsubscribed)))}</span>
+              <button class="icon" data-action="fy-dismiss" data-kind="subscription" data-id="${esc(n.id)}" aria-label="${esc(t.fyHide)}: ${esc(n.name || n.sender)}">${ico("eye-off-outline")}</button></div>`
+          )
+          .join("")}</div>`
+      : "";
     const empty = fy.subscriptions_checked ? t.fySubsNone : t.fyNotChecked;
     const restore = fy.dismissed?.subscription ? `<button class="link" data-action="fy-restore" data-kind="subscription">${esc(fmt(t.fyRestore, fy.dismissed.subscription))}</button>` : "";
     return `<div class="card"><div class="chead"><h2>${esc(t.fySubs)}</h2>${list.length ? `<span class="badge">${list.length}</span>` : ""}</div>
       <p class="muted" style="margin:-4px 0 10px">${esc(t.fySubsHint)}</p>
-      <div class="ai-cats">${rows || `<p class="muted">${esc(empty)}</p>`}</div>${restore ? `<div class="subbar">${restore}</div>` : ""}</div>`;
+      ${tabs}${view === "gone" ? goneList : `<div class="ai-cats">${rows || `<p class="muted">${esc(gone.length ? t.fySubsNone : empty)}</p>`}</div>`}${restore ? `<div class="subbar">${restore}</div>` : ""}</div>`;
   }
 
   async _fyOpenEditor(id) {
@@ -3459,15 +3480,25 @@ class FriedaPostfachPanel extends HTMLElement {
 
   async _fyUnsub(sender, name) {
     const t = this.t;
+    let manual = false;
     if (!(await this._confirm({ title: fmt(t.fyUnsubTitle, name), text: t.fyUnsubText, ok: t.fyUnsub, irreversible: true, icon: "email-remove-outline" }))) return;
     await this._call(async () => {
       const res = await this._ws({ type: "friedafetch_mail/insights/unsubscribe", entry_id: this._s.entryId, sender });
       if (res.method === "manual") {
         this._s.notice = fmt(t.fyUnsubManual, name);
         window.open(res.url, "_blank", "noopener,noreferrer");
+        manual = true;
       } else this._s.notice = fmt(t.fyUnsubDone, name);
       await this._loadInsights();
     });
+    // a web page to unsubscribe: Frieda cannot see whether it worked, so it asks (and then notes it)
+    if (manual && (await this._confirm({ title: t.fyManualAskTitle, text: fmt(t.fyManualAskText, name), ok: t.fyManualYes, irreversible: false, tone: "neutral", icon: "email-check-outline" }))) {
+      await this._call(async () => {
+        await this._ws({ type: "friedafetch_mail/insights/unsubscribe", entry_id: this._s.entryId, sender, done: true });
+        this._s.notice = fmt(t.fyUnsubDone, name);
+        await this._loadInsights();
+      });
+    }
   }
 
   _tabs() {
@@ -3666,6 +3697,10 @@ class FriedaPostfachPanel extends HTMLElement {
       const handler = {
         "fy-refresh": () => this._fyCall({ type: "friedafetch_mail/insights/refresh" }),
         "keys-close": () => this._keysClose(),
+        "fy-subs-view": () => {
+          this._s.subsView = el.dataset.v;
+          this._render();
+        },
         "fy-dismiss": () => this._fyCall({ type: "friedafetch_mail/insights/dismiss", kind: el.dataset.kind, item_id: el.dataset.id }, null, this.t[`fyDone_${el.dataset.kind}`] || this.t.undoDone),
         "fy-restore": () => this._fyCall({ type: "friedafetch_mail/insights/restore", kind: el.dataset.kind }),
         "fy-event-edit": () => this._fyOpenEditor(el.dataset.id),

@@ -211,3 +211,65 @@ def test_friedas_panel_has_the_same_keys(open_panel) -> None:
     panel.js("await wait(200);")
     assert panel.js('return root.querySelector(\'[role="tab"][aria-selected="true"]\').dataset.tab;') == tabs[-1]
     assert panel.count(".content.enter") == 1
+
+
+# ------------------------------------------------------------------ subscriptions
+def test_unsubscribed_newsletters_fold_away_unless_they_keep_sending(open_panel) -> None:
+    panel = open_panel("postfach", "tab=foryou")
+    panel.js("el._setTab('foryou'); await wait(500);")
+    names = "return [...root.querySelectorAll(arg)].map((n) => n.querySelector('strong').textContent);"
+    assert panel.js(names, '[data-widget="fy-subs"] > .card > .ai-cats .fy-sub') == [
+        "Möbelhaus",
+        "Gartenmarkt",
+        "Schuhhaus",
+    ]
+    assert "schreibt weiter: 2 seit der Abmeldung" in panel.text('[data-widget="fy-subs"]')
+    tabs = panel.js(
+        "return [...root.querySelectorAll('.fy-subtabs .seg')].map((b) => [b.textContent.trim(), b.getAttribute('aria-pressed')]);"
+    )
+    assert tabs == [["Abonniert3", "true"], ["Abgemeldet1", "false"]]
+    panel.click('.fy-subtabs [data-v="gone"]', 200)
+    assert panel.js(names, ".fy-gone .fy-sub") == ["Reiseportal"]
+    assert panel.count('[data-widget="fy-subs"] [data-action="fy-unsub"]') == 0  # only the unsubscribed ones
+    panel.click('.fy-subtabs [data-v="on"]', 200)
+    assert "2 Adressen" in panel.text('[data-widget="fy-subs"] .fy-sub')
+    # hiding takes it off the list at once
+    panel.click('[data-widget="fy-subs"] .fy-sub [data-action="fy-dismiss"]', 500)
+    assert "Möbelhaus" not in panel.js(names, '[data-widget="fy-subs"] .fy-sub')
+
+
+def test_after_a_web_page_frieda_asks_whether_it_worked(open_panel) -> None:
+    panel = open_panel("postfach", "tab=foryou&unsubpage=1")
+    panel.js("el._setTab('foryou'); window.open = () => null; await wait(500);")
+    panel.click('[data-widget="fy-subs"] [data-action="fy-unsub"]', 200)
+    panel.click('[data-action="confirm-yes"]', 900)  # "Unsubscribe?"
+    assert panel.text(".modal h3") == "Auf der Seite abgemeldet?"
+    panel.click('[data-action="confirm-yes"]', 900)  # "Yes, unsubscribed"
+    assert panel.text('.fy-subtabs [data-v="gone"] .n') == "2"
+
+
+# ------------------------------------------------------------------ tablets
+@pytest.mark.parametrize("width", [768, 834, 1024])
+def test_ipad_portrait_list_and_mail_side_by_side(browser, site, width: int) -> None:
+    ctx = browser.new_context(viewport={"width": width, "height": 1100}, has_touch=True)
+    page = ctx.new_page()
+    page.goto(f"{site}/postfach.html")
+    page.wait_for_function("document.title === 'ready'", timeout=20000)
+    page.wait_for_timeout(600)
+    got = page.evaluate(
+        """() => { const root = document.querySelector('friedafetch-mail-panel').shadowRoot;
+        const list = root.querySelector('.listpane').getBoundingClientRect();
+        const inside = [...root.querySelectorAll('.lhead *')].filter((n) => n.getClientRects().length).every((n) => n.getBoundingClientRect().right <= list.right + 1);
+        const top = root.querySelector('.reader .rtop'); return { inside, topRows: top ? Math.round(top.getBoundingClientRect().height) : 0,
+          page: document.documentElement.scrollWidth - innerWidth }; }"""
+    )
+    page.goto(f"{site}/postfach.html?tab=rules")
+    page.wait_for_function("document.title === 'ready'", timeout=20000)
+    page.wait_for_timeout(400)
+    rules = page.evaluate(
+        "() => { const c = document.querySelector('friedafetch-mail-panel').shadowRoot.querySelector('[data-widget=\"rules\"] .card'); return c.scrollWidth - c.clientWidth; }"
+    )
+    ctx.close()
+    assert got["inside"], "the list's tools stay in their column"
+    assert got["topRows"] <= 60, "the mail's buttons fit in one row"
+    assert got["page"] <= 1 and rules <= 1

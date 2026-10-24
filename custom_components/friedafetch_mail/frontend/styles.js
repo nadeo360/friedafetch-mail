@@ -763,4 +763,19 @@ export const STYLE = `
     .mlist li.m { padding-top: 12px; padding-bottom: 12px; }
     #pal-list [role="option"] { padding: 12px 10px; }
   }
+
+  /* ---------------------------------------------------------------- subscriptions: the unsubscribed ones fold away */
+  .fy-subtabs { margin: 0 0 10px; }
+  .fy-sub.done { opacity: .78; }
+  .fy-sub .warnline.small { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--frieda-text-warn); --mdc-icon-size: 14px; }
+
+  /* ---------------------------------------------------------------- tablets (iPad portrait): list and mail side by side */
+  @container (max-width: 1000px) {
+    .lhead .lrow { flex-wrap: wrap; }
+    .lhead label.search { order: 3; flex: 1 1 100%; }
+    .rtop .lb { display: none; }  /* the reading pane's buttons as icons (with their names for screen readers) */
+  }
+  @container (max-width: 900px) {
+    .rtable .c-cond { display: none; }  /* the conditions show when a rule is opened */
+  }
 `;

@@ -353,6 +353,65 @@ async def test_subscriptions_and_unsubscribing(hass: HomeAssistant) -> None:
     assert result == {"method": "manual", "url": "https://moebel.example/page"}  # a page for the user to open
 
 
+async def test_newsletters_per_site_hidden_at_once_and_unsubscribed_apart(hass: HomeAssistant) -> None:
+    """shop@ and support@ of one site are one newsletter; hiding it takes it off the list at once; once unsubscribed
+    it stays apart – unless it keeps sending after a few days."""
+    now = dt_util.now()
+    day = lambda n: (now - timedelta(days=n)).isoformat(timespec="seconds")  # noqa: E731
+    mail = MagicMock()
+    mail.async_special_mailbox = AsyncMock(return_value=None)
+    mail.async_search_uids = AsyncMock(return_value=[1, 2, 3, 4])
+    shop = {"from": [{"name": "NUDIENT", "email": "shop@nudient.com"}], "newsletter": True}
+    support = {"from": [{"name": "NUDIENT", "email": "support@nudient.com"}], "newsletter": True}
+    other = {"from": [{"name": "Netflix", "email": "info@account.netflix.com"}], "newsletter": True}
+    mail.async_summaries = AsyncMock(
+        return_value=[
+            {"uid": 1, "seen": False, "date": day(9), "subject": "A", **shop},
+            {"uid": 2, "seen": True, "date": day(5), "subject": "B", **support},
+            {"uid": 3, "seen": True, "date": day(1), "subject": "C", **other},
+            {"uid": 4, "seen": False, "date": day(0.5), "subject": "D", **other},
+        ]
+    )
+    insights = _insights(hass, await _activity(hass, []), mail)
+    await insights.async_load()
+    insights.unsubscribed = {"shop@nudient.com": day(6)}  # marked by an older version: per address
+    subs = {s["site"]: s for s in await insights.async_subscriptions(force=True)}
+    assert set(subs) == {"nudient.com", "netflix.com"}
+    nudient = subs["nudient.com"]
+    assert (nudient["count"], sorted(nudient["senders"]), nudient["sender"]) == (
+        2,
+        ["shop@nudient.com", "support@nudient.com"],
+        "support@nudient.com",  # the newest mail, to unsubscribe with
+    )
+    assert nudient["unsubscribed"] == day(6) and nudient["after"] == 0  # support@ wrote 1 day later: within grace
+
+    # still sending well after unsubscribing: counted, so the panel shows it again
+    insights.unsubscribed = {"netflix.com": day(10)}
+    subs = {s["site"]: s for s in await insights.async_subscriptions(force=True)}
+    assert subs["netflix.com"]["after"] == 2
+
+    # hiding takes it off the list at once, and undo brings it back
+    await insights.async_dismiss("subscription", subs["netflix.com"]["id"])
+    assert [s["site"] for s in insights.subscriptions] == ["nudient.com"]
+    await insights.async_undo(insights._undo["token"])  # noqa: SLF001
+    assert {s["site"] for s in insights.subscriptions} == {"nudient.com", "netflix.com"}
+
+    # hidden before 1.0.38 by the address' id: still hidden
+    from custom_components.friedafetch_mail.insights import _id  # noqa: PLC0415
+
+    insights.dismissed["subscription"] = [_id("sub", "support@nudient.com")]
+    assert [s["site"] for s in await insights.async_subscriptions(force=True)] == ["netflix.com"]
+
+    # unsubscribed on the newsletter's page: only noted
+    insights.dismissed = {}
+    await insights.async_subscriptions(force=True)
+    res = await insights.async_unsubscribe("info@account.netflix.com", read_only=False, allow_send=False, done=True)
+    assert res["method"] == "done"
+    sub = next(s for s in insights.subscriptions if s["site"] == "netflix.com")
+    assert sub["unsubscribed"] and sub["after"] == 0
+    assert "netflix.com" in insights.unsubscribed and "info@account.netflix.com" in insights.unsubscribed
+
+
 # ------------------------------------------------------------------ the week
 async def test_the_week_and_its_review(hass: HomeAssistant) -> None:
     lines = [_line(n, "a@example.com", rules=["CI"] if n == 1 else []) for n in range(1, 4)]

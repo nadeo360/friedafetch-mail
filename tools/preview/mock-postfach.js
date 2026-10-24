@@ -246,8 +246,11 @@ function insights(data, rows) {
       { id: "s1", sender: "versand@shop.example", name: "Shop Versand", folder: "Archive", count: 5, total: 5, subjects: ["Ihre Bestellung ist unterwegs", "Zustellung heute zwischen 10 und 14 Uhr", "Rechnung zu Ihrer Bestellung"] },
     ],
     subscriptions: [
-      { id: "n1", sender: "newsletter@moebel.example", name: "Möbelhaus", count: 9, unread: 9, last: ago(1), mailbox: "INBOX", uid: 911, subject: "Sofa-Wochen", never_opened: true, unsubscribed: null },
-      { id: "n2", sender: "news@gartenmarkt.example", name: "Gartenmarkt", count: 6, unread: 2, last: ago(0.2), mailbox: "INBOX", uid: 912, subject: "Ihr Wochenangebot", never_opened: false, unsubscribed: null },
+      { id: "n1", site: "moebel.example", sender: "newsletter@moebel.example", senders: ["newsletter@moebel.example", "info@moebel.example"], name: "Möbelhaus", count: 9, unread: 9, last: ago(1), mailbox: "INBOX", uid: 911, subject: "Sofa-Wochen", never_opened: true, unsubscribed: null, after: 0 },
+      { id: "n2", site: "gartenmarkt.example", sender: "news@gartenmarkt.example", senders: ["news@gartenmarkt.example"], name: "Gartenmarkt", count: 6, unread: 2, last: ago(0.2), mailbox: "INBOX", uid: 912, subject: "Ihr Wochenangebot", never_opened: false, unsubscribed: null, after: 0 },
+      // unsubscribed: one is quiet now, one keeps sending
+      { id: "n3", site: "reiseportal.example", sender: "deals@reiseportal.example", senders: ["deals@reiseportal.example"], name: "Reiseportal", count: 3, unread: 3, last: ago(9), mailbox: "INBOX", uid: 913, subject: "Last-Minute", never_opened: true, unsubscribed: ago(8), after: 0 },
+      { id: "n4", site: "schuhe.example", sender: "news@schuhe.example", senders: ["news@schuhe.example"], name: "Schuhhaus", count: 5, unread: 4, last: ago(0.5), mailbox: "INBOX", uid: 914, subject: "Neue Kollektion", never_opened: false, unsubscribed: ago(12), after: 2 },
     ],
     subscriptions_checked: ago(0.05),
     parcel_ignored: [],
@@ -643,8 +646,14 @@ export function install({ data, q }) {
     }
     if (m.type === "friedafetch_mail/insights/unsubscribe") {
       await wait(500);
-      const n = fy.subscriptions.find((x) => x.sender === m.sender);
-      if (n) n.unsubscribed = new Date().toISOString();
+      const n = fy.subscriptions.find((x) => x.sender === m.sender || (x.senders || []).includes(m.sender));
+      if (n) Object.assign(n, { unsubscribed: new Date().toISOString(), after: 0 });
+      if (m.done) return { sender: m.sender, method: "done" };
+      // ?unsubpage=1: the newsletter only offers a web page
+      if (q.get("unsubpage")) {
+        if (n) Object.assign(n, { unsubscribed: null });
+        return { method: "manual", url: "https://example.com/abmelden" };
+      }
       return { sender: m.sender, method: "one_click", status: 200 };
     }
     if (m.type === "friedafetch_mail/rules/run") {
