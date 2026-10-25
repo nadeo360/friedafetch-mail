@@ -644,3 +644,82 @@ def test_names_found_across_odd_spaces() -> None:
     found = _names_in(items, "Lieferung\r\n\r\niPhone Duo 512 GB\r\nSternenweiß\r\n")
     assert [i["name"] for i in found] == ["iPhone Duo 512 GB Sternenweiß"]
     assert _names_in(items, "Apple Care is great") == []  # word for word, not letters across words
+
+
+async def test_a_shop_that_never_writes_on_delivery(hass: HomeAssistant) -> None:
+    """Nudient writes when a parcel leaves, never when it arrives: Frieda asks, learns, and then takes it as delivered."""
+    insights = await _insights(hass)
+    now = dt_util.now()
+
+    def shipped(days: float, mid: str, number: str) -> None:
+        text = f"Ihre Bestellung ist auf dem Weg. Sendungsnummer {number}"
+        info = _info(
+            "shop@nudient.example", "Ihre Bestellung ist auf dem Weg", "NUDIENT", text, now - timedelta(days=days), mid
+        )
+        insights._merge_parcel(info, fire=False)  # noqa: SLF001
+
+    shipped(1, "<q1>", "LX700399511DE")
+    [parcel] = insights.parcels()
+    assert parcel["status"] == "in_transit" and parcel["quiet"] is None  # a day on its way is nothing unusual
+
+    shipped(5, "<q2>", "LX700399522DE")
+    quiet = next(p for p in insights.parcels() if p["number"] == "LX700399522DE")
+    assert quiet["status"] == "in_transit" and quiet["quiet"] == 5  # Frieda asks whether it came
+
+    await insights.async_parcel_waiting(quiet["id"])  # "still missing": asked again in three days
+    assert next(p for p in insights.parcels() if p["id"] == quiet["id"])["quiet"] is None
+
+    await insights.async_parcel_arrived(quiet["id"])  # it came after all
+    came = next(p for p in insights.parcels() if p["id"] == quiet["id"])
+    assert came["status"] == "delivered" and came["arrived"] == "you"
+    assert insights.parcel_silent == []  # "still missing" made it not quiet any more: nothing to learn from it
+
+    shipped(6, "<q3>", "LX700399533DE")
+    third = next(p for p in insights.parcels() if p["number"] == "LX700399533DE")
+    await insights.async_parcel_arrived(third["id"])
+    assert insights.parcel_silent == ["nudient.example"]  # a quiet parcel that came: this shop never writes
+    await insights.async_undo(insights._undo["token"])  # noqa: SLF001 - undone: not learned
+    assert insights.parcel_silent == []
+    await insights.async_parcel_arrived(third["id"])
+
+    shipped(5, "<q4>", "LX700399544DE")  # the next quiet one is taken as delivered, without asking
+    fourth = next(p for p in insights.parcels() if p["number"] == "LX700399544DE")
+    assert fourth["status"] == "delivered" and fourth["arrived"] == "assumed" and fourth["quiet"] is None
+    shipped(9, "<q5>", "LX700399555DE")  # taken as delivered more than two days ago: gone from the list
+    assert not any(p["number"] == "LX700399555DE" for p in insights.parcels())
+
+    await insights.async_restore("silent")  # forget it: Frieda asks again
+    assert next(p for p in insights.parcels() if p["id"] == fourth["id"])["quiet"] == 5
+
+
+async def test_a_carrier_is_never_learned_as_silent(hass: HomeAssistant) -> None:
+    insights = await _insights(hass)
+    info = _info(
+        "noreply@dhl.de",
+        "Ihr Paket ist unterwegs",
+        "DHL",
+        "Sendungsnummer 00340434161094000077",
+        dt_util.now() - timedelta(days=5),
+        "<c1>",
+    )
+    insights._merge_parcel(info | {"shop": "Beispielshop"}, fire=False)  # noqa: SLF001
+    [parcel] = insights.parcels()
+    assert parcel["quiet"] == 5
+    await insights.async_parcel_arrived(parcel["id"])
+    assert insights.parcel_silent == []
+
+
+async def test_a_parcel_due_on_a_day_goes_quiet_two_days_after_it(hass: HomeAssistant) -> None:
+    insights = await _insights(hass)
+    now = dt_util.now()
+    insights._merge_parcel(  # noqa: SLF001
+        _info(
+            "versand@shop.example", "Ihre Bestellung ist unterwegs", "Shop", "Mit DPD.", now - timedelta(days=6), "<e1>"
+        )
+        | {"eta": (now - timedelta(days=1)).date().isoformat()},
+        fire=False,
+    )
+    [parcel] = insights.parcels()
+    assert parcel["quiet"] is None  # due yesterday: still in time
+    insights.packages[0]["eta"] = (now - timedelta(days=3)).date().isoformat()
+    assert insights.parcels()[0]["quiet"] == 6

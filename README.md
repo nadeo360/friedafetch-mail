@@ -150,7 +150,11 @@ mail on the right (on phones the mail opens in a sheet over the list that you sw
   Esc.
 - **On the phone** the tabs sit at the bottom within reach of the thumb, the open mail fills the screen and closes
   with the back gesture (or a swipe from the left edge or down), a long press on a mail starts picking it, and pulling
-  the list down loads it again.
+  the list down loads it again. Low phones (such as the outer screen of a folding phone) get a slimmer title, tab bar
+  and list head; the view menu and the search share one row.
+- **Folding phones** (such as the iPhone Duo): opened, list and mail sit side by side from a frame of 560 px; opened
+  and turned, the tabs share the title row. Folding open or shut keeps the open mail – it moves between its own page
+  and the reading pane.
 - **Views** *Unread* and *Flagged* (under *In the mailbox*) list what the mailbox has like that now.
 - **Select** (or Cmd/Ctrl-click, Shift-click for a range) picks mails for **Rate again**: all of a view, a whole day
   (Today, Yesterday, …) or single ones; mails handled by a rule are not for the AI. While the batch runs, every mail
@@ -409,6 +413,12 @@ the mailbox, the activity and the contacts; nothing of it goes to an AI, and not
   read in each (number, order, expected day, the shop it names). If something went wrong you can correct it there:
   *Make it a parcel of its own* takes a mail out, *Belongs to* + *Merge* joins two parcels, *Not a parcel* hides it,
   and *Never parcels from …* ignores the sender's domain from then on (*Undo* next to *No parcels from* in the card).
+  **No news for longer than expected:** some shops write when a parcel leaves, never when it arrives. A parcel on its
+  way with no news for 4 days (2 days after its expected day, or the day after “arrives today”) asks *No news for 6
+  days – has it arrived?* with **Arrived** and **Still missing** (asked again in three days). A quiet parcel you mark
+  as arrived teaches Frieda that its shop never writes on delivery: the next quiet parcel of that shop counts as
+  *probably delivered* by itself, with *Still missing* to call it back; *Ask again* next to *No delivery notice* in the
+  card forgets it. Carriers are never learned like that. *It has arrived* under *Where from?* works for any parcel.
   Every parcel shows how far it got – on its way → today → delivered (or ready for pick-up → picked up) – and one that
   arrives today with a time window shows the window on the day with a mark for now.
 - **Important senders** – contact groups (or every contact) and addresses or domains you name. Their mail is never lost

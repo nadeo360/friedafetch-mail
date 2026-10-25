@@ -122,6 +122,8 @@ const store = {
   },
 };
 const isoDay = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; // a local day, as the backend counts them
+const FOLD_WIDTH = 560; // px of the list's frame from which list and mail sit side by side (a folding phone opened)
+const SHORT_WIDE = "(max-height: 700px) and (min-width: 761px)"; // the tabs move into the title row
 const SWIPE_AT = 80; // px a mail in the list is swiped before it acts
 const ASSIST_ROUNDS = 5; // rounds of the category assistant, then the proposal is edited by hand
 const initials = (name) =>
@@ -250,6 +252,9 @@ class FriedaPostfachPanel extends HTMLElement {
       if (this._s.sheet && !this._s.sheet.inline) this._closeTimeline();
     };
     window.addEventListener("popstate", this._onPop);
+    this._layoutNow = null;
+    this._resizeObs = window.ResizeObserver ? new ResizeObserver(() => requestAnimationFrame(() => this._onResize())) : null;
+    this._resizeObs?.observe(this);
     this._subscribe();
     this._openLinked(); // the panel may come back from Home Assistant's cache with a new link
   }
@@ -262,6 +267,7 @@ class FriedaPostfachPanel extends HTMLElement {
     this.removeEventListener("keydown", this._onKeyStop);
     window.removeEventListener("keydown", this._onWinKey);
     window.removeEventListener("popstate", this._onPop);
+    this._resizeObs?.disconnect();
     clearTimeout(this._liveTimer);
     clearTimeout(this._retryTimer);
     document.removeEventListener("visibilitychange", this._onVisible);
@@ -2677,10 +2683,40 @@ class FriedaPostfachPanel extends HTMLElement {
     this._render();
   }
 
-  // Phones and narrow windows have no reading pane: a mail opens in the sheet over the list.
+  // Phones and narrow windows have no reading pane: a mail opens in the sheet over the list. From 560px (a folding
+  // phone opened, a small window) list and mail sit side by side.
   _actNarrow() {
     const w = this.shadowRoot.querySelector(".mcwrap")?.clientWidth || this.clientWidth || window.innerWidth;
-    return w <= 720;
+    return w < FOLD_WIDTH;
+  }
+
+  // Wide but low (a folding phone opened and turned, a phone in landscape): the tabs move into the title row.
+  _shortWide() {
+    return !!window.matchMedia?.(SHORT_WIDE).matches;
+  }
+
+  // Folding a phone open or shut (or turning it): the open mail moves between its page and the reading pane, and
+  // an opened screen shows a mail beside the list at once.
+  _onResize() {
+    const narrow = this._actNarrow();
+    const short = this._shortWide();
+    const was = this._layoutNow;
+    this._layoutNow = { narrow, short };
+    if (!was || (was.narrow === narrow && was.short === short)) return;
+    const s = this._s;
+    const sheet = s.sheet;
+    if (was.narrow !== narrow && (s.tab || this._layout.opt("tabs", "current", "activity")) === "activity" && !s.act.picking) {
+      if (sheet && s.act.open && !narrow && !sheet.inline) {
+        sheet.inline = true;
+        this._sheetBack = false; // its step in the history stays; going back over it changes nothing
+      } else if (sheet && s.act.open && narrow && sheet.inline) {
+        sheet.inline = false;
+      } else if (!narrow && !sheet && s.act.items?.[0]) {
+        this._actOpen(s.act.items[0].key);
+        return;
+      }
+    }
+    this._render();
   }
 
   async _actView(view) {
@@ -3652,8 +3688,8 @@ class FriedaPostfachPanel extends HTMLElement {
         const who = [p.carrier, p.number].filter(Boolean).join(" · ");
         const warn = p.status === "problem" || p.status === "out_for_delivery" || p.status === "pickup";
         return `<div class="ai-cat fy-row"><span class="fy-ic ${warn ? "warn" : ""}">${ico(icons[p.status] || "package-variant-closed")}</span>
-          <span class="tx"><strong>${esc(p.shop || p.carrier || p.subject || "–")}</strong><span>${esc(t.fyParcel[p.status] || p.status)}${when ? ` · ${esc(when)}` : ""}</span>
-            <span class="muted">${esc(who || p.subject || "")}</span>${this._parcelItems(p)}${this._parcelSteps(p)}</span>
+          <span class="tx"><strong>${esc(p.shop || p.carrier || p.subject || "–")}</strong><span>${esc(p.arrived === "assumed" ? t.fyAssumed : t.fyParcel[p.status] || p.status)}${when ? ` · ${esc(when)}` : ""}</span>
+            <span class="muted">${esc(who || p.subject || "")}</span>${this._parcelItems(p)}${this._parcelSteps(p)}${this._parcelQuiet(p)}</span>
           ${p.url ? `<button class="secondary small ib" data-action="fy-track" data-url="${esc(p.url)}">${ico(p.link === "shop" ? "shopping-outline" : "open-in-new")}${esc(p.link === "shop" ? t.fyOrderPage : t.fyTrack)}</button>` : ""}
           <button class="icon" data-action="fy-parcel-open" data-id="${esc(p.id)}" aria-expanded="${this._s.fyParcel === p.id}" aria-label="${esc(t.fyWhere)}: ${esc(p.shop || p.carrier || "")}">${ico(this._s.fyParcel === p.id ? "chevron-up" : "information-outline")}</button>
           <button class="icon" data-action="fy-dismiss" data-kind="package" data-id="${esc(p.id)}" aria-label="${esc(t.fyHide)}: ${esc(p.shop || p.carrier || "")}">${ico("close")}</button></div>
@@ -3664,9 +3700,28 @@ class FriedaPostfachPanel extends HTMLElement {
     const ignored = (fy.parcel_ignored || []).length
       ? `<div class="subbar"><span class="muted">${esc(fmt(t.fyIgnored, fy.parcel_ignored.join(", ")))}</span><button class="link" data-action="fy-restore" data-kind="parcel">${esc(t.fyIgnoredUndo)}</button></div>`
       : "";
+    const silent = (fy.parcel_silent || []).length
+      ? `<div class="subbar"><span class="muted">${esc(fmt(t.fySilent, fy.parcel_silent.join(", ")))}</span><button class="link" data-action="fy-restore" data-kind="silent">${esc(t.fySilentUndo)}</button></div>`
+      : "";
     return `<div class="card"><div class="chead"><h2>${esc(t.fyParcels)}</h2>${open ? `<span class="badge">${open}</span>` : ""}</div>
       <p class="muted" style="margin:-4px 0 10px">${esc(t.fyParcelsHint)}</p>
-      ${this._parcelWeek(fy)}<div class="ai-cats">${rows || this._empty(t.emptyAllDone)}</div>${ignored}</div>`;
+      ${this._parcelWeek(fy)}<div class="ai-cats">${rows || this._empty(t.emptyAllDone)}</div>${ignored}${silent}</div>`;
+  }
+
+  // No news for longer than expected: some shops never write when a parcel arrived. Frieda asks (and learns the shop);
+  // one taken as delivered can be called back with "Still missing".
+  _parcelQuiet(p) {
+    const t = this.t;
+    const busy = this._s.busy ? "disabled" : "";
+    if (p.arrived === "assumed") {
+      const shop = p.shop || (p.senders || [])[0] || "";
+      return `<span class="fy-quiet assumed">${ico("check-circle-outline")}<span>${esc(fmt(t.fyAssumedHint, shop))}</span>
+        <button class="link small" data-action="fy-parcel-waiting" data-id="${esc(p.id)}" ${busy}>${esc(t.fyStillMissing)}</button></span>`;
+    }
+    if (!p.quiet) return "";
+    return `<span class="fy-quiet">${ico("help-circle-outline")}<span>${esc(p.quiet === 1 ? t.fyQuietOne : fmt(t.fyQuiet, p.quiet))}</span>
+      <span class="fy-quiet-acts"><button class="secondary small" data-action="fy-parcel-arrived" data-id="${esc(p.id)}" ${busy}>${esc(t.fyArrived)}</button>
+      <button class="link small" data-action="fy-parcel-waiting" data-id="${esc(p.id)}" ${busy}>${esc(t.fyStillMissing)}</button></span></span>`;
   }
 
   // What is in a parcel: from its shipping mails, or (until one comes) the order's items
@@ -3743,7 +3798,7 @@ class FriedaPostfachPanel extends HTMLElement {
           ${p.items_more ? `<p class="muted">${esc(fmt(t.fyItemsMore, p.items_more))}</p>` : ""}${p.items_from === "order" ? `<p class="muted">${esc(t.fyItemsOrderHint)}</p>` : ""}</div>`
       : "";
     return `<div class="fy-where">${contents}<p class="muted">${esc(t.fyWhereHint)}</p><ul class="thread">${sources}</ul>${merge}
-      <div class="actionsbar"><button class="secondary small" data-action="fy-parcel-ignore" data-id="${esc(p.id)}">${esc(t.fyNoParcel)}</button>
+      <div class="actionsbar">${p.status === "in_transit" || p.status === "out_for_delivery" || p.status === "pickup" || p.status === "problem" ? `<button class="secondary small" data-action="fy-parcel-arrived" data-id="${esc(p.id)}">${esc(t.fyMarkArrived)}</button>` : ""}<button class="secondary small" data-action="fy-parcel-ignore" data-id="${esc(p.id)}">${esc(t.fyNoParcel)}</button>
         ${senders ? `<button class="secondary small danger" data-action="fy-parcel-ignore" data-id="${esc(p.id)}" data-sender="1" data-who="${esc(senders)}">${esc(fmt(t.fyNeverFrom, senders))}</button>` : ""}</div></div>`;
   }
 
@@ -4043,11 +4098,14 @@ class FriedaPostfachPanel extends HTMLElement {
       ${s.notice ? `<div class="ok" data-announce>${esc(s.notice)}</div>` : ""}
       ${this._renderAccounts()}
       ${main}`;
+    const tabsHtml = ready && tabbed ? W.renderTabs(tabs, tab, t.tabsLabel) : "";
+    const inbar = !!tabsHtml && this._shortWide();
+    this.classList.toggle("short", inbar);
     W.mount(
       this.shadowRoot,
       `<style>${W.UI_STYLE}${STYLE}</style>
-      <div class="toolbar"><ha-menu-button></ha-menu-button><img src="${esc(ICON_URL)}" alt=""><span>${esc(t.title)}</span><span class="grow"></span>${ready ? `<button class="icon tb-hist" data-action="hist-open" aria-label="${esc(t.hiTitle)}">${ico("history")}</button>` : ""}</div>
-      ${ready && tabbed ? W.renderTabs(tabs, tab, t.tabsLabel) : ""}
+      <div class="toolbar"><ha-menu-button></ha-menu-button><img src="${esc(ICON_URL)}" alt="">${inbar ? tabsHtml.replace('class="tabsbar"', 'class="tabsbar inbar"') : `<span>${esc(t.title)}</span><span class="grow"></span>`}${ready ? `<button class="icon tb-hist" data-action="hist-open" aria-label="${esc(t.hiTitle)}">${ico("history")}</button>` : ""}</div>
+      ${inbar ? "" : tabsHtml}
       <div class="content widgets" ${ready && tabbed ? `role="tabpanel" id="tabpanel" aria-labelledby="tab-${tab}"` : ""}>${body}</div>${this._renderSheet()}${this._renderSender()}${this._renderConfirm()}${this._renderKeys()}${this._renderQc()}${this._renderHist()}${this._renderAssist()}`
     );
     // a short glide where something new comes in: another tab, another mail in the reading pane
@@ -4226,6 +4284,8 @@ class FriedaPostfachPanel extends HTMLElement {
           const text = sender ? fmt(this.t.fyDone_never, el.dataset.who) : this.t.fyDone_ignore;
           await this._fyCall({ type: "friedafetch_mail/insights/parcel", action: "ignore", parcel_id: el.dataset.id, sender }, null, text);
         },
+        "fy-parcel-arrived": () => this._fyCall({ type: "friedafetch_mail/insights/parcel", action: "arrived", parcel_id: el.dataset.id }, null, this.t.fyDone_arrived),
+        "fy-parcel-waiting": () => this._fyCall({ type: "friedafetch_mail/insights/parcel", action: "waiting", parcel_id: el.dataset.id }, null, this.t.fyDone_waiting),
         "fy-track": () => window.open(el.dataset.url, "_blank", "noopener,noreferrer"),
         // a new rule for mails like this one: the sender as its condition, to be changed in the editor
         "rule-from-mail": () => {

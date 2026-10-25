@@ -289,7 +289,7 @@ def test_parcels_show_what_is_in_them(open_panel) -> None:
     assert by["eBay"]["items"] == "Schweberegal Wandregal Esche Whiskey +2 weitere"
     assert by["Amazon.de"]["ordered"] and by["Amazon.de"]["step"] == "Fortschritt: Bestellt"
     assert by["Gartenmarkt"]["items"] is None  # nothing known: nothing shown
-    assert panel.text('[data-widget="fy-parcels"] .chead .badge') == "3"  # ordered is not on its way yet
+    assert panel.text('[data-widget="fy-parcels"] .chead .badge') == "4"  # ordered and assumed delivered are not on their way
     # "Where from?": the contents with quantity and price, and which mail listed them
     panel.js(
         'root.querySelectorAll(\'[data-widget="fy-parcels"] [data-action="fy-parcel-open"]\')[0].click(); await wait(300);'

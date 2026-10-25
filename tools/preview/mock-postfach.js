@@ -208,7 +208,7 @@ function derive(data, rows) {
     k3: [src("<k3a@example>", "Ihr Paket wurde zugestellt", 36, "delivered", { number: "01234567890123" })],
     k4: [src("<k4a@example>", "Ihre Bestellung ist unterwegs", 48, "in_transit", { order: "12-34567-89012" })],
   };
-  const senders = { k1: ["dhl.de", "shop.example"], k2: ["myhermes.de"], k3: ["dpd.de"], k4: ["ebay.com"], k5: ["amazon.de"] };
+  const senders = { k1: ["dhl.de", "shop.example"], k2: ["myhermes.de"], k3: ["dpd.de"], k4: ["ebay.com"], k5: ["amazon.de"], k6: ["huellen.example"], k7: ["tee.example"] };
   // what is in them: from the shipping mail (k1, k4), or as ordered (k5)
   const item = (name, qty = 1, price = null) => ({ name, qty, price });
   const contents = {
@@ -218,11 +218,15 @@ function derive(data, rows) {
     k4: [[item("Schweberegal Wandregal Esche Whiskey")], 2, "parcel"],
     k5: [[item("Kabelmarkierungen 1,5 mm², 300 Stück", 1, "9.99 EUR"), item("Kabelkennzeichnung 0-9 (100Pcs 2.5mm²)", 2, "6.53 EUR")], 0, "order"],
   };
+  sources.k6 = [src("<k6a@example>", "Ihre Bestellung ist auf dem Weg", 60 * 24 * 6, "in_transit", { number: "LX700399511DE", order: "1195235" })];
+  sources.k7 = [src("<k7a@example>", "Ihr Tee ist unterwegs", 60 * 24 * 5, "in_transit", { number: "LX700399522DE", order: "88231" })];
+  contents.k6 = [[item("Slice Case – Ink Black", 1, "29,95 €")], 0, "order"];
+  contents.k7 = [[item("Grüner Tee Sencha, 250 g", 2, "12,50 €")], 0, "parcel"];
   sources.k5 = [src("<k5a@example>", "Bestellt: „Kabelmarkierungen…“ und 1 weiterer Artikel", 60 * 7, "ordered", { order: "304-1111111-2222222" })];
   for (const parcel of data["friedafetch_mail/insights"].parcels) {
     const [items, more, from] = contents[parcel.id] || [[], 0, null];
     const own = (sources[parcel.id] || []).map((x) => ({ ...x, items: x.status === "ordered" || x === sources[parcel.id].at(-1) ? items.map((i) => i.name) : [] }));
-    Object.assign(parcel, { sources: own, senders: senders[parcel.id], items, items_more: more, items_from: from });
+    Object.assign(parcel, { sources: own, senders: senders[parcel.id], items, items_more: more, items_from: from, quiet: parcel.quiet ?? null, arrived: parcel.arrived ?? null });
   }
 }
 
@@ -253,6 +257,10 @@ function insights(data, rows) {
       { id: "k4", carrier: null, number: null, url: "https://www.ebay.de/mye/myebay/purchase", shop: "eBay", order: "12-34567-89012", status: "in_transit", eta: day(2), window: null, subject: "Ihre Bestellung ist unterwegs", updated: ago(0.8), link: "shop" },
       // only ordered so far: the order's items, the parcel comes later
       { id: "k5", carrier: null, number: null, url: "https://www.amazon.de/gp/your-account/order-details?orderID=304-1111111-2222222", shop: "Amazon.de", order: "304-1111111-2222222", status: "ordered", eta: day(4), window: null, subject: "Bestellt: „Kabelmarkierungen…“ und 1 weiterer Artikel", updated: ago(0.3), link: "shop" },
+      // no news for six days: the shop writes when a parcel leaves, never when it arrives – Frieda asks
+      { id: "k6", carrier: "DHL", number: "LX700399511DE", url: "https://www.dhl.de/de/privatkunden/pakete-empfangen/verfolgen.html?piececode=LX700399511DE", shop: "Hüllenladen", order: "1195235", status: "in_transit", eta: null, window: null, subject: "Ihre Bestellung ist auf dem Weg", updated: ago(6), link: "carrier", quiet: 6 },
+      // from a shop the user confirmed once: taken as delivered
+      { id: "k7", carrier: "DHL", number: "LX700399522DE", url: "https://www.dhl.de/de/privatkunden/pakete-empfangen/verfolgen.html?piececode=LX700399522DE", shop: "Teeversand", order: "88231", status: "delivered", eta: null, window: null, subject: "Ihr Tee ist unterwegs", updated: ago(5), link: "carrier", arrived: "assumed" },
     ],
     proposals: [
       { id: "p1", status: "open", created: ago(0.1), rating_id: "r0", message_id: "<test-frieda@example>", subject: "Kurze Frage zu Samstag", from: "Erika Mustermann", kind: "appointment", title: "Grillen bei Erika", start: day(3, "18:00"), end: day(3, "22:00"), all_day: false, location: "Gartenweg 5" },
@@ -276,6 +284,7 @@ function insights(data, rows) {
     ],
     subscriptions_checked: ago(0.05),
     parcel_ignored: [],
+    parcel_silent: ["tee.example"],
     vip: { groups: ["Familie"], senders: 1, known: 4, notify: true },
     weekly_day: "sun",
     events_calendar: null,
@@ -625,7 +634,7 @@ export function install({ data, q }) {
       return { cleared: true };
     }
     const fy = data["friedafetch_mail/insights"];
-    const UNDOABLE = ["parcels", "proposals", "followups", "suggestions", "subscriptions", "dismissed", "parcel_ignored", "week"];
+    const UNDOABLE = ["parcels", "proposals", "followups", "suggestions", "subscriptions", "dismissed", "parcel_ignored", "parcel_silent", "week"];
     const remember = (before) => {
       fy.undo = `u${Date.now().toString(36)}`;
       fyUndo = { token: fy.undo, before };
@@ -654,6 +663,11 @@ export function install({ data, q }) {
     }
     if (m.type === "friedafetch_mail/insights/restore") {
       if (m.kind === "parcel") fy.parcel_ignored = [];
+      if (m.kind === "silent") {
+        // like the backend: parcels of those shops that went quiet are asked about again
+        for (const p of fy.parcels) if (p.arrived === "assumed") Object.assign(p, { status: "in_transit", arrived: null, quiet: Math.max(1, Math.round((Date.now() - new Date(p.updated)) / 86400000)) });
+        fy.parcel_silent = [];
+      }
       delete fy.dismissed[m.kind];
       return fy;
     }
@@ -672,6 +686,12 @@ export function install({ data, q }) {
         const moving = parcel.sources.filter((x) => x.message_id === m.message_id);
         parcel.sources = parcel.sources.filter((x) => x.message_id !== m.message_id);
         fy.parcels.push({ ...parcel, id: `split-${m.message_id}`, sources: moving, status: moving[0].status, number: moving[0].number, subject: moving[0].subject });
+      } else if (parcel && m.action === "arrived") {
+        const shop = parcel.senders.find((d) => !/(^|\.)(dhl\.de|dhl\.com|dpd\.de|myhermes\.de|ups\.com)$/.test(d));
+        if (parcel.quiet && shop && !fy.parcel_silent.includes(shop)) fy.parcel_silent.push(shop);
+        Object.assign(parcel, { status: "delivered", arrived: "you", quiet: null, window: null, updated: new Date().toISOString() });
+      } else if (parcel && m.action === "waiting") {
+        Object.assign(parcel, { status: "in_transit", arrived: null, quiet: null });
       } else if (parcel && m.action === "ignore") {
         if (m.sender) fy.parcel_ignored.push(...parcel.senders.filter((d) => !fy.parcel_ignored.includes(d)));
         fy.parcels = fy.parcels.filter((x) => x !== parcel);

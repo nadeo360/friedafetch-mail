@@ -159,7 +159,11 @@ die gewählte Mail (auf dem Handy öffnet sich die Mail in einem Blatt über der
   Pfeiltasten, Enter, Esc.
 - **Auf dem Handy** liegen die Tabs unten in Daumennähe, die geöffnete Mail füllt den Bildschirm und schließt mit der
   Zurück-Geste (oder einem Wischen vom linken Rand oder nach unten), langes Drücken auf eine Mail beginnt das Auswählen,
-  und die Liste lädt neu, wenn du sie nach unten ziehst.
+  und die Liste lädt neu, wenn du sie nach unten ziehst. Niedrige Handys (etwa der Außenbildschirm eines Falt-Handys)
+  bekommen eine schmalere Titelzeile, Tab-Leiste und Listenkopf; Ansichtsmenü und Suche teilen sich eine Zeile.
+- **Falt-Handys** (etwa das iPhone Duo): Aufgeklappt stehen Liste und Mail ab einem Rahmen von 560 px nebeneinander;
+  aufgeklappt und gedreht teilen sich die Tabs die Titelzeile. Beim Auf- und Zuklappen bleibt die geöffnete Mail offen
+  – sie wechselt zwischen eigener Seite und Lesebereich.
 - **Ansichten** *Ungelesen* und *Markiert* (unter *Im Postfach*) zeigen, was das Postfach gerade so hat.
 - **Auswählen** (oder ⌘/Strg-Klick, ⇧-Klick für einen Bereich) wählt Mails für **Neu bewerten**: alle einer Ansicht,
   einen ganzen Tag (Heute, Gestern, …) oder einzelne; Mails, die eine Regel erledigt hat, sind nicht für die KI.
@@ -439,6 +443,13 @@ Aktivität und den Kontakten ermittelt; davon geht nichts an eine KI, und ohne d
   korrigierst du es dort: *Als eigenes Paket* nimmt eine Mail heraus, *Gehört zu* + *Zusammenführen* vereint zwei
   Pakete, *Kein Paket* blendet es aus, und *Nie Pakete von …* übergeht die Domain des Absenders ab dann
   (*Zurücknehmen* neben *Keine Pakete von* in der Karte).
+  **Länger keine Neuigkeit:** Manche Shops schreiben, wenn ein Paket losgeht, aber nie, wenn es ankommt. Ein Paket
+  unterwegs ohne Neuigkeit seit 4 Tagen (2 Tage nach seinem voraussichtlichen Tag oder am Tag nach „kommt heute“) fragt
+  *Seit 6 Tagen keine Neuigkeit – angekommen?* mit **Angekommen** und **Fehlt noch** (dann fragt Frieda in drei Tagen
+  wieder). Markierst du ein solches Paket als angekommen, lernt Frieda, dass sein Shop keine Zustellung meldet: Das
+  nächste stille Paket dieses Shops gilt von selbst als *wohl zugestellt*, mit *Fehlt noch* zum Zurückholen;
+  *Wieder nachfragen* neben *Ohne Zustellmeldung* in der Karte vergisst es. Paketdienste lernt Frieda so nie.
+  *Ist angekommen* unter *Woher?* geht bei jedem Paket.
   Jedes Paket zeigt, wie weit es ist – unterwegs → heute → zugestellt (oder abholbereit → abgeholt) –, und eines, das
   heute mit Zeitfenster kommt, zeigt das Fenster auf dem Tag mit einer Marke für jetzt.
 - **Wichtige Absender** – Kontaktgruppen (oder alle Kontakte) und Adressen oder Domains, die du nennst. Ihre Mails gehen

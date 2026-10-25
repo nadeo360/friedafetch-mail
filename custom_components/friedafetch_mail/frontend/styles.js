@@ -525,8 +525,20 @@ export const STYLE = `
     .lhead .narrow-menu { display: inline-flex; align-items: center; }
     .lstatus { display: flex; }
   }
+  /* a folding phone opened (and small windows): list and mail side by side, the list a little narrower */
+  @container (min-width: 560px) and (max-width: 720px) {
+    .mc { grid-template-columns: minmax(0, 42%) minmax(0, 1fr); }
+    .reader .rhead h2 { font-size: 19px; }
+    .mlist li.m { padding-left: 12px; padding-right: 10px; }
+    .lhead select.boxsel { flex: 1 1 0; }
+    .lhead .pickbtn span { display: none; }
+    .lstatus .st:not(.qc-open) { display: none; }  /* how mail arrives is shown in Rules too */
+    .rtop { flex-wrap: nowrap; gap: 4px; padding: 8px 10px; }
+    .rtop .macts { flex-wrap: nowrap; }
+    .rtop button, .rtop .macts .mact { min-width: 36px; padding-inline: 7px; }
+  }
   /* phone: the list; a mail opens in the sheet over it */
-  @container (max-width: 720px) {
+  @container (max-width: 559px) {
     .mc { display: block; height: auto; overflow: visible; }
     .listpane { border-right: 0; }
     .reader { display: none; }
@@ -633,6 +645,13 @@ export const STYLE = `
   /* ---------------------------------------------------------------- parcels: steps and today's window */
   .pstep { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-top: 6px; max-width: 420px; }
   .fy-items { display: flex; align-items: flex-start; gap: 5px; margin-top: 3px; font-size: 13px; color: var(--primary-text-color); --mdc-icon-size: 15px; }
+  /* a parcel without news: the question whether it came, and the answer right there */
+  .fy-quiet { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; margin-top: 8px; padding: 8px 10px; border-radius: 10px; font-size: 13px; background: color-mix(in srgb, var(--warning-color, #ffa600) 10%, transparent); color: var(--primary-text-color); --mdc-icon-size: 16px; }
+  .fy-quiet > ha-icon { color: var(--frieda-text-warn); }
+  .fy-quiet > span:not(.fy-quiet-acts) { flex: 1 1 180px; }
+  .fy-quiet-acts { display: inline-flex; align-items: center; gap: 8px; }
+  .fy-quiet.assumed { background: color-mix(in srgb, var(--success-color, #43a047) 9%, transparent); }
+  .fy-quiet.assumed > ha-icon { color: var(--frieda-text-ok); }
   .fy-items ha-icon { flex: none; margin-top: 1px; color: var(--secondary-text-color); }
   .fy-items span { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .fy-items.ordered { color: var(--secondary-text-color); }
@@ -904,4 +923,27 @@ export const STYLE = `
   :host(.dense) .fy-tile { padding: 6px 10px; }
   :host(.dense) table.dtable tbody td { padding-top: 4px; padding-bottom: 4px; }
   :host(.dense) ol.daytl li .dx { padding-top: 3px; padding-bottom: 3px; }
+
+  /* ---------------------------------------------------------------- low screens */
+  /* wide but low (a folding phone opened and turned, a phone in landscape): one row for title and tabs, the rest for mail */
+  :host(.short) .toolbar { height: 48px; gap: 8px; }
+  :host(.short) .toolbar .tabsbar.inbar { flex: 1 1 0; min-width: 0; align-self: stretch; align-items: stretch; padding: 0; background: transparent; border-bottom: 0; }
+  :host(.short) .toolbar .tabsbar.inbar button[role="tab"] { padding: 0 12px; font-size: 14px; }
+  :host(.short) .content { padding-top: 10px; }
+  :host(.short) .mc { height: max(320px, calc(100vh - 84px)); }
+  /* phones with little height (the outer screen of a folding phone, small phones): a slimmer title, tabs and list head */
+  @media (max-width: 600px) and (max-height: 760px) {
+    .toolbar { height: 46px; font-size: 17px; }
+    .toolbar img { width: 24px; height: 24px; }
+    .tabsbar button[role="tab"] { min-height: 46px; padding: 4px 2px; font-size: 10.5px; --mdc-icon-size: 20px; }
+    .content.widgets { padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px)); }
+    .undobar { bottom: calc(64px + env(safe-area-inset-bottom, 0px)); }
+    .lhead { gap: 6px; padding: 10px 10px 8px; }
+    .lhead .lrow { flex-wrap: nowrap; }
+    .lhead select.boxsel { flex: 0 1 44%; }
+    .lhead label.search { order: 0; flex: 1 1 0; min-width: 0; }
+    .lhead .pickbtn span { display: none; }
+    .vchips { display: none; }  /* the view menu has them all */
+    .lstatus .st:not(.qc-open) { display: none; }  /* how mail arrives is shown in Rules too */
+  }
 `;

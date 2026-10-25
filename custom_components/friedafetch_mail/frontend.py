@@ -1092,7 +1092,7 @@ async def ws_insights_dismiss(
     {
         vol.Required("type"): f"{DOMAIN}/insights/restore",
         vol.Optional("entry_id"): str,
-        vol.Required("kind"): vol.In((*INSIGHT_KINDS[:3], "parcel")),
+        vol.Required("kind"): vol.In((*INSIGHT_KINDS[:3], "parcel", "silent")),
     }
 )
 @websocket_api.require_admin
@@ -1220,7 +1220,7 @@ async def ws_insights_unsubscribe(
         vol.Required("type"): f"{DOMAIN}/insights/parcel",
         vol.Optional("entry_id"): str,
         vol.Required("parcel_id"): vol.All(str, vol.Length(min=1, max=40)),
-        vol.Required("action"): vol.In(("merge", "split", "ignore")),
+        vol.Required("action"): vol.In(("merge", "split", "ignore", "arrived", "waiting")),
         vol.Optional("into"): vol.All(str, vol.Length(min=1, max=40)),
         vol.Optional("message_id"): vol.All(str, vol.Length(min=1, max=300)),
         vol.Optional("sender", default=False): bool,
@@ -1232,7 +1232,8 @@ async def ws_insights_unsubscribe(
 async def ws_insights_parcel(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
-    """A parcel corrected by hand: merged into another, a mail split off, or not a parcel (also never from a sender)."""
+    """A parcel corrected by hand: merged into another, a mail split off, not a parcel (also never from a sender), or
+    arrived / still missing (for shops that never write on delivery)."""
     insights = _insights(hass, msg.get("entry_id"))
     if msg["action"] == "merge":
         if not msg.get("into"):
@@ -1242,6 +1243,10 @@ async def ws_insights_parcel(
         if not msg.get("message_id"):
             raise ActionError("Which mail should be split off?")
         await insights.async_parcel_split(msg["parcel_id"], msg["message_id"])
+    elif msg["action"] == "arrived":
+        await insights.async_parcel_arrived(msg["parcel_id"])
+    elif msg["action"] == "waiting":
+        await insights.async_parcel_waiting(msg["parcel_id"])
     else:
         await insights.async_parcel_ignore(msg["parcel_id"], sender=msg["sender"])
     connection.send_result(msg["id"], await insights.async_get())

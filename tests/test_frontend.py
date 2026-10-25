@@ -112,3 +112,16 @@ async def test_websocket_requires_admin(hass: HomeAssistant, hass_ws_client, has
     await ws.send_json({"id": 1, "type": "friedafetch_mail/rules/list"})
     msg = await ws.receive_json()
     assert msg["success"] is False and msg["error"]["code"] == "unauthorized"
+
+
+def test_panel_texts_have_no_key_twice_and_both_languages_the_same_keys() -> None:
+    """A key written twice silently replaces the first text (a new "fyWaiting" once renamed a tile of "Your week")."""
+    import re  # noqa: PLC0415
+    from pathlib import Path  # noqa: PLC0415
+
+    source = (Path(__file__).parent.parent / "custom_components/friedafetch_mail/frontend/i18n.js").read_text()
+    de, en = re.split(r"\n  en: \{", source.split("\n  de: {", 1)[1], maxsplit=1)
+    keys = {lang: re.findall(r"^    ([A-Za-z_0-9]+):", block, re.M) for lang, block in (("de", de), ("en", en))}
+    for lang, found in keys.items():
+        assert not sorted({k for k in found if found.count(k) > 1}), lang
+    assert set(keys["de"]) == set(keys["en"])

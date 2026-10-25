@@ -323,8 +323,10 @@
   "parcel_ignored": [
    "str"
   ],
+  "parcel_silent": [],
   "parcels": [
    {
+    "arrived": "null",
     "carrier": "null|str",
     "eta": "null|str",
     "id": "str",
@@ -340,6 +342,7 @@
     "link": "str",
     "number": "null|str",
     "order": "null|str",
+    "quiet": "null",
     "senders": [
      "str"
     ],
@@ -499,8 +502,10 @@
   "parcel_ignored": [
    "str"
   ],
+  "parcel_silent": [],
   "parcels": [
    {
+    "arrived": "null",
     "carrier": "null|str",
     "eta": "null|str",
     "id": "str",
@@ -516,6 +521,7 @@
     "link": "str",
     "number": "null|str",
     "order": "null|str",
+    "quiet": "null",
     "senders": [
      "str"
     ],
@@ -645,8 +651,10 @@
   "parcel_ignored": [
    "str"
   ],
+  "parcel_silent": [],
   "parcels": [
    {
+    "arrived": "null",
     "carrier": "null|str",
     "eta": "null|str",
     "id": "str",
@@ -662,6 +670,7 @@
     "link": "str",
     "number": "null|str",
     "order": "null|str",
+    "quiet": "null",
     "senders": [
      "str"
     ],

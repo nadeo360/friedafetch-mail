@@ -57,7 +57,7 @@ _LOGGER = logging.getLogger(__name__)
 STORAGE_VERSION = 1
 TREND_WEEKS = 8  # points of the trend lines in "Your week": the weeks before and these seven days
 KEEP_WEEKS = 12  # completed weeks kept (the activity itself keeps 30 days)
-UNDO_FIELDS = ("packages", "proposals", "followups", "subscriptions", "dismissed", "parcel_ignored")
+UNDO_FIELDS = ("packages", "proposals", "followups", "subscriptions", "dismissed", "parcel_ignored", "parcel_silent")
 UNSUB_GRACE = timedelta(days=3)  # a sender may still send for a few days after unsubscribing
 SECOND_LEVEL = {
     "co.uk",
@@ -84,6 +84,12 @@ VIP_EVERY = 6 * 3600  # the contact groups are read again after this
 MAX_DISMISSED = 300
 PACKAGE_DAYS = 21  # shipping mails of these days are read; a parcel without news for so long is forgotten
 PACKAGE_DELIVERED_DAYS = 2  # a delivered parcel stays on the list this long
+# Some shops (and carriers without an account) write when a parcel leaves, never when it arrives. A parcel on its way
+# goes quiet when nothing came for so long: 4 days without an expected day, 2 days after the day it was due, the day
+# after "arrives today". Frieda then asks; for a shop the user confirmed once, it takes the parcel as delivered.
+PACKAGE_QUIET_DAYS = 4
+PACKAGE_QUIET_AFTER_ETA = 2
+PACKAGE_WAIT_DAYS = 3  # "still missing": asked again after these days
 PACKAGE_READS = 40  # shipping mails read per look (each once)
 MAX_PARSED = 1000
 SOURCE_FIELDS = (
@@ -213,6 +219,7 @@ class Insights:
         self.packages: list[dict[str, Any]] = []
         self.parsed: list[str] = []  # Message-IDs of shipping mails read already (each is read once)
         self.parcel_ignored: list[str] = []  # sender domains the user said send no parcels
+        self.parcel_silent: list[str] = []  # shop domains that never write when a parcel arrived
         self.weeks: dict[str, dict[str, Any]] = {}  # ISO week -> its numbers (for the trend lines)
         self._undo: dict[str, Any] | None = None  # the last dismissal or parcel correction, for "Undo" (memory only)
         self._last_uid: int | None = None
@@ -237,6 +244,7 @@ class Insights:
         self.packages = list(data.get("packages") or [])
         self.parsed = list(data.get("parsed") or [])
         self.parcel_ignored = list(data.get("parcel_ignored") or [])
+        self.parcel_silent = list(data.get("parcel_silent") or [])
         self.weeks = dict(data.get("weeks") or {})
         if data.get("parser") != shipping.PARSER:
             # the patterns learned more: the shipping mails of the last weeks are read again with them
@@ -260,6 +268,7 @@ class Insights:
             "weeks": dict(sorted(self.weeks.items())[-KEEP_WEEKS:]),
             "parser": shipping.PARSER,
             "parcel_ignored": self.parcel_ignored,
+            "parcel_silent": self.parcel_silent,
             "last_uid": self._last_uid,
             "validity": self._validity,
         }
@@ -325,6 +334,8 @@ class Insights:
         if kind == "parcel":
             self.parcel_ignored = []  # their shipping mails are read again from the next look on
             self._subs_at = 0.0
+        if kind == "silent":
+            self.parcel_silent = []  # quiet parcels of every shop are asked about again
         self.dismissed.pop(kind, None)
         await self._save()
 
@@ -1124,8 +1135,50 @@ class Insights:
                 continue
             if p.get("status") == "delivered" and age > timedelta(days=PACKAGE_DELIVERED_DAYS):
                 continue
+            quiet = self._quiet_from(p)
+            if quiet is not None and self._silent(p) and now - quiet > timedelta(days=PACKAGE_DELIVERED_DAYS):
+                continue  # taken as delivered, and that was two days ago
             keep.append(p)
         self.packages = keep
+
+    @staticmethod
+    def _quiet_from(p: dict[str, Any]) -> datetime | None:
+        """From when a parcel on its way counts as quiet (no news for longer than expected); None: not on its way."""
+        status = p.get("status")
+        updated = dt_util.parse_datetime(p.get("updated") or "")
+        if status not in ("in_transit", "out_for_delivery") or updated is None:
+            return None
+        if status == "out_for_delivery":
+            start = dt_util.start_of_local_day(dt_util.as_local(updated)) + timedelta(days=1)
+        elif p.get("eta"):
+            try:
+                due = date.fromisoformat(str(p["eta"]))
+            except ValueError:
+                due = dt_util.as_local(updated).date()
+            start = dt_util.start_of_local_day(due) + timedelta(days=PACKAGE_QUIET_AFTER_ETA)
+        else:
+            start = updated + timedelta(days=PACKAGE_QUIET_DAYS)
+        waiting = dt_util.parse_datetime(p.get("waiting") or "")
+        if waiting is not None:
+            start = max(start, waiting + timedelta(days=PACKAGE_WAIT_DAYS))
+        return start
+
+    def _silent(self, p: dict[str, Any]) -> bool:
+        return bool(p.get("shop_domain")) and p["shop_domain"] in self.parcel_silent
+
+    def _quiet_view(self, p: dict[str, Any], view: dict[str, Any], now: datetime) -> dict[str, Any]:
+        """A quiet parcel: from a shop that never writes on delivery it counts as delivered, else Frieda asks."""
+        view["arrived"] = p.get("arrived")  # "you": the user said it came
+        view["quiet"] = None  # days without news, when Frieda asks whether it came
+        quiet = self._quiet_from(p)
+        if quiet is None or now < quiet:
+            return view
+        if self._silent(p):
+            view.update(status="delivered", window=None, arrived="assumed")
+        else:
+            updated = dt_util.parse_datetime(p.get("updated") or "")
+            view["quiet"] = max(1, (now - updated).days) if updated is not None else PACKAGE_QUIET_DAYS
+        return view
 
     # ----------------------------------------------- parcels, corrected by hand
     @staticmethod
@@ -1216,6 +1269,34 @@ class Insights:
         self._remember(before)
         await self._save()
 
+    async def async_parcel_arrived(self, parcel_id: str) -> None:
+        """The user says a parcel came. Was it quiet, its shop never writes on delivery: the next ones are taken as
+        delivered when they go quiet."""
+        await self.async_load()
+        before = self._snapshot()
+        parcel = self._parcel(parcel_id)
+        quiet = self._quiet_from(parcel)
+        shop = parcel.get("shop_domain")
+        carriers = [d for _name, domains, _numbers, _url in shipping.CARRIERS.values() for d in domains]
+        carrier = bool(shop) and any(shop == d or shop.endswith(f".{d}") for d in carriers)
+        if quiet is not None and dt_util.now() >= quiet and shop and not carrier and shop not in self.parcel_silent:
+            self.parcel_silent.append(shop)  # a carrier is never "silent": it writes for other shops' parcels
+        parcel.update(
+            status="delivered", window=None, arrived="you", updated=dt_util.now().isoformat(timespec="seconds")
+        )
+        parcel.pop("waiting", None)
+        self._remember(before)
+        await self._save()
+
+    async def async_parcel_waiting(self, parcel_id: str) -> None:
+        """Not there yet: the parcel stays on its way, and Frieda asks again in a few days."""
+        await self.async_load()
+        before = self._snapshot()
+        parcel = self._parcel(parcel_id)
+        parcel["waiting"] = dt_util.now().isoformat(timespec="seconds")
+        self._remember(before)
+        await self._save()
+
     @staticmethod
     def parcel_items(p: dict[str, Any]) -> tuple[list[dict[str, Any]], int, str | None]:
         """What is in a parcel: the items its shipping mails list (or name from the order), else the order's items.
@@ -1285,7 +1366,8 @@ class Insights:
     def parcels(self) -> list[dict[str, Any]]:
         """The parcels to show: on their way first, the expected day next; delivered ones for two days."""
         self._prune_parcels()
-        listed = [self.parcel_view(p) for p in self.packages]
+        now = dt_util.now()
+        listed = [self._quiet_view(p, self.parcel_view(p), now) for p in self.packages]
         return sorted(listed, key=lambda p: (PACKAGE_ORDER.get(p["status"] or "", 9), p["eta"] or "9999", p["updated"]))
 
     # --------------------------------------------------------------- the week
@@ -1451,6 +1533,7 @@ class Insights:
             "subscriptions_checked": self.subscriptions_checked,
             "parcels": self.parcels(),
             "parcel_ignored": list(self.parcel_ignored),
+            "parcel_silent": list(self.parcel_silent),
             "vip": {
                 "groups": list(self.opts.get(CONF_VIP_GROUPS) or []),
                 "senders": len(parse_list(self.opts.get(CONF_VIP_SENDERS))),
