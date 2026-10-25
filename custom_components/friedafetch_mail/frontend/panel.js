@@ -472,10 +472,14 @@ class FriedaPostfachPanel extends HTMLElement {
   }
 
   async _aiSaveCategories(categories) {
+    let token = null;
     await this._call(async () => {
-      this._s.ai = await this._ws({ type: "friedafetch_mail/ai/categories", entry_id: this._s.entryId, categories });
+      const { undo_token: undo, ...ai } = await this._ws({ type: "friedafetch_mail/ai/categories", entry_id: this._s.entryId, categories });
+      this._s.ai = ai;
       this._s.aiEdit = null;
+      token = undo || null;
     });
+    return token;
   }
 
   _aiReadEdit() {
@@ -517,20 +521,41 @@ class FriedaPostfachPanel extends HTMLElement {
   }
 
   // ------------------------------------------------------------ acting on mails (like a mail program)
-  // undoing: the reverse the backend named for the last action (only the mails that changed, back to their folders)
-  async _mailAct(keys, action, { to = null, undoing = false } = {}) {
+  async _mailAct(keys, action) {
     const t = this.t;
     if (!keys.length) return;
     let res = null;
     await this._call(async () => {
-      res = await this._ws({ type: "friedafetch_mail/mail/act", entry_id: this._s.entryId, keys, action, ...(to ? { to } : {}) });
+      res = await this._ws({ type: "friedafetch_mail/mail/act", entry_id: this._s.entryId, keys, action });
       await Promise.all([this._loadActivity().catch(() => {}), this._s.sheet ? this._loadTimeline() : null]);
     });
-    if (!res || undoing) return;
+    if (!res) return;
     const text = res.failed?.length ? fmt(t.mactFailed, res.failed.length) : fmt(t[`mactDone_${action}`], res.done);
-    const undo = res.undo;
-    if (undo) this._offerUndo(text, () => this._mailAct(undo.keys, undo.action, { to: undo.to || null, undoing: true }), { kind: "mail", undo });
+    const token = res.undo_token;
+    if (token) this._offerUndo(text, () => this._undoToken(token), { kind: "token", token });
     else W.announce(this.shadowRoot, text, 0);
+  }
+
+  // an undo step the backend keeps (mails, categories): the panel holds only its token; it runs once, and only while
+  // nothing changed what it would bring back
+  async _undoToken(token) {
+    await this._call(async () => {
+      const res = await this._ws({ type: "friedafetch_mail/undo", entry_id: this._s.entryId, token });
+      if (res.kind === "cats") {
+        const { kind, ...ai } = res;
+        this._s.ai = ai;
+        this._s.aiEdit = null;
+      } else await Promise.all([this._loadActivity().catch(() => {}), this._s.sheet ? this._loadTimeline() : null]);
+    });
+  }
+
+  // the backend's English refusals of an undo, in the panel's language
+  _errText(err) {
+    const msg = err?.message || String(err);
+    const t = this.t;
+    if (msg.startsWith("This can no longer be undone:")) return t.undoChanged;
+    if (msg.startsWith("This can no longer be undone")) return t.undoGone;
+    return msg;
   }
 
   // The actions for one mail (reading pane) or the picked ones (action bar), as fits their state now
@@ -744,7 +769,7 @@ class FriedaPostfachPanel extends HTMLElement {
     const t = this.t;
     const bar = this._undoBar();
     this._undoRun = run;
-    if (record) this._histAdd(text, record);
+    this._undoHist = record ? this._histAdd(text, record) : null;
     bar.innerHTML = `${ico("check-circle-outline")}<span class="ut">${esc(text)}</span><button class="link" data-undo>${esc(t.undo)}</button><button class="icon" data-undo-close aria-label="${esc(t.undoClose)}">${ico("close")}</button>`;
     bar.querySelector("[data-undo]").addEventListener("click", () => this._undoNow());
     bar.querySelector("[data-undo-close]").addEventListener("click", () => this._hideUndo());
@@ -765,10 +790,13 @@ class FriedaPostfachPanel extends HTMLElement {
 
   async _undoNow() {
     const run = this._undoRun;
+    const hist = this._undoHist;
     this._hideUndo();
     if (!run) return;
     await run();
-    if (!this._s.error) W.announce(this.shadowRoot, this.t.undoDone, 0);
+    if (this._s.error) return;
+    if (hist) this._histMark(hist);
+    W.announce(this.shadowRoot, this.t.undoDone, 0);
   }
 
   // ------------------------------------------------------------ the command palette (⌘K / Ctrl+K)
@@ -943,9 +971,20 @@ class FriedaPostfachPanel extends HTMLElement {
     store.set(`${HIST_KEY}_${this._s.entryId}`, JSON.stringify(list.slice(-50)));
   }
 
+  // only a line of text and a token (or a rule's id) are kept here: what an undo brings back stays in Home Assistant
   _histAdd(text, record) {
     const list = this._histLoad();
-    list.push({ id: `${Date.now()}`, day: isoDay(), time: new Date().toISOString(), text, record, undone: false });
+    const id = `${Date.now()}${Math.random().toString(36).slice(2, 6)}`;
+    list.push({ id, day: isoDay(), time: new Date().toISOString(), text, record, undone: false });
+    this._histSave(list);
+    return id;
+  }
+
+  _histMark(id) {
+    const list = this._histLoad();
+    const h = list.find((x) => x.id === id);
+    if (!h) return;
+    h.undone = true;
     this._histSave(list);
   }
 
@@ -961,16 +1000,19 @@ class FriedaPostfachPanel extends HTMLElement {
     if (!h || h.undone) return;
     const r = h.record || {};
     const run = {
-      mail: () => this._mailAct(r.undo.keys, r.undo.action, { to: r.undo.to || null, undoing: true }),
+      token: () => this._undoToken(r.token),
       rule: () =>
         this._call(async () => {
           await this._ws({ type: "friedafetch_mail/rules/restore", entry_id: this._s.entryId, rule_id: r.id });
           await this._reload();
         }),
       fy: () => this._fyCall({ type: "friedafetch_mail/insights/undo", token: r.token }),
-      cats: () => this._aiSaveCategories(r.before),
     }[r.kind];
-    if (!run) return;
+    if (!run) {
+      this._s.error = this.t.undoGone; // a step of an older version (it kept more than a token)
+      this._render();
+      return;
+    }
     await run();
     if (!this._s.error) {
       h.undone = true;
@@ -1726,7 +1768,7 @@ class FriedaPostfachPanel extends HTMLElement {
     try {
       await fn();
     } catch (err) {
-      this._s.error = err.message || String(err);
+      this._s.error = this._errText(err);
     }
     this._s.busy = false;
     this._render();
@@ -4400,8 +4442,8 @@ class FriedaPostfachPanel extends HTMLElement {
           const e = this._s.aiEdit;
           const before = this._s.ai.categories;
           const name = before[e.index]?.name || "";
-          await this._aiSaveCategories(before.filter((_, i) => i !== e.index));
-          if (!this._s.error) this._offerUndo(fmt(this.t.catDeleted, name), () => this._aiSaveCategories(before), { kind: "cats", before });
+          const token = await this._aiSaveCategories(before.filter((_, i) => i !== e.index));
+          if (!this._s.error && token) this._offerUndo(fmt(this.t.catDeleted, name), () => this._undoToken(token), { kind: "token", token });
         },
         "confirm-yes": () => this._confirmDone(true),
         "confirm-no": () => this._confirmDone(false),

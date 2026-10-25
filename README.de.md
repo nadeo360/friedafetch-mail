@@ -217,7 +217,9 @@ Newsletter (mit Abmelden), ihre Pakete und ihre letzten fünf Mails – unten mi
 zeigen*.
 
 **Heute getan:** Das Uhr-Symbol oben hält die Aktionen von heute auf diesem Gerät fest (auch wenn die
-Rückgängig-Leiste schon weg ist), jede mit *Rückgängig*, solange sie sich zurücknehmen lässt. **Kompakte Darstellung**
+Rückgängig-Leiste schon weg ist), jede mit *Rückgängig*, solange sie sich zurücknehmen lässt. Der Browser hält dabei nur eine Textzeile und ein Token;
+was ein Rückgängig zurückbringt, bleibt in Home Assistant, jeder Schritt läuft nur einmal (Leiste oder Liste), und
+Kategorien kommen nur zurück, solange sie seitdem niemand geändert hat. **Kompakte Darstellung**
 (Befehlspalette) macht Listen und Verlauf dichter, ebenfalls je Gerät. Auf Tablets und Handys stehen die Ansichten der
 Aktivität als Chips über der Liste, und leere Listen zeigen einen ruhigen Hinweis mit Frieda statt einer leeren
 Fläche.
@@ -442,7 +444,9 @@ Aktivität und den Kontakten ermittelt; davon geht nichts an eine KI, und ohne d
   was Frieda in jeder erkannt hat (Nummer, Bestellung, voraussichtlicher Tag, genannter Shop). Ist etwas schiefgegangen,
   korrigierst du es dort: *Als eigenes Paket* nimmt eine Mail heraus, *Gehört zu* + *Zusammenführen* vereint zwei
   Pakete, *Kein Paket* blendet es aus, und *Nie Pakete von …* übergeht die Domain des Absenders ab dann
-  (*Zurücknehmen* neben *Keine Pakete von* in der Karte).
+  (*Zurücknehmen* neben *Keine Pakete von* in der Karte). Frieda merkt sich diese Korrekturen (und deine Antworten
+  *Angekommen* / *Fehlt noch*) an den Mails, um die es geht – sie gelten also weiter, wenn ein Update neue Muster
+  bringt und die Versandmails neu gelesen werden.
   **Länger keine Neuigkeit:** Manche Shops schreiben, wenn ein Paket losgeht, aber nie, wenn es ankommt. Ein Paket
   unterwegs ohne Neuigkeit seit 4 Tagen (2 Tage nach seinem voraussichtlichen Tag oder am Tag nach „kommt heute“) fragt
   *Seit 6 Tagen keine Neuigkeit – angekommen?* mit **Angekommen** und **Fehlt noch** (dann fragt Frieda in drei Tagen

@@ -340,6 +340,13 @@ export function install({ data, q }) {
 
   let deletedRule = null; // the last deleted rule, for "Undo"
   let fyUndo = null; // the last dismissal or parcel correction, for "Undo"
+  // undo steps by token, as the backend keeps them (each runs once; categories only while unchanged)
+  const undoBook = new Map();
+  const undoAdd = (kind, data) => {
+    const token = `undo-${undoBook.size + 1}-${Date.now().toString(36)}`;
+    undoBook.set(token, { kind, data });
+    return token;
+  };
   return async function handle(m) {
     if (m.type === "friedafetch_mail/activity/list") {
       const view = m.view || "all";
@@ -429,8 +436,21 @@ export function install({ data, q }) {
       return { rating: { id: m.rating_id, corrected: m.category } };
     }
     if (m.type === "friedafetch_mail/ai/categories") {
+      const before = structuredClone(ai.categories);
       ai.categories = m.categories.map((c, i) => ({ id: c.id || `n${i}`, ...c }));
-      return structuredClone(ai);
+      return { ...structuredClone(ai), undo_token: undoAdd("cats", { before, after: JSON.stringify(ai.categories) }) };
+    }
+    if (m.type === "friedafetch_mail/undo") {
+      const step = undoBook.get(m.token);
+      undoBook.delete(m.token);
+      if (!step) throw new Error("This can no longer be undone");
+      if (step.kind === "mail") {
+        const res = await handle({ type: "friedafetch_mail/mail/act", keys: step.data.keys, action: step.data.action, to: step.data.to });
+        return { kind: "mail", done: res.done, failed: res.failed };
+      }
+      if (JSON.stringify(ai.categories) !== step.data.after) throw new Error("This can no longer be undone: the categories have changed since");
+      ai.categories = step.data.before;
+      return { kind: "cats", ...structuredClone(ai) };
     }
     if (m.type === "friedafetch_mail/ai/assist") {
       await wait(Number(q.get("aislow") || 900));
@@ -472,7 +492,8 @@ export function install({ data, q }) {
       }
       live("activity");
       const keys = Object.keys(undo);
-      return { action: m.action, done, failed: [], skipped: 0, undo: keys.length ? (opposite ? { action: opposite, keys } : { action: "return", keys, to: undo }) : null };
+      const back = keys.length ? (opposite ? { action: opposite, keys } : { action: "return", keys, to: undo }) : null;
+      return { action: m.action, done, failed: [], skipped: 0, undo: back, ...(back ? { undo_token: undoAdd("mail", back) } : {}) };
     }
     if (m.type === "friedafetch_mail/mail/text") {
       await wait(Number(q.get("textslow") || 300));

@@ -14,7 +14,7 @@ from pytest_homeassistant_custom_component.common import async_capture_events
 from custom_components.friedafetch_mail.activity import ActivityLog
 from custom_components.friedafetch_mail.const import EVENT_PACKAGE
 from custom_components.friedafetch_mail.insights import Insights
-from custom_components.friedafetch_mail.packages import is_candidate, parse, tracking_url
+from custom_components.friedafetch_mail.packages import is_candidate, items, parse, tracking_url
 
 SENT = datetime(2026, 10, 22, 7, 30, tzinfo=dt_util.get_default_time_zone())
 
@@ -325,6 +325,58 @@ async def test_new_patterns_read_the_shipping_mails_again(hass: HomeAssistant, h
     insights = Insights(hass, "parcels-old", SimpleNamespace(guard=None), MagicMock(), log, {}, language="de")
     await insights.async_load()
     assert insights.packages == [] and insights.parsed == []  # read again with the new patterns
+
+
+async def test_corrections_hold_when_the_mails_are_read_again(hass: HomeAssistant) -> None:
+    """New patterns read the shipping mails again: what the user corrected by hand is applied again by Message-ID."""
+    insights = await _insights(hass)
+    now = dt_util.now()
+    infos = [
+        _info("versand@shop.example", "Ihre Bestellung ist unterwegs", "Shop", "Mit DPD.", now - timedelta(hours=9), "<m1>"),
+        _info("noreply@dhl.de", "Ihr Paket kommt", "DHL", "Sendungsnummer 00340434161094000001", now - timedelta(hours=8), "<m2>"),
+        _info("noreply@dhl.de", "Ihr Paket kommt", "DHL", "Sendungsnummer 00340434161094000002", now - timedelta(hours=7), "<m3>"),
+        _info("noreply@dhl.de", "Ihr Paket kommt", "DHL", "Sendungsnummer 00340434161094000003", now - timedelta(hours=6), "<m4>"),
+        _info("noreply@dhl.de", "Ihr Paket kommt", "DHL", "Sendungsnummer 00340434161094000004", now - timedelta(hours=5), "<m5>"),
+    ]  # fmt: skip
+
+    def read_all() -> None:
+        for info in infos:
+            insights._merge_parcel(dict(info), fire=False)  # noqa: SLF001
+
+    def by_mail() -> dict[str, dict[str, Any]]:
+        return {",".join(sorted(x["message_id"] for x in p["sources"])): p for p in insights.packages}
+
+    read_all()
+    parcels = by_mail()
+    await insights.async_parcel_merge(parcels["<m3>"]["id"], parcels["<m2>"]["id"])  # one parcel
+    await insights.async_parcel_merge(parcels["<m1>"]["id"], by_mail()["<m2>,<m3>"]["id"])
+    await insights.async_parcel_split(by_mail()["<m1>,<m2>,<m3>"]["id"], "<m1>")  # the shop's mail was another one
+    await insights.async_parcel_ignore(by_mail()["<m4>"]["id"], sender=False)  # not a parcel
+    await insights.async_parcel_arrived(by_mail()["<m5>"]["id"])
+    expected = {k: p.get("status") for k, p in by_mail().items()}
+    assert expected == {"<m1>": "in_transit", "<m2>,<m3>": "in_transit", "<m5>": "delivered"}
+
+    insights.packages, insights.parsed = [], []  # the patterns learned more (PARSER): everything is read again
+    read_all()
+    assert len(insights.packages) == 5
+    assert insights._apply_fixes()  # noqa: SLF001
+    assert {k: p.get("status") for k, p in by_mail().items()} == expected
+    assert by_mail()["<m5>"]["arrived"] == "you"
+    assert not insights._apply_fixes()  # noqa: SLF001 - nothing more to do
+
+    # a new mail of the split-off parcel is its own update, not split again
+    insights._merge_parcel(  # noqa: SLF001
+        _info("versand@shop.example", "Ihre Bestellung ist unterwegs", "Shop", "Mit DPD.", now, "<m6>"), fire=False
+    )
+    assert "<m1>,<m6>" in by_mail()
+    insights._apply_fixes()  # noqa: SLF001
+    assert "<m1>,<m6>" in by_mail()
+    # undo takes a correction back together with its fix
+    fixes = len(insights.parcel_fixes)
+    await insights.async_parcel_waiting(by_mail()["<m2>,<m3>"]["id"])
+    assert insights.parcel_fixes[-1]["op"] == "waiting" and len(insights.parcel_fixes) == fixes + 1
+    await insights.async_undo(insights._undo["token"])  # noqa: SLF001
+    assert len(insights.parcel_fixes) == fixes and insights._data()["parcel_fixes"] == insights.parcel_fixes  # noqa: SLF001
 
 
 # ------------------------------------------------------------------ corrected by hand
@@ -723,3 +775,45 @@ async def test_a_parcel_due_on_a_day_goes_quiet_two_days_after_it(hass: HomeAssi
     assert parcel["quiet"] is None  # due yesterday: still in time
     insights.packages[0]["eta"] = (now - timedelta(days=3)).date().isoformat()
     assert insights.parcels()[0]["quiet"] == 6
+
+
+def test_order_and_item_patterns_on_hostile_text() -> None:
+    """The patterns of 1.0.39 (items of an order, order numbers, names a shipping mail gives) do not crash or run
+    away on any text."""
+    import time  # noqa: PLC0415
+
+    from hypothesis import given, settings  # noqa: PLC0415
+    from hypothesis import strategies as st  # noqa: PLC0415
+
+    from custom_components.friedafetch_mail.insights import _names_in  # noqa: PLC0415
+
+    words = st.sampled_from(
+        ["1 x", "2×", "1.00 x", "Menge:", "Anzahl", "Stück", "Qty", "Artikelnr.", "Item #", "12,99 €", "EUR 5",
+         "-3,00 €", "Versand", "Summe", "Bestellnummer", "Bestellung,", "Order #", "W123-45", "\n", " ", "/",
+         "und 2 weitere Artikel", "Bestellt:", "„", "“", "iPhone", "AppleCare+", "x" * 40]
+    )  # fmt: skip
+
+    @settings(max_examples=200, deadline=None)
+    @given(st.lists(st.one_of(words, st.text(max_size=12)), max_size=400), st.text(max_size=80))
+    def run(parts: list[str], subject: str) -> None:
+        text = " ".join(parts)
+        found, more = items(subject, text)
+        assert more >= 0 and all(isinstance(i.get("name"), str) and i["name"] for i in found)
+        parse(_mail("versand@shop.example", subject or "Bestellbestätigung"), text, SENT)
+        assert all(i.get("from_order") for i in _names_in(found, text))
+
+    run()
+    for text in (
+        "1 x " * 5000,
+        "Menge: " * 5000,
+        "Artikelnr.\n" * 3000,
+        "1" * 20000 + " x Name",
+        "Bestellung, " * 3000,
+        "Order #" + "A1-" * 6000,
+        ("12,99 € " * 50 + "\n") * 100,
+    ):
+        started = time.perf_counter()
+        items("Bestellt: „" + text[:500] + "“ und 3 weitere Artikel", text)
+        parse(_mail("versand@shop.example", "Bestellbestätigung"), text, SENT)
+        _names_in([{"name": text[:200]}], text)
+        assert time.perf_counter() - started < 1.0, text[:40]

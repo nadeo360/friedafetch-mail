@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import logging
 from pathlib import Path
 from typing import Any
@@ -81,6 +82,7 @@ async def async_setup_frontend(hass: HomeAssistant, version: str) -> None:
         ws_rules_restore,
         ws_rules_preview,
         ws_sender,
+        ws_undo,
         ws_rules_run,
         ws_rules_history,
         ws_rules_history_clear,
@@ -531,8 +533,13 @@ async def ws_ai_categories(
 ) -> None:
     """Replace the categories."""
     sorter = _sorter(hass, msg.get("entry_id"))
+    await sorter.async_load()
+    before = copy.deepcopy(sorter.categories)
     await sorter.async_set_categories([c for c in msg["categories"] if isinstance(c, dict)])
-    connection.send_result(msg["id"], _ai_payload(sorter))
+    token = _entry(hass, msg.get("entry_id")).runtime_data.undo.add(
+        "cats", {"before": before, "after": copy.deepcopy(sorter.categories)}
+    )
+    connection.send_result(msg["id"], {**_ai_payload(sorter), "undo_token": token})
 
 
 @websocket_api.websocket_command(
@@ -826,18 +833,51 @@ async def ws_mail_locate(hass: HomeAssistant, connection: websocket_api.ActiveCo
 async def ws_mail_act(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
     """Read / unread / flag / unflag / archive / back to the inbox / trash for mails of the activity."""
     link = _entry(hass, msg.get("entry_id")).runtime_data
+    result = await _act(link, msg["keys"], msg["action"], msg.get("to"))
+    if result.get("undo"):
+        result["undo_token"] = link.undo.add("mail", result["undo"])
+    connection.send_result(msg["id"], result)
+
+
+async def _act(link: Any, keys: list[str], action: str, to: dict[str, str] | None) -> dict[str, Any]:
     options = link.clients.options
-    connection.send_result(
-        msg["id"],
-        await async_act(
-            link,
-            msg["keys"],
-            msg["action"],
-            read_only=bool(options.get(CONF_READ_ONLY, DEFAULT_READ_ONLY)),
-            allow_delete=bool(options.get(CONF_ALLOW_DELETE, DEFAULT_ALLOW_DELETE)),
-            to=msg.get("to"),
-        ),
+    return await async_act(
+        link,
+        keys,
+        action,
+        read_only=bool(options.get(CONF_READ_ONLY, DEFAULT_READ_ONLY)),
+        allow_delete=bool(options.get(CONF_ALLOW_DELETE, DEFAULT_ALLOW_DELETE)),
+        to=to,
     )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/undo",
+        vol.Optional("entry_id"): str,
+        vol.Required("token"): vol.All(str, vol.Length(min=8, max=64)),
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+@_ws_errors
+async def ws_undo(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """Undo a step by its token (the undo bar and "Done today"): each step once, and only while nothing changed it."""
+    link = _entry(hass, msg.get("entry_id")).runtime_data
+    step = link.undo.take(msg["token"])
+    if step is None:
+        raise ActionError("This can no longer be undone")
+    kind, data = step
+    if kind == "mail":
+        result = await _act(link, data["keys"], data["action"], data.get("to"))
+        connection.send_result(msg["id"], {"kind": kind, "done": result.get("done"), "failed": result.get("failed")})
+        return
+    sorter = link.ai
+    await sorter.async_load()
+    if sorter.categories != data["after"]:
+        raise ActionError("This can no longer be undone: the categories have changed since")
+    await sorter.async_set_categories(data["before"])
+    connection.send_result(msg["id"], {"kind": kind, **_ai_payload(sorter)})
 
 
 @websocket_api.websocket_command(

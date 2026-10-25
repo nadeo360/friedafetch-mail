@@ -140,6 +140,9 @@ async def test_panel_answers_keep_their_shape(hass: HomeAssistant, hass_ws_clien
         shapes["friedafetch_mail/mail/act"] = await call(
             "friedafetch_mail/mail/act", keys=["<3@example.com>"], action="flag"
         )
+        shapes["friedafetch_mail/undo"] = await call(
+            "friedafetch_mail/undo", token=shapes["friedafetch_mail/mail/act"]["undo_token"]
+        )
     with patch(
         f"{MAIL}.async_get_message",
         AsyncMock(return_value={"body": "Hallo", "body_truncated": False, "attachments": [{"filename": "a.pdf"}]}),

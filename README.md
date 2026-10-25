@@ -202,7 +202,9 @@ days, how many are read, unread or flagged, the AI categories and rules that met
 unsubscribe), its parcels and its last five mails – with *Create rule* and *Show all mails* at the bottom.
 
 **Done today:** the clock symbol at the top keeps today's actions on this device (also after the undo bar has gone),
-each with *Undo* as long as it can be taken back. **Compact layout** (command palette) makes lists and the timeline
+each with *Undo* as long as it can be taken back. The browser keeps only a line of text and a token; what an undo
+brings back stays in Home Assistant, each step runs once (bar or list), and categories come back only while nobody
+changed them since. **Compact layout** (command palette) makes lists and the timeline
 denser, also per device. On tablets and phones the views of the activity sit as chips above the list, and empty
 lists show a calm note with Frieda instead of a blank space.
 
@@ -413,6 +415,8 @@ the mailbox, the activity and the contacts; nothing of it goes to an AI, and not
   read in each (number, order, expected day, the shop it names). If something went wrong you can correct it there:
   *Make it a parcel of its own* takes a mail out, *Belongs to* + *Merge* joins two parcels, *Not a parcel* hides it,
   and *Never parcels from …* ignores the sender's domain from then on (*Undo* next to *No parcels from* in the card).
+  Frieda keeps these corrections (and your answers *Arrived* / *Still missing*) by the mails they are about, so they
+  still hold when an update teaches Frieda new patterns and the shipping mails are read again.
   **No news for longer than expected:** some shops write when a parcel leaves, never when it arrives. A parcel on its
   way with no news for 4 days (2 days after its expected day, or the day after “arrives today”) asks *No news for 6
   days – has it arrived?* with **Arrived** and **Still missing** (asked again in three days). A quiet parcel you mark

@@ -785,7 +785,8 @@
    "keys": [
     "str"
    ]
-  }
+  },
+  "undo_token": "str"
  },
  "friedafetch_mail/mail/locate": {
   "checked": "str",
@@ -1089,5 +1090,10 @@
   "subscription": "null",
   "unread": "num",
   "vip": "bool"
+ },
+ "friedafetch_mail/undo": {
+  "done": "num",
+  "failed": [],
+  "kind": "str"
  }
 }

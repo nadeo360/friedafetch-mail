@@ -70,6 +70,58 @@ async def test_mail_actions_name_their_undo(hass: HomeAssistant, hass_ws_client)
     assert (await ws.receive_json())["error"]["message"] == "No folders to return the mails to"
 
 
+async def test_undo_by_token_runs_once_and_only_while_unchanged(hass: HomeAssistant, hass_ws_client) -> None:
+    """The panel keeps only a token ("Done today"): what an undo brings back stays in Home Assistant."""
+    entry = await _setup(hass)
+    link = entry.runtime_data
+    link.activity.add_pass("push", dt_now_iso(), [_mail(1)])
+    link.activity.set_state("INBOX", {1: []}, set(), dt_now_iso())
+    ws = await hass_ws_client(hass)
+    seq = iter(range(1, 100))
+
+    async def call(type_: str, **data: Any) -> dict[str, Any]:
+        await ws.send_json({"id": next(seq), "type": f"friedafetch_mail/{type_}", "entry_id": entry.entry_id, **data})
+        return await ws.receive_json()
+
+    with (
+        patch(f"{MAIL}.async_special_mailbox", AsyncMock(return_value="Deleted Messages")),
+        patch(f"{MAIL}.async_set_flags", AsyncMock()) as flags,
+    ):
+        token = (await call("mail/act", keys=["<1@example.com>"], action="flag"))["result"]["undo_token"]
+        res = await call("undo", token=token)
+        assert res["success"] and res["result"] == {"kind": "mail", "done": 1, "failed": []}
+        flags.assert_awaited_with("INBOX", [1], flagged=False)
+        again = await call("undo", token=token)  # the undo bar and "Done today" cannot both run it
+        assert again["error"]["message"] == "This can no longer be undone"
+
+    sorter = link.ai
+    await sorter.async_load()
+    first = [{"name": "Bank"}, {"name": "Newsletter"}]
+    await call("ai/categories", categories=first)
+    token = (await call("ai/categories", categories=first[:1]))["result"]["undo_token"]  # "Newsletter" deleted
+    res = await call("undo", token=token)
+    assert res["success"] and res["result"]["kind"] == "cats"
+    assert [c["name"] for c in sorter.categories] == ["Bank", "Newsletter"]
+
+    token = (await call("ai/categories", categories=first[:1]))["result"]["undo_token"]
+    await call("ai/categories", categories=[{"name": "Bank"}, {"name": "Familie"}])  # changed later
+    res = await call("undo", token=token)
+    assert res["error"]["message"] == "This can no longer be undone: the categories have changed since"
+    assert [c["name"] for c in sorter.categories] == ["Bank", "Familie"]  # the later change stays
+
+
+def test_the_undo_book_forgets_old_and_too_many_steps() -> None:
+    from custom_components.friedafetch_mail.undo import MAX_STEPS, TTL, UndoBook  # noqa: PLC0415
+
+    book = UndoBook()
+    with patch("custom_components.friedafetch_mail.undo.time.monotonic", return_value=1000.0):
+        tokens = [book.add("mail", {"n": i}) for i in range(MAX_STEPS + 1)]
+    assert book.take(tokens[0]) is None  # the oldest made room
+    with patch("custom_components.friedafetch_mail.undo.time.monotonic", return_value=1000.0 + TTL + 1):
+        assert book.take(tokens[-1]) is None  # a day later
+    assert len({*tokens}) == len(tokens)
+
+
 async def test_a_deleted_rule_comes_back_as_it_was(hass: HomeAssistant) -> None:
     engine = RuleEngine(hass, "entry1", _rule_mail([], []))
     made = [

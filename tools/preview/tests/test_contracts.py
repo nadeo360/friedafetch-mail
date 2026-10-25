@@ -41,6 +41,7 @@ REQUESTS = {
     "friedafetch_mail/sender": {"email": "erika@example.com"},
     "friedafetch_mail/rules/preview": {"conditions": [{"field": "subject", "op": "contains", "value": "Ratenkredit"}]},
     "friedafetch_mail/insights/undo": {"token": "<undo>"},
+    "friedafetch_mail/undo": {"token": "<mail-undo>"},
 }
 # what a request needs to have happened just before ("Undo" needs something done): JS returning the placeholder's value
 PREPARE = {
@@ -52,6 +53,10 @@ PREPARE = {
     "friedafetch_mail/insights/undo": (
         "<undo>",
         "return (await el._hass.callWS({ type: 'friedafetch_mail/insights/dismiss', kind: 'package', item_id: 'k1' })).undo;",
+    ),
+    "friedafetch_mail/undo": (
+        "<mail-undo>",
+        "return (await el._hass.callWS({ type: 'friedafetch_mail/mail/act', keys: ['<test-frieda@example>'], action: 'seen' })).undo_token;",
     ),
 }
 

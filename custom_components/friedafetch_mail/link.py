@@ -8,6 +8,7 @@ from typing import Any
 
 from .rules import RuleEngine
 from .tools import TOOL_CLASSES
+from .undo import UndoBook
 
 
 @dataclass
@@ -59,3 +60,4 @@ class AccountLink:
     insights: Any | None = None  # insights.Insights: the tab "For you"
     throttle: Any | None = None  # throttle.Throttle: iCloud asked to slow down
     health: Any | None = None  # health.Health: the problems of the account (problem sensor, repair)
+    undo: UndoBook = field(default_factory=UndoBook)  # undo steps the panel refers to by token

@@ -156,11 +156,26 @@ def test_calm_empty_states(open_panel, dark: bool) -> None:
     assert panel.text(".lscroll .empty-state p") == "Keine Mails in dieser Ansicht."
 
 
+def test_done_today_keeps_only_a_token_and_each_step_runs_once(open_panel) -> None:
+    panel = open_panel("postfach", "actslow=20")
+    panel.click('.rtop [data-action="mail-act"][data-v="archive"]', 600)
+    stored = panel.js(
+        "return localStorage.getItem(Object.keys(localStorage).find((k) => k.startsWith('friedafetch_mail_today')));"
+    )
+    assert "<" not in stored and "INBOX" not in stored  # no message ids, no folders: only text and a token
+    panel.click(".undobar [data-undo]", 900)  # undone in the bar ...
+    panel.click('[data-action="hist-open"]', 300)
+    assert panel.text(".hilist li .chip") == "rückgängig gemacht"  # ... and so in the list too
+    assert panel.count('.hilist [data-action="hist-undo"]') == 0
+
+
 def test_a_failed_undo_from_done_today_says_so(open_panel) -> None:
     panel = open_panel("postfach", "actslow=20")
     panel.click('.rtop [data-action="mail-act"][data-v="archive"]', 600)
-    panel.js("el._hideUndo(); el._mailAct = async () => { el._s.error = 'Die Mail ist nicht mehr da.'; };")
+    panel.js(
+        "el._hideUndo(); const h = JSON.parse(localStorage.getItem(Object.keys(localStorage).find((k) => k.startsWith('friedafetch_mail_today'))));"
+        " await el._hass.callWS({ type: 'friedafetch_mail/undo', token: h[0].record.token });"  # gone (a restart, say)
+    )
     panel.click('[data-action="hist-open"]', 300)
     panel.click('.hilist [data-action="hist-undo"]', 400)
-    assert panel.text(".modal.hist .error") == "Die Mail ist nicht mehr da."
-    assert panel.count('.hilist [data-action="hist-undo"]') == 1  # still there to try again
+    assert panel.text(".modal.hist .error") == "Das lässt sich nicht mehr rückgängig machen."
