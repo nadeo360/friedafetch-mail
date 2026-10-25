@@ -22,7 +22,7 @@ const TEXTS = {
     important: "Wichtig heute",
     noImportant: "Nichts Wichtiges heute",
     unread: "{0} ungelesen",
-    status: { in_transit: "unterwegs", out_for_delivery: "kommt heute", pickup: "abholbereit", delivered: "zugestellt", problem: "Problem" },
+    status: { ordered: "bestellt", in_transit: "unterwegs", out_for_delivery: "kommt heute", pickup: "abholbereit", delivered: "zugestellt", problem: "Problem" },
     today: "heute",
     tomorrow: "morgen",
     track: "Verfolgen",
@@ -41,7 +41,7 @@ const TEXTS = {
     important: "Important today",
     noImportant: "Nothing important today",
     unread: "{0} unread",
-    status: { in_transit: "on its way", out_for_delivery: "arrives today", pickup: "ready for pick-up", delivered: "delivered", problem: "problem" },
+    status: { ordered: "ordered", in_transit: "on its way", out_for_delivery: "arrives today", pickup: "ready for pick-up", delivered: "delivered", problem: "problem" },
     today: "today",
     tomorrow: "tomorrow",
     track: "Track",
@@ -51,7 +51,7 @@ const TEXTS = {
     missing: "No Frieda Postfach sensors found.",
   },
 };
-const ICONS = { in_transit: "mdi:package-variant-closed", out_for_delivery: "mdi:truck-delivery-outline", pickup: "mdi:store-marker-outline", delivered: "mdi:package-variant-closed-check", problem: "mdi:package-variant-remove" };
+const ICONS = { ordered: "mdi:cart-outline", in_transit: "mdi:package-variant-closed", out_for_delivery: "mdi:truck-delivery-outline", pickup: "mdi:store-marker-outline", delivered: "mdi:package-variant-closed-check", problem: "mdi:package-variant-remove" };
 const KEYS = ["parcels", "important_today", "unread_inbox", "problem"];
 const SHOWN = 3; // rows per section; the rest is counted
 
@@ -152,15 +152,16 @@ class FriedaMailCard extends HTMLElement {
         : "";
     const sections = [];
     if (this._config.parcels && parcelsSt) {
-      const order = { out_for_delivery: 0, pickup: 1, problem: 2, in_transit: 3, delivered: 4 };
+      const order = { out_for_delivery: 0, pickup: 1, problem: 2, in_transit: 3, ordered: 4, delivered: 5 };
       const list = [...(parcelsSt.attributes.parcels || [])].filter((p) => p.status !== "delivered").sort((a, b) => (order[a.status] ?? 5) - (order[b.status] ?? 5));
+      const more = (p) => Math.max(0, (p.items || []).length - 2) + (p.items_more || 0); // beyond the two names shown
       const rows = list.slice(0, SHOWN).map((p) => {
         const when = [p.status === "out_for_delivery" ? "" : this._day(p.eta), p.window || ""].filter(Boolean).join(" ");
         const link = p.url
           ? `<button class="link" data-url="${esc(p.url)}" aria-label="${esc(`${p.shop ? t.order : t.track}: ${p.shop || p.carrier || ""}`)}"><ha-icon icon="mdi:open-in-new"></ha-icon></button>`
           : "";
         return `<li class="${p.status === "out_for_delivery" || p.status === "problem" ? "hot" : ""}"><ha-icon icon="${ICONS[p.status] || ICONS.in_transit}"></ha-icon>
-          <span class="tx"><strong>${esc(p.shop || p.carrier || "–")}</strong><small>${esc([t.status[p.status] || p.status, when].filter(Boolean).join(" · "))}</small></span>${link}</li>`;
+          <span class="tx"><strong>${esc(p.shop || p.carrier || "–")}</strong><small>${esc([t.status[p.status] || p.status, when].filter(Boolean).join(" · "))}</small>${(p.items || []).length ? `<small class="items">${esc([p.items.slice(0, 2).join(", "), more(p) ? `+${more(p)}` : ""].filter(Boolean).join(" "))}</small>` : ""}</span>${link}</li>`;
       });
       sections.push(`<section><h3>${esc(t.parcels)}${list.length ? `<span class="n">${list.length}</span>` : ""}</h3>
         ${rows.length ? `<ul>${rows.join("")}</ul>${list.length > SHOWN ? `<p class="more">${esc(fmt(t.more, list.length - SHOWN))}</p>` : ""}` : `<p class="none">${esc(t.noParcels)}</p>`}</section>`);
@@ -201,6 +202,7 @@ const STYLE = `<style>
   .tx { display: grid; min-width: 0; flex: 1; text-align: left; }
   .tx strong { font-size: 14px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tx small { font-size: 12px; color: var(--secondary-text-color); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tx small.items { color: var(--primary-text-color); }
   button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; border-radius: 8px; }
   button:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 1px; }
   .mail { display: flex; align-items: center; gap: 10px; width: 100%; padding: 4px 0; }

@@ -309,7 +309,10 @@ class MailForYou(ForYouTool):
                 if n.get("never_opened") and not n.get("unsubscribed")
             ],
             "parcels": [
-                {k: p[k] for k in ("carrier", "number", "shop", "status", "eta", "window", "url")}
+                {
+                    **{k: p[k] for k in ("carrier", "number", "shop", "status", "eta", "window", "url")},
+                    "items": [i["name"] for i in p["items"]],
+                }
                 for p in data["parcels"]
             ],
             "week": {k: v for k, v in data["week"].items() if k != "trend"},  # the panel's trend lines stay there

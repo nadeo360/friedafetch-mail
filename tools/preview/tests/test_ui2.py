@@ -273,3 +273,39 @@ def test_ipad_portrait_list_and_mail_side_by_side(browser, site, width: int) -> 
     assert got["inside"], "the list's tools stay in their column"
     assert got["topRows"] <= 60, "the mail's buttons fit in one row"
     assert got["page"] <= 1 and rules <= 1
+
+
+# ------------------------------------------------------------------ what is in a parcel
+def test_parcels_show_what_is_in_them(open_panel) -> None:
+    panel = open_panel("postfach", "tab=foryou")
+    panel.js("el._setTab('foryou'); await wait(500);")
+    rows = panel.js(
+        "return [...root.querySelectorAll('[data-widget=\"fy-parcels\"] .fy-row')].map((r) => ({"
+        " shop: r.querySelector('strong').textContent, items: r.querySelector('.fy-items')?.textContent.trim() || null,"
+        " ordered: !!r.querySelector('.fy-items.ordered'), step: r.querySelector('.pstep')?.getAttribute('aria-label') }));"
+    )
+    by = {r["shop"]: r for r in rows}
+    assert by["Shop Versand"]["items"] == "2 × Sofa-Kissen Leinen, Salbeigrün, Kuscheldecke Waffelpiqué 150 × 200 cm"
+    assert by["eBay"]["items"] == "Schweberegal Wandregal Esche Whiskey +2 weitere"
+    assert by["Amazon.de"]["ordered"] and by["Amazon.de"]["step"] == "Fortschritt: Bestellt"
+    assert by["Gartenmarkt"]["items"] is None  # nothing known: nothing shown
+    assert panel.text('[data-widget="fy-parcels"] .chead .badge') == "3"  # ordered is not on its way yet
+    # "Where from?": the contents with quantity and price, and which mail listed them
+    panel.js(
+        'root.querySelectorAll(\'[data-widget="fy-parcels"] [data-action="fy-parcel-open"]\')[0].click(); await wait(300);'
+    )
+    box = panel.js(
+        "const b = root.querySelector('.fy-where .fy-contents'); return { head: b.querySelector('h4').textContent.trim(),"
+        " rows: [...b.querySelectorAll('li')].map((l) => l.textContent.replace(/\\s+/g, ' ').trim()) };"
+    )
+    assert box["head"] == "Inhalt"
+    assert box["rows"][0] == "2 × Sofa-Kissen Leinen, Salbeigrün 39,90 €"
+    assert "2 Artikel" in panel.text(".fy-where ul.thread")
+
+
+def test_the_card_names_what_is_in_a_parcel(open_panel) -> None:
+    panel = open_panel("postfach", "card=1")
+    items = panel.page.evaluate(
+        "() => [...window.__card.shadowRoot.querySelectorAll('section:first-of-type li small.items')].map((n) => n.textContent)"
+    )
+    assert items[0] == "Sofa-Kissen Leinen, Salbeigrün, Kuscheldecke Waffelpiqué 150 × 200 cm"

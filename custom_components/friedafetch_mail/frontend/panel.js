@@ -3217,7 +3217,7 @@ class FriedaPostfachPanel extends HTMLElement {
 
   _fyParcels(fy) {
     const t = this.t;
-    const icons = { out_for_delivery: "truck-delivery-outline", pickup: "store-marker-outline", problem: "package-variant-remove", delivered: "package-variant-closed-check", in_transit: "package-variant-closed" };
+    const icons = { ordered: "cart-outline", out_for_delivery: "truck-delivery-outline", pickup: "store-marker-outline", problem: "package-variant-remove", delivered: "package-variant-closed-check", in_transit: "package-variant-closed" };
     const day = (iso) => {
       if (!iso) return "";
       const d = new Date(`${iso}T12:00:00`);
@@ -3232,14 +3232,14 @@ class FriedaPostfachPanel extends HTMLElement {
         const warn = p.status === "problem" || p.status === "out_for_delivery" || p.status === "pickup";
         return `<div class="ai-cat fy-row"><span class="fy-ic ${warn ? "warn" : ""}">${ico(icons[p.status] || "package-variant-closed")}</span>
           <span class="tx"><strong>${esc(p.shop || p.carrier || p.subject || "–")}</strong><span>${esc(t.fyParcel[p.status] || p.status)}${when ? ` · ${esc(when)}` : ""}</span>
-            <span class="muted">${esc(who || p.subject || "")}</span>${this._parcelSteps(p)}</span>
+            <span class="muted">${esc(who || p.subject || "")}</span>${this._parcelItems(p)}${this._parcelSteps(p)}</span>
           ${p.url ? `<button class="secondary small ib" data-action="fy-track" data-url="${esc(p.url)}">${ico(p.link === "shop" ? "shopping-outline" : "open-in-new")}${esc(p.link === "shop" ? t.fyOrderPage : t.fyTrack)}</button>` : ""}
           <button class="icon" data-action="fy-parcel-open" data-id="${esc(p.id)}" aria-expanded="${this._s.fyParcel === p.id}" aria-label="${esc(t.fyWhere)}: ${esc(p.shop || p.carrier || "")}">${ico(this._s.fyParcel === p.id ? "chevron-up" : "information-outline")}</button>
           <button class="icon" data-action="fy-dismiss" data-kind="package" data-id="${esc(p.id)}" aria-label="${esc(t.fyHide)}: ${esc(p.shop || p.carrier || "")}">${ico("close")}</button></div>
           ${this._s.fyParcel === p.id ? this._fyParcelWhere(p, fy) : ""}`;
       })
       .join("");
-    const open = (fy.parcels || []).filter((p) => p.status !== "delivered").length;
+    const open = (fy.parcels || []).filter((p) => p.status !== "delivered" && p.status !== "ordered").length;
     const ignored = (fy.parcel_ignored || []).length
       ? `<div class="subbar"><span class="muted">${esc(fmt(t.fyIgnored, fy.parcel_ignored.join(", ")))}</span><button class="link" data-action="fy-restore" data-kind="parcel">${esc(t.fyIgnoredUndo)}</button></div>`
       : "";
@@ -3248,11 +3248,22 @@ class FriedaPostfachPanel extends HTMLElement {
       <div class="ai-cats">${rows}</div>${ignored}</div>`;
   }
 
-  // Where a parcel is: on its way → today (or ready for pick-up) → delivered; a problem shows at the middle step
+  // What is in a parcel: from its shipping mails, or (until one comes) the order's items
+  _parcelItems(p) {
+    const t = this.t;
+    const items = p.items || [];
+    if (!items.length) return "";
+    const names = items.slice(0, 2).map((i) => `${i.qty > 1 ? `${i.qty} × ` : ""}${i.name}`);
+    const more = Math.max(0, items.length - 2) + (p.items_more || 0); // not shown here, and only counted in the mail
+    const label = [names.join(", "), more > 0 ? fmt(t.fyItemsMore, more) : ""].filter(Boolean).join(" ");
+    return `<span class="fy-items ${p.items_from === "order" ? "ordered" : ""}" aria-label="${esc(fmt(t.fyItemsLabel, label))}">${ico(p.items_from === "order" ? "cart-outline" : "package-variant")}<span>${esc(label)}</span></span>`;
+  }
+
+  // Where a parcel is: ordered → on its way → today (or ready for pick-up) → delivered; a problem shows at "today"
   _parcelSteps(p) {
     const t = this.t;
-    const steps = p.status === "pickup" ? [t.pstepTransit, t.pstepPickup, t.pstepPicked] : [t.pstepTransit, t.pstepToday, t.pstepDelivered];
-    const at = { in_transit: 0, out_for_delivery: 1, pickup: 1, problem: 1, delivered: 2 }[p.status] ?? 0;
+    const steps = p.status === "pickup" ? [t.pstepOrdered, t.pstepTransit, t.pstepPickup, t.pstepPicked] : [t.pstepOrdered, t.pstepTransit, t.pstepToday, t.pstepDelivered];
+    const at = { ordered: 0, in_transit: 1, out_for_delivery: 2, pickup: 2, problem: 2, delivered: 3 }[p.status] ?? 1;
     const problem = p.status === "problem";
     const label = problem ? t.pstepProblem : steps[at];
     const parts = steps
@@ -3290,6 +3301,7 @@ class FriedaPostfachPanel extends HTMLElement {
           x.order ? fmt(t.fyFoundOrder, x.order) : "",
           x.eta ? fmt(t.fyFoundEta, fmtShort(x.eta)) : "",
           x.shop_hint ? fmt(t.fyFoundHint, x.shop_hint) : "",
+          (x.items || []).length ? fmt(t.fyFoundItems, x.items.length) : "",
         ].filter(Boolean);
         const split = (p.sources || []).length > 1
           ? `<button class="link small" data-action="fy-parcel-split" data-id="${esc(p.id)}" data-mid="${esc(x.message_id)}">${esc(t.fySplit)}</button>`
@@ -3304,7 +3316,12 @@ class FriedaPostfachPanel extends HTMLElement {
           .join("")}</select><button class="secondary small" data-action="fy-parcel-merge" data-id="${esc(p.id)}" ${s.busy ? "disabled" : ""}>${esc(t.fyMerge)}</button></label>`
       : "";
     const senders = (p.senders || []).join(", ");
-    return `<div class="fy-where"><p class="muted">${esc(t.fyWhereHint)}</p><ul class="thread">${sources}</ul>${merge}
+    const contents = (p.items || []).length
+      ? `<div class="fy-contents"><h4>${ico(p.items_from === "order" ? "cart-outline" : "package-variant")}${esc(p.items_from === "order" ? t.fyItemsOrder : t.fyItems)}</h4>
+          <ul>${p.items.map((i) => `<li><span class="q">${esc(i.qty)} ×</span> <span class="nm">${esc(i.name)}</span>${i.price ? ` <span class="pr">${esc(i.price)}</span>` : ""}</li>`).join("")}</ul>
+          ${p.items_more ? `<p class="muted">${esc(fmt(t.fyItemsMore, p.items_more))}</p>` : ""}${p.items_from === "order" ? `<p class="muted">${esc(t.fyItemsOrderHint)}</p>` : ""}</div>`
+      : "";
+    return `<div class="fy-where">${contents}<p class="muted">${esc(t.fyWhereHint)}</p><ul class="thread">${sources}</ul>${merge}
       <div class="actionsbar"><button class="secondary small" data-action="fy-parcel-ignore" data-id="${esc(p.id)}">${esc(t.fyNoParcel)}</button>
         ${senders ? `<button class="secondary small danger" data-action="fy-parcel-ignore" data-id="${esc(p.id)}" data-sender="1" data-who="${esc(senders)}">${esc(fmt(t.fyNeverFrom, senders))}</button>` : ""}</div></div>`;
   }

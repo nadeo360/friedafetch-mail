@@ -327,6 +327,15 @@
     "carrier": "null|str",
     "eta": "null|str",
     "id": "str",
+    "items": [
+     {
+      "name": "str",
+      "price": "str",
+      "qty": "num"
+     }
+    ],
+    "items_from": "null|str",
+    "items_more": "num",
     "link": "str",
     "number": "null|str",
     "order": "null|str",
@@ -338,6 +347,9 @@
      {
       "date": "str",
       "eta": "null|str",
+      "items": [
+       "str"
+      ],
       "message_id": "str",
       "number": "null|str",
       "order": "null|str",
@@ -491,6 +503,15 @@
     "carrier": "null|str",
     "eta": "null|str",
     "id": "str",
+    "items": [
+     {
+      "name": "str",
+      "price": "str",
+      "qty": "num"
+     }
+    ],
+    "items_from": "null|str",
+    "items_more": "num",
     "link": "str",
     "number": "null|str",
     "order": "null|str",
@@ -502,6 +523,9 @@
      {
       "date": "str",
       "eta": "null|str",
+      "items": [
+       "str"
+      ],
       "message_id": "str",
       "number": "null|str",
       "order": "null|str",
@@ -625,6 +649,15 @@
     "carrier": "null|str",
     "eta": "null|str",
     "id": "str",
+    "items": [
+     {
+      "name": "str",
+      "price": "str",
+      "qty": "num"
+     }
+    ],
+    "items_from": "null|str",
+    "items_more": "num",
     "link": "str",
     "number": "null|str",
     "order": "null|str",
@@ -636,6 +669,9 @@
      {
       "date": "str",
       "eta": "null|str",
+      "items": [
+       "str"
+      ],
       "message_id": "str",
       "number": "null|str",
       "order": "null|str",

@@ -399,6 +399,15 @@ Aktivität und den Kontakten ermittelt; davon geht nichts an eine KI, und ohne d
   des Shops. *Verfolgen* öffnet die Seite des Versanddienstes, *Bestellung* die Bestellseite des Shops (Amazon, eBay,
   Apple), wenn kein Versanddienst bekannt ist – nie einen Link aus der Mail. Zugestellte Pakete bleiben zwei Tage stehen. Der Sensor *Pakete unterwegs* und das Ereignis
   `friedafetch_mail_package` machen Automationen möglich.
+  **Was drin ist:** Auch Bestellbestätigungen zählen (Schritt *Bestellt*), mit ihren Artikeln – in den üblichen Formen
+  „1 x Name“, Amazons „Name / Menge: 1“, eBays „Name / Artikelnr.“, Apples „Name / Preis / Anzahl“, sonst der Name im
+  Betreff („Bestellt: „…“ und 1 weiterer Artikel“); Versandkosten, Summen und Gebühren sind keine Artikel. Die
+  Bestellnummer verbindet die Bestellung mit ihren Versandmails. Eine Versandmail mit eigener Liste zeigt diese; eine
+  ohne (Apple, viele Shops) bekommt die bestellten Artikel, die sie nennt – so zeigt ein Paket, was in *ihm* ist, auch
+  wenn eine Bestellung in mehreren Paketen kommt (eine andere Sendungsnummer ergibt ein eigenes Paket). Bis dahin zeigt
+  die Zeile die Artikel der Bestellung mit einem Einkaufswagen („laut Bestellung“). Eine Bestellung ohne Artikel (ein
+  Download) und eine Mail mit nur einem Wort wie „versendet“ (eine verschickte Anfrage) sind keine Pakete; nur
+  bestellte zählen nicht als unterwegs.
   **Woher?** (die ⓘ-Taste eines Pakets) zeigt die Mails, aus denen es zusammengesetzt ist, neueste zuerst, mit dem,
   was Frieda in jeder erkannt hat (Nummer, Bestellung, voraussichtlicher Tag, genannter Shop). Ist etwas schiefgegangen,
   korrigierst du es dort: *Als eigenes Paket* nimmt eine Mail heraus, *Gehört zu* + *Zusammenführen* vereint zwei

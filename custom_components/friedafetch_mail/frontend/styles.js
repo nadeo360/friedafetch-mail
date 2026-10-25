@@ -631,7 +631,18 @@ export const STYLE = `
   .mlist li.m.sw-go.sw-l .swbg.r { background: color-mix(in srgb, var(--success-color, #43a047) 30%, transparent); }
 
   /* ---------------------------------------------------------------- parcels: steps and today's window */
-  .pstep { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-top: 6px; max-width: 360px; }
+  .pstep { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-top: 6px; max-width: 420px; }
+  .fy-items { display: flex; align-items: flex-start; gap: 5px; margin-top: 3px; font-size: 13px; color: var(--primary-text-color); --mdc-icon-size: 15px; }
+  .fy-items ha-icon { flex: none; margin-top: 1px; color: var(--secondary-text-color); }
+  .fy-items span { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .fy-items.ordered { color: var(--secondary-text-color); }
+  .fy-contents { border: 1px solid var(--divider-color, #e0e0e0); border-radius: 10px; padding: 8px 10px; }
+  .fy-contents h4 { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; font-size: 13px; font-weight: 600; --mdc-icon-size: 16px; }
+  .fy-contents ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+  .fy-contents li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; font-size: 13px; align-items: baseline; }
+  .fy-contents .q { color: var(--secondary-text-color); }
+  .fy-contents .pr { color: var(--secondary-text-color); white-space: nowrap; }
+  .fy-contents p { margin: 6px 0 0; font-size: 12px; }
   .pstep .ps { display: grid; gap: 3px; }
   .pstep .ps i { display: block; height: 4px; border-radius: 2px; background: var(--divider-color, #e0e0e0); }
   .pstep .ps.done i, .pstep .ps.now i { background: var(--primary-color); }

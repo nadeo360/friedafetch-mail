@@ -20,7 +20,7 @@ export async function show({ data, rows, q }) {
     ? [{ kind: "push", since: new Date(Date.now() - 3600e3).toISOString(), detail: "connection lost" }, { kind: "throttled", since: new Date().toISOString(), detail: "NO [THROTTLED]" }]
     : [];
   const states = {
-    "sensor.frieda_postfach_privat_pakete_unterwegs": { state: String(fy.parcels.filter((p) => p.status !== "delivered").length), attributes: { out_for_delivery: 1, parcels: fy.parcels.map(({ carrier, number, shop, status, eta, window, url }) => ({ carrier, number, shop, status, eta, window, url })) } },
+    "sensor.frieda_postfach_privat_pakete_unterwegs": { state: String(fy.parcels.filter((p) => p.status !== "delivered" && p.status !== "ordered").length), attributes: { out_for_delivery: 1, parcels: fy.parcels.map(({ carrier, number, shop, status, eta, window, url, items, items_more }) => ({ carrier, number, shop, status, eta, window, url, items: (items || []).slice(0, 5).map((i) => i.name), items_more: (items_more || 0) + Math.max(0, (items || []).length - 5) })) } },
     "sensor.frieda_postfach_privat_wichtige_mails_heute": { state: String(important.length), attributes: { threshold: 4, mails: important.slice(0, 5).map((r) => ({ time: r.time, from: r.name, subject: r.subject, category: r.ai.category, importance: r.ai.importance, reason: r.reason || "", message_id: r.message_id })) } },
     "sensor.frieda_postfach_privat_ungelesen_im_posteingang": { state: String(rows.filter((r) => r.state?.seen === false).length), attributes: {} },
     "binary_sensor.frieda_postfach_privat_problem": { state: problem.length ? "on" : "off", attributes: { problems: problem, throttle: { active: false } } },

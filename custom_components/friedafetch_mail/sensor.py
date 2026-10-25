@@ -257,7 +257,7 @@ class ParcelsSensor(_StatusSensor):
 
     @property
     def native_value(self) -> int:
-        return sum(1 for p in self._link.insights.parcels() if p["status"] != "delivered")
+        return sum(1 for p in self._link.insights.parcels() if p["status"] not in ("delivered", "ordered"))
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -265,7 +265,11 @@ class ParcelsSensor(_StatusSensor):
         return {
             "out_for_delivery": sum(1 for p in listed if p["status"] == "out_for_delivery"),
             "parcels": [
-                {k: p[k] for k in ("carrier", "number", "shop", "status", "eta", "window", "url")}
+                {
+                    **{k: p[k] for k in ("carrier", "number", "shop", "status", "eta", "window", "url")},
+                    "items": [i["name"] for i in p["items"][:5]],  # what is in it (for the card)
+                    "items_more": p["items_more"] + max(0, len(p["items"]) - 5),
+                }
                 for p in listed[:MAX_LISTED]
             ],
         }

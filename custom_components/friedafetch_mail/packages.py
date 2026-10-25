@@ -1,10 +1,15 @@
-"""Parcels on their way, read from shipping mails: carrier, tracking number, status, expected delivery.
+"""Parcels on their way, read from order and shipping mails: carrier, tracking number, status, expected delivery and
+what is in them.
 
 Worked out locally with patterns – no AI. A mail is a candidate by its sender (a carrier) or its subject (shipped,
 on its way, delivered …); only candidates are read, each once. Tracking numbers count only when the carrier is named
 in the mail or the number stands next to a word like "Sendungsnummer" or in a carrier's tracking link, so order and
 customer numbers are not taken for parcels. The tracking link shown is built from the carrier's own address, never
 taken from the mail (a link in a mail may lead anywhere); for a parcel without one, a known shop's own order page.
+
+Order confirmations count too (status "ordered"): their items and order number join the parcel the shop's shipping
+mail is about later. A shipping mail without a list of its own gets the ordered items it names – so a parcel shows
+what is in it, also when an order comes in several parcels.
 
 PARSER bumps when the patterns learn something new: the shipping mails of the last weeks are then read again.
 """
@@ -17,7 +22,10 @@ from typing import Any
 
 # 2: DHL Express waybills, dates with month names and weekdays, shop hints in carrier mails
 # 3: parcels keep the mails they were read from (for "Where from?")
-PARSER = 3
+# 4: order confirmations and the items in a parcel
+# 5: Deutsche Post's international numbers (LX…DE), "Abstellung erfolgt" is delivered, order numbers after a comma
+# 6: ordered items found in shipping mails word by word (non-breaking spaces, line breaks)
+PARSER = 6
 
 # carrier id: (name, sender domains, number patterns, tracking link with {n})
 CARRIERS: dict[str, tuple[str, tuple[str, ...], tuple[str, ...], str]] = {
@@ -25,7 +33,7 @@ CARRIERS: dict[str, tuple[str, tuple[str, ...], tuple[str, ...], str]] = {
         "DHL",
         ("dhl.de", "dhl.com", "deutschepost.de", "dhl.net"),
         # JJD…, 00340…, 12 or 20 digits (DHL Paket), 10 digits (a DHL Express waybill)
-        (r"\bJJD\d{18,20}\b", r"\b00340\d{15}\b", r"\b\d{12}\b", r"\b\d{20}\b", r"\b\d{10}\b"),
+        (r"\bJJD\d{18,20}\b", r"\b00340\d{15}\b", r"\b[A-Z]{2}\d{9}DE\b", r"\b\d{12}\b", r"\b\d{20}\b", r"\b\d{10}\b"),
         "https://www.dhl.de/de/privatkunden/pakete-empfangen/verfolgen.html?piececode={n}",
     ),
     "dpd": (
@@ -52,7 +60,7 @@ CARRIERS: dict[str, tuple[str, tuple[str, ...], tuple[str, ...], str]] = {
 }
 # the carrier is named in the text (for mails from shops)
 _NAMED = {
-    "dhl": r"\bDHL\b|Deutsche Post",
+    "dhl": r"\bDHL\b|Deutsche Post|\b[A-Z]{2}\d{9}DE\b",  # LX700399511DE: Deutsche Post, international
     "dpd": r"\bDPD\b",
     "hermes": r"\bHermes\b",
     "gls": r"\bGLS\b",
@@ -66,13 +74,31 @@ _NUMBER_WORDS = re.compile(
 )
 # a tracking number inside a carrier's link: ?piececode=, ?idc=, /parcel/, ?tracknum=, ?match=
 _LINK_NUMBER = re.compile(
-    r"(?:piececode|idc|identcode|parcelNumber|parcel/|tracknum|trackNums|match)=?/?([0-9A-Z]{10,22})"
+    r"(?:piececode|idc|identcode|parcelNumber|parcel/|tracknum|trackNums|nums|match)=?/?([0-9A-Z]{10,22})"
 )
 
+# an order confirmation (by its subject first): "Bestellbestätigung", "Bestellt: …", "Wir bearbeiten deine Bestellung"
+ORDERED = re.compile(
+    r"bestellbestätigung|auftragsbestätigung|bestellung\s+(?:ist\s+)?(?:erhalten|bestätigt|eingegangen|aufgegeben)|"
+    r"^\W*bestellt\b|bearbeiten\s+(?:deine|ihre)\s+bestellung|vielen dank für (?:deine|ihre|deinen|ihren) "
+    r"(?:bestellung|einkauf)|vorbestellung|order (?:confirmation|confirmed|received|placed)|"
+    r"thank you for your (?:order|purchase)|we(?:'ve| have) received your order",
+    re.IGNORECASE,
+)
+# an order of something that is not sent as a parcel (food, tickets): not read as one
+_NO_PARCELS = (
+    "lieferando.de",
+    "wolt.com",
+    "ubereats.com",
+    "deliveroo.de",
+    "foodora.de",
+    "eventim.de",
+    "ticketmaster.de",
+)
 CANDIDATE = re.compile(
     r"versand|versendet|verschickt|unterwegs|zustell|geliefert|lieferung|liefertermin|sendung|paket|päckchen|"
     r"abholbereit|abholung|packstation|shipped|shipping|shipment|delivery|delivered|out for delivery|tracking|"
-    r"on (its|the) way|parcel|package|dispatched",
+    r"on (its|the) way|parcel|package|dispatched|bestell|order\b",
     re.IGNORECASE,
 )
 # status from the subject first, then the beginning of the text (the order matters: "wird heute zugestellt" is not
@@ -84,7 +110,11 @@ STATUS = (
         r"heute zwischen|out for delivery|arriving today|delivered today|on (its|the) way to you today",
     ),
     ("pickup", r"abholbereit|zur abholung|abholen|packstation|paketshop|filiale|ready for pick-?up|pick it up"),
-    ("delivered", r"zugestellt|geliefert(?! werden)|ausgeliefert|wurde abgeholt|delivered|has been picked up"),
+    (
+        "delivered",
+        r"zugestellt|geliefert(?! werden)|ausgeliefert|wurde abgeholt|abstellung\b.{0,40}\berfolgt|wurde abgestellt|"
+        r"delivered|has been picked up",
+    ),
     ("problem", r"nicht zugestellt|zustellung nicht möglich|verzögert|verspätet|delayed|could not be delivered"),
     (
         "in_transit",
@@ -95,7 +125,7 @@ STATUS = (
 )
 _ORDER = re.compile(
     # an order number has a digit ("Bestellung wurde zugestellt" names none)
-    r"(?:bestell(?:ung|nummer|nr)\.?|order)\s*(?:nr\.?|nummer|number|#|:)?\s*:?\s*((?=[\w-]*\d)[A-Z0-9][\w-]{4,})",
+    r"(?:bestell(?:ung|nummer|nr)\.?|order)\s*(?:nr\.?|nummer|number|#|:|,)?\s*:?\s*((?=[\w-]*\d)[A-Z0-9][\w-]{4,})",
     re.I,
 )
 _MONTHS = {
@@ -184,11 +214,87 @@ def _numbers(carrier: str | None, text: str) -> list[str]:
 
 
 def _status(subject: str, text: str) -> str | None:
-    for part in (subject, text[:600]):
-        for status, pattern in STATUS:
-            if re.search(pattern, part, re.IGNORECASE):
-                return status
-    return None
+    """Shipping words in the subject, then order words there (Amazon's order mail shows "Versendet · In Zustellung" as
+    a progress bar in its text), then the beginning of the text."""
+    for status, pattern in STATUS:
+        if re.search(pattern, subject, re.IGNORECASE):
+            return status
+    if ORDERED.search(subject.strip()):
+        return "ordered"
+    for status, pattern in STATUS:
+        if re.search(pattern, text[:600], re.IGNORECASE):
+            return status
+    return "ordered" if ORDERED.search(text[:400]) else None
+
+
+# ------------------------------------------------------------------ the items of an order or a parcel
+_PRICE_LINE = re.compile(r"^(?:-?\d{1,3}(?:[.\s]\d{3})*(?:[.,]\d{1,2})?\s*(?:€|EUR)|(?:€|EUR)\s*-?\d[\d.,]*)$", re.I)
+_QTY_X = re.compile(r"^(\d{1,3})(?:[.,]0{1,2})?\s*[x×]\s+(\S.{1,150})$", re.I)  # "1.00 x Slice Case – Ink Black"
+_QTY_LINE = re.compile(r"^(?:menge|anzahl|stück|qty|quantity)\s*:?\s*(\d{1,3})\b", re.I)  # Amazon: "Menge: 1"
+_ITEM_NO = re.compile(r"^(?:artikel-?\s?nr\.?|artikelnummer|item\s+(?:no\.?|number|#))\s*:?\s*$", re.I)  # eBay
+_NOT_ITEM = re.compile(
+    r"\b(?:versand|versandkosten|shipping|zwischensumme|gesamt\w*|summe|total|mwst|ust|steuer|rabatt|gutschein|"
+    r"coupon|discount|handling|bearbeitung|gebühr|fee|trade.?in|eintausch|pfand|zahlung|payment|lieferung)\b",
+    re.I,
+)
+# Amazon and eBay name the first item in the subject: "Bestellt: „Greluma 1,5 mm²...“ und 1 mehr Artikel"
+_SUBJECT_ITEM = re.compile(
+    r"^\W*(?:bestellt|versendet|versandt|in zustellung|geliefert|zugestellt|bestellung bestätigt|bestellung zugestellt)"
+    r"\s*:?\s*[„\"“']?(.+?)(?:\.{3}|…)?[“\"”']?(?:\s+und\s+(\d+)\s+(?:weitere|mehr|weiterer)\b.*)?$",
+    re.I,
+)
+_SUBJECT_MORE = re.compile(r"\bund\s+(\d+)\s+(?:weitere|mehr|weiterer)", re.I)
+MAX_ITEMS = 20
+
+
+def _item_name(line: str) -> str | None:
+    name = re.sub(r"\s+", " ", line.strip(" *•·-\t")).strip()
+    if not 3 <= len(name) <= 160 or not re.search(r"[A-Za-zÄÖÜäöüß]", name) or name.endswith(":"):
+        return None
+    if "://" in name or "@" in name or _NOT_ITEM.search(name) or _PRICE_LINE.match(name):
+        return None
+    return name[:120]
+
+
+def items(subject: str, text: str) -> tuple[list[dict[str, Any]], int]:
+    """The items a mail lists, as [{name, qty, price}], and how many more it only counts ("und 2 weitere").
+
+    The usual forms: "1 x Name", "* Name / Menge: 1 / 9.99 EUR" (Amazon), "Name / Artikelnr.:" (eBay), "Name /
+    2.549,00 € / 1" (Apple). Shipping costs, sums and fees are not items.
+    """
+    lines = [x.strip() for x in str(text or "").replace("\r", "").split("\n")]
+    filled = [i for i, x in enumerate(lines) if x]
+
+    def after(i: int, n: int = 1) -> str:
+        nxt = [j for j in filled if j > i]
+        return lines[nxt[n - 1]] if len(nxt) >= n else ""
+
+    found: dict[str, dict[str, Any]] = {}
+
+    def add(name: str | None, qty: int = 1, price: str | None = None) -> None:
+        if name and name.lower() not in found and len(found) < MAX_ITEMS:
+            found[name.lower()] = {"name": name, "qty": max(1, min(qty, 999)), "price": price}
+
+    for i in filled:
+        line = lines[i]
+        if m := _QTY_X.match(line):
+            add(_item_name(m.group(2)), int(m.group(1)), after(i) if _PRICE_LINE.match(after(i)) else None)
+        elif line[:2] in ("* ", "• ", "· ") and (q := _QTY_LINE.match(after(i)) or _QTY_LINE.match(after(i, 2))):
+            price = next((after(i, k) for k in (2, 3) if _PRICE_LINE.match(after(i, k))), None)
+            add(_item_name(line), int(q.group(1)), price)
+        elif _ITEM_NO.match(after(i)):
+            add(_item_name(line))
+        elif _PRICE_LINE.match(after(i)) and re.fullmatch(r"\d{1,3}", after(i, 2)):
+            add(_item_name(line), int(after(i, 2)), after(i))
+    listed = list(found.values())
+    more = 0
+    if m := _SUBJECT_MORE.search(subject):
+        more = max(0, int(m.group(1)) + 1 - len(listed) if listed else int(m.group(1)))
+    if not listed and (m := _SUBJECT_ITEM.match(subject.strip())):
+        name = _item_name(m.group(1))
+        if name:
+            listed = [{"name": name, "qty": 1, "price": None, "short": True}]  # cut off in the subject
+    return listed, more
 
 
 def _first_day(near: str, sent: date) -> date | None:
@@ -251,12 +357,17 @@ def parse(summary: dict[str, Any], text: str, sent: datetime) -> dict[str, Any] 
     status = _status(subject, text)
     if status is None and not numbers:
         return None
-    if summary.get("newsletter") and not numbers and carrier is None:
+    if any(domain == d or domain.endswith("." + d) for d in _NO_PARCELS):
+        return None  # food, tickets: an order, but no parcel
+    order = _ORDER.search(whole)
+    listed, more = items(subject, text)
+    if status == "ordered" and not listed:
+        return None  # an order without items to show (a download, a "thank you" without a list): not a parcel
+    if summary.get("newsletter") and not numbers and carrier is None and not order:
         return None  # an offer with "free delivery"
     eta, window = _eta(whole, sent.date())
     if status == "out_for_delivery" and eta is None:
         eta = sent.date().isoformat()  # "kommt heute": the day of the mail
-    order = _ORDER.search(whole)
     from_carrier = carrier is not None and any(domain.endswith(d) for d in CARRIERS[carrier][1])
     hint = _SHOP_HINT.search(text) if from_carrier else None
     return {
@@ -269,6 +380,8 @@ def parse(summary: dict[str, Any], text: str, sent: datetime) -> dict[str, Any] 
         "shop": None if from_carrier else (sender.get("name") or domain or None),
         "domain": domain,
         "shop_hint": hint.group(1).strip() if hint else None,  # the shop a carrier names
+        "items": listed,
+        "more": more,
         "subject": subject[:160],
         "message_id": summary.get("message_id"),
         "date": sent.isoformat(),

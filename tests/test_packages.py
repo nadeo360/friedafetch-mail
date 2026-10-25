@@ -413,3 +413,234 @@ def test_parser_on_hostile_text() -> None:
         started = time.perf_counter()
         parse(_mail("noreply@dhl.de", "Ihre Sendung kommt heute"), text, SENT)
         assert time.perf_counter() - started < 1.0, text[:40]
+
+
+# ------------------------------------------------------------------ orders and what is in a parcel (real formats)
+APPLE_ORDER = (
+    "Bestellnummer W1234567890\r\nBestellt am 16/10/2026\r\n\r\nVielen Dank für deine Bestellung.\r\n\r\nVersand 1:\r\n"
+    "------------------------------ \r\nLieferung: Fr. 23 Okt. per Expressversand\r\niPhone Duo 512 GB Sternenweiß\r\n"
+    "2.549,00 €\r\n1\r\n 2.549,00 € ------\r\nApple Trade In\r\n\r\nGeschätzter Eintauschwert:\r\n865,00 €\r\n"
+    "Dein Gerät:\r\niPhone 17 Pro Max\r\n\r\nVersand 2:\r\n------------------------------ \r\n"
+    "Lieferung: Fr. 23 Okt. per Expressversand\r\nAppleCare One\r\n20,99 €\r\n1\r\n 20,99 € \r\nZwischensumme :\r\n"
+)
+APPLE_SHIPPED = (
+    "Apple Store\r\n\r\nBestellnummer W1234567890\r\n\r\nDeine Artikel wurden versendet.\r\n\r\n Lieferung  23/10/2026\r\n"
+    "   Expressversand\r\n Sendungsverfolgung\r\nUnterschrift erforderlich\r\n------\r\n\r\niPhone Duo 512 GB Sternenweiß"
+    "\r\n\r\n\r\nnot defined\r\n\r\nVersandadresse\r\n"
+)
+AMAZON_ORDER = (
+    "    Vielen Dank für deine Bestellung!\r\nBestellt\r\n\r\nVersendet\r\n\r\nIn Zustellung\r\n\r\nZugestellt\r\n\r\n"
+    "Zustellung: Montag\r\n\r\nBestellnr.\r\n304-1111111-2222222\r\n\r\n* Greluma 1,5 mm² Kabelmarkierungen, 300 Stück\r\n"
+    "  Menge: 1\r\n  9.99 EUR\r\n\r\n* Kabelkennzeichnung 0-9 (100Pcs 2.5mm²)\r\n  Menge: 2\r\n  6.53 EUR\r\n\r\nSumme\r\n16.52 EUR\r\n"
+)
+NUDIENT_ORDER = (
+    "BESTELLBESTÄTIGUNG\r\n\r\nBestellnummer: 1195235\r\nBestelldatum: 16-10-2026\r\n\r\nLieferadresse\r\n\r\n"
+    "Bestellübersicht\r\n\r\nhttps://shop.example/products/slice-case\r\n1.00 x Slice Case - Ink Black / iPhone Duo\r\n"
+    "35.00 EUR\r\n\r\nhttps://shop.example/products/prio\r\n1.00 x Priority order handling\r\n1.00 EUR\r\n\r\nVersand:\r\n"
+    "0.00 EUR\r\nGesamtsumme:\r\n36.00 EUR\r\n"
+)
+EBAY_SHIPPED = (
+    "Bald ist es so weit! Ihre Bestellung befindet sich in der Zustellung.\r\n\nSendung verfolgen\r\n\nSchweberegal "
+    "Wandregal Esche Whiskey\r\n\nArtikelnr.:\r\n\n257492762587\r\n\nBestellnummer:\r\n\n19-15263-93328\r\n\nSchweberegal "
+    "Wandregal Esche Whiskey\r\n\nArtikelnr.:\r\n\n257492762587\r\n\nVersanddienstleister:\r\n\nDPD Germany\r\n"
+)
+
+
+def test_order_confirmations_and_their_items() -> None:
+    amazon = parse(
+        _mail("bestellbestaetigung@amazon.de", "Bestellt: „Greluma 1,5 mm²...“ und 1 mehr Artikel", "Amazon.de"),
+        AMAZON_ORDER,
+        SENT,
+    )
+    assert amazon["status"] == "ordered"  # not "In Zustellung" from Amazon's progress bar
+    assert amazon["order"] == "304-1111111-2222222"
+    assert [(i["name"], i["qty"], i["price"]) for i in amazon["items"]] == [
+        ("Greluma 1,5 mm² Kabelmarkierungen, 300 Stück", 1, "9.99 EUR"),
+        ("Kabelkennzeichnung 0-9 (100Pcs 2.5mm²)", 2, "6.53 EUR"),
+    ]
+    shop = parse(_mail("shop@nudient.example", "Bestellbestätigung", "NUDIENT", newsletter=True), NUDIENT_ORDER, SENT)
+    assert shop["status"] == "ordered" and [i["name"] for i in shop["items"]] == ["Slice Case - Ink Black / iPhone Duo"]
+    apple = parse(
+        _mail("your_order@orders.apple.example", "Wir bearbeiten deine Bestellung W1234567890"), APPLE_ORDER, SENT
+    )
+    assert [i["name"] for i in apple["items"]] == ["iPhone Duo 512 GB Sternenweiß", "AppleCare One"]  # no trade-in
+    ebay = parse(
+        _mail("ebay@ebay.example", "IN ZUSTELLUNG: Schweberegal W... und 2 weitere(r) Artikel"), EBAY_SHIPPED, SENT
+    )
+    assert ebay["status"] == "out_for_delivery" and [i["name"] for i in ebay["items"]] == [
+        "Schweberegal Wandregal Esche Whiskey"
+    ]
+    assert ebay["more"] == 2
+    # only the subject: the name cut off there
+    short = parse(
+        _mail("bestellbestaetigung@amazon.de", "Bestellt: „Irfora HT97D Digitaler...“"), "Bestellnr. 304-1-2", SENT
+    )
+    assert short["items"][0]["name"] == "Irfora HT97D Digitaler"
+    # nothing for food and tickets, nor a thank-you without an order
+    assert parse(_mail("no-reply@lieferando.de", "Stefan, Bestellung erhalten"), "Lieferung in 30 Min.", SENT) is None
+    assert (
+        parse(_mail("news@shop.example", "Vielen Dank für Ihre Bestellung!"), "Hier ist ein Gutschein.", SENT) is None
+    )
+
+
+async def test_the_order_tells_what_is_in_the_parcel(hass: HomeAssistant) -> None:
+    """Apple: the order lists two things, the shipping mail names the one in this parcel."""
+    insights = await _insights(hass)
+    now = dt_util.now()
+    insights._merge_parcel(  # noqa: SLF001
+        _info(
+            "your_order@orders.apple.example",
+            "Wir bearbeiten deine Bestellung W1234567890",
+            "Apple Store",
+            APPLE_ORDER,
+            now - timedelta(days=6),
+            "<o1>",
+        ),
+        fire=False,
+    )
+    [parcel] = insights.parcels()
+    assert parcel["status"] == "ordered" and parcel["items_from"] == "order" and len(parcel["items"]) == 2
+    assert insights.week()["parcels"] == 0  # ordered is not on its way yet
+    insights._merge_parcel(  # noqa: SLF001
+        _info(
+            "shipping@orders.apple.example",
+            "Versandbenachrichtigung W1234567890",
+            "Apple Store",
+            APPLE_SHIPPED,
+            now - timedelta(days=1),
+            "<s1>",
+        ),
+        fire=False,
+        text=APPLE_SHIPPED,
+    )
+    [parcel] = insights.parcels()
+    assert parcel["status"] == "in_transit" and parcel["items_from"] == "parcel"
+    assert [i["name"] for i in parcel["items"]] == ["iPhone Duo 512 GB Sternenweiß"]  # not the AppleCare
+    assert [s["items"] for s in parcel["sources"]] == [
+        ["iPhone Duo 512 GB Sternenweiß", "AppleCare One"],
+        ["iPhone Duo 512 GB Sternenweiß"],
+    ]
+
+
+async def test_an_order_in_two_parcels(hass: HomeAssistant) -> None:
+    insights = await _insights(hass)
+    now = dt_util.now()
+    order = (
+        "Vielen Dank für Ihre Bestellung 4711-2026\n2 x Sofa Beige\n499,00 €\n1 x Kissen Grau\n19,00 €\n"
+        "Lieferadresse: Beispielweg 1"
+    )
+    insights._merge_parcel(  # noqa: SLF001
+        _info(
+            "shop@moebel.example", "Bestellbestätigung 4711-2026", "Möbelhaus", order, now - timedelta(days=4), "<o>"
+        ),
+        fire=False,
+    )
+    for n, (name, number) in enumerate(
+        (("Sofa Beige", "00340434161094000011"), ("Kissen Grau", "00340434161094000022"))
+    ):
+        text = (
+            f"Ihre Bestellung 4711-2026 wurde mit DHL versendet.\nSendungsnummer: {number}\nIn diesem Paket: {name}\n"
+        )
+        insights._merge_parcel(  # noqa: SLF001
+            _info(
+                "shop@moebel.example",
+                "Ihre Bestellung ist unterwegs",
+                "Möbelhaus",
+                text,
+                now - timedelta(days=3 - n),
+                f"<s{n}>",
+            ),
+            fire=False,
+            text=text,
+        )
+    listed = sorted(insights.parcels(), key=lambda p: p["number"] or "")
+    assert [(p["number"], [i["name"] for i in p["items"]]) for p in listed] == [
+        ("00340434161094000011", ["Sofa Beige"]),
+        ("00340434161094000022", ["Kissen Grau"]),
+    ]
+    assert all(p["order"] == "4711-2026" and p["items_from"] == "parcel" for p in listed)
+
+
+NUDIENT_SHIPPED = (
+    "VERSANDBESTÄTIGUNG\r\n\r\nLieber Stefan,\r\nGute Nachrichten! Deine Bestellung, 1195235, ist auf dem Weg und wird "
+    "dir in Kürze zugestellt.\r\n\r\nSendungsnummer:\r\n\r\nLX700399511DE\r\n\r\n[Lieferung verfolgen]"
+    "(https://shop.example/apps/track123?nums=LX700399511DE)\r\n"
+)
+
+
+async def test_lessons_from_real_mails(hass: HomeAssistant) -> None:
+    """An order number after a comma, Deutsche Post's international number, "Abstellung erfolgt", and what is no parcel."""
+    insights = await _insights(hass)
+    now = dt_util.now()
+    insights._merge_parcel(  # noqa: SLF001
+        _info("shop@nudient.example", "Bestellbestätigung", "NUDIENT", NUDIENT_ORDER, now - timedelta(days=3), "<n1>"),
+        fire=False,
+    )
+    shipped = parse(
+        _mail("shop@nudient.example", "Ihre Bestellung ist auf dem Weg", "NUDIENT", newsletter=True),
+        NUDIENT_SHIPPED,
+        SENT,
+    )
+    assert shipped["order"] == "1195235" and shipped["carrier"] == "dhl" and shipped["numbers"] == ["LX700399511DE"]
+    insights._merge_parcel(
+        shipped | {"message_id": "<n2>", "date": (now - timedelta(days=1)).isoformat()},
+        fire=False,
+        text=NUDIENT_SHIPPED,
+    )
+    [parcel] = insights.parcels()
+    assert parcel["status"] == "in_transit" and parcel["url"].endswith("LX700399511DE")
+    assert [i["name"] for i in parcel["items"]] == ["Slice Case - Ink Black / iPhone Duo"]  # named by the order
+
+    dropped = parse(
+        _mail("noreply@dpd.de", "Die Abstellung Ihres DPD Pakets ist erfolgt"), "Paketnummer 01126812252093", SENT
+    )
+    assert dropped["status"] == "delivered"
+    # a booking request "versendet": no number, no order, no carrier, no items – it starts no parcel
+    request = parse(
+        _mail("noreply@booking.example", "Anfrage an Aparthotel Beispielstadt versendet"), "Ihre Nachricht.", SENT
+    )
+    assert request is not None and insights._merge_parcel(request | {"message_id": "<b1>"}, fire=False) is False  # noqa: SLF001
+    # a download: an order confirmation without items
+    assert parse(_mail("ea@ea.example", "Bestellbestätigung"), "Bestellnummer: 1005429910250\nDanke!", SENT) is None
+
+
+async def test_an_order_read_after_its_shipping_mail(hass: HomeAssistant) -> None:
+    """The order comes in a later look: the shipping mail is read again for the items it names."""
+    insights = await _insights(hass)
+    now = dt_util.now()
+    shipped = _info(
+        "shipping@orders.apple.example",
+        "Versandbenachrichtigung W1234567890",
+        "Apple Store",
+        APPLE_SHIPPED,
+        now - timedelta(days=1),
+        "<s1>",
+    )
+    insights._merge_parcel(shipped | {"mailbox": "Shop", "uid": 359}, fire=False, text=APPLE_SHIPPED)  # noqa: SLF001
+    order = _info(
+        "your_order@orders.apple.example",
+        "Wir bearbeiten deine Bestellung W1234567890",
+        "Apple Store",
+        APPLE_ORDER,
+        now - timedelta(days=6),
+        "<o1>",
+    )
+    insights._merge_parcel(order | {"mailbox": "Shop", "uid": 346}, fire=False)  # noqa: SLF001
+    [parcel] = insights.packages
+    insights._mail = MagicMock()  # noqa: SLF001
+    insights._mail.async_get_message = AsyncMock(return_value={"body": APPLE_SHIPPED})  # noqa: SLF001
+    assert await insights._items_from_order(parcel) is True  # noqa: SLF001
+    insights._mail.async_get_message.assert_awaited_once_with("Shop", 359, max_chars=20000)  # noqa: SLF001
+    [view] = insights.parcels()
+    assert view["items_from"] == "parcel" and [i["name"] for i in view["items"]] == ["iPhone Duo 512 GB Sternenweiß"]
+    assert await insights._items_from_order(parcel) is False  # noqa: SLF001 - once
+
+
+def test_names_found_across_odd_spaces() -> None:
+    """Real shipping mails split names with non-breaking spaces and line breaks."""
+    from custom_components.friedafetch_mail.insights import _names_in  # noqa: PLC0415
+
+    items = [{"name": "iPhone Duo 512 GB Sternenweiß"}, {"name": "AppleCare One"}]
+    found = _names_in(items, "Lieferung\r\n\r\niPhone Duo 512 GB\r\nSternenweiß\r\n")
+    assert [i["name"] for i in found] == ["iPhone Duo 512 GB Sternenweiß"]
+    assert _names_in(items, "Apple Care is great") == []  # word for word, not letters across words

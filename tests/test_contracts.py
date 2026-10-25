@@ -274,6 +274,17 @@ async def test_panel_answers_keep_their_shape(hass: HomeAssistant, hass_ws_clien
         dt_util.now(),
     )
     link.insights._merge_parcel(from_carrier, fire=False)  # noqa: SLF001 - no shop, no order, a time window
+    ordered = parse(
+        {
+            "from": [{"name": "Amazon.de", "email": "bestellbestaetigung@amazon.de"}],
+            "subject": "Bestellt: „Kabelmarkierungen...“",
+            "message_id": "<o1@x>",
+        },
+        "Vielen Dank für deine Bestellung!\nBestellnr.\n304-1111111-2222222\n* Kabelmarkierungen, 300 Stück\n  Menge: 1\n"
+        "  9.99 EUR\n",
+        dt_util.now(),
+    )
+    link.insights._merge_parcel(ordered, fire=False)  # noqa: SLF001 - only ordered: the order's items
     link.insights.parcel_ignored.append("ads.example")
     shapes["friedafetch_mail/insights"] = await call("friedafetch_mail/insights")
     shapes["friedafetch_mail/insights/parcel"] = await call(

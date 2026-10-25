@@ -202,8 +202,22 @@ function derive(data, rows) {
     k3: [src("<k3a@example>", "Ihr Paket wurde zugestellt", 36, "delivered", { number: "01234567890123" })],
     k4: [src("<k4a@example>", "Ihre Bestellung ist unterwegs", 48, "in_transit", { order: "12-34567-89012" })],
   };
-  const senders = { k1: ["dhl.de", "shop.example"], k2: ["myhermes.de"], k3: ["dpd.de"], k4: ["ebay.com"] };
-  for (const parcel of data["friedafetch_mail/insights"].parcels) Object.assign(parcel, { sources: sources[parcel.id], senders: senders[parcel.id] });
+  const senders = { k1: ["dhl.de", "shop.example"], k2: ["myhermes.de"], k3: ["dpd.de"], k4: ["ebay.com"], k5: ["amazon.de"] };
+  // what is in them: from the shipping mail (k1, k4), or as ordered (k5)
+  const item = (name, qty = 1, price = null) => ({ name, qty, price });
+  const contents = {
+    k1: [[item("Sofa-Kissen Leinen, Salbeigrün", 2, "39,90 €"), item("Kuscheldecke Waffelpiqué 150 × 200 cm", 1, "49,00 €")], 0, "parcel"],
+    k2: [[item("Esstisch Eiche massiv 180 cm", 1, "899,00 €")], 0, "parcel"],
+    k3: [[], 0, null],
+    k4: [[item("Schweberegal Wandregal Esche Whiskey")], 2, "parcel"],
+    k5: [[item("Kabelmarkierungen 1,5 mm², 300 Stück", 1, "9.99 EUR"), item("Kabelkennzeichnung 0-9 (100Pcs 2.5mm²)", 2, "6.53 EUR")], 0, "order"],
+  };
+  sources.k5 = [src("<k5a@example>", "Bestellt: „Kabelmarkierungen…“ und 1 weiterer Artikel", 60 * 7, "ordered", { order: "304-1111111-2222222" })];
+  for (const parcel of data["friedafetch_mail/insights"].parcels) {
+    const [items, more, from] = contents[parcel.id] || [[], 0, null];
+    const own = (sources[parcel.id] || []).map((x) => ({ ...x, items: x.status === "ordered" || x === sources[parcel.id].at(-1) ? items.map((i) => i.name) : [] }));
+    Object.assign(parcel, { sources: own, senders: senders[parcel.id], items, items_more: more, items_from: from });
+  }
 }
 
 // For you: the week, dates the AI read, sent mail without an answer, rule suggestions, newsletters
@@ -231,6 +245,8 @@ function insights(data, rows) {
       { id: "k2", carrier: "Hermes", number: "H1001234567890123456", url: "https://www.myhermes.de/empfangen/sendungsverfolgung/sendungsinformation/#H1001234567890123456", shop: "Möbelhaus", order: null, status: "in_transit", eta: day(3), window: null, subject: "Ihre Bestellung ist unterwegs", updated: ago(1), link: "carrier" },
       { id: "k3", carrier: "DPD", number: "01234567890123", url: "https://tracking.dpd.de/status/de_DE/parcel/01234567890123", shop: "Gartenmarkt", order: null, status: "delivered", eta: null, window: null, subject: "Ihr Paket wurde zugestellt", updated: ago(0.6), link: "carrier" },
       { id: "k4", carrier: null, number: null, url: "https://www.ebay.de/mye/myebay/purchase", shop: "eBay", order: "12-34567-89012", status: "in_transit", eta: day(2), window: null, subject: "Ihre Bestellung ist unterwegs", updated: ago(0.8), link: "shop" },
+      // only ordered so far: the order's items, the parcel comes later
+      { id: "k5", carrier: null, number: null, url: "https://www.amazon.de/gp/your-account/order-details?orderID=304-1111111-2222222", shop: "Amazon.de", order: "304-1111111-2222222", status: "ordered", eta: day(4), window: null, subject: "Bestellt: „Kabelmarkierungen…“ und 1 weiterer Artikel", updated: ago(0.3), link: "shop" },
     ],
     proposals: [
       { id: "p1", status: "open", created: ago(0.1), rating_id: "r0", message_id: "<test-frieda@example>", subject: "Kurze Frage zu Samstag", from: "Erika Mustermann", kind: "appointment", title: "Grillen bei Erika", start: day(3, "18:00"), end: day(3, "22:00"), all_day: false, location: "Gartenweg 5" },
@@ -601,7 +617,7 @@ export function install({ data, q }) {
       const list = { rule: "suggestions", followup: "followups", subscription: "subscriptions", proposal: "proposals", package: "parcels" }[m.kind];
       fy[list] = fy[list].filter((x) => x.id !== m.item_id);
       if (m.kind !== "proposal" && m.kind !== "package") fy.dismissed[m.kind] = (fy.dismissed[m.kind] || 0) + 1;
-      fy.week.parcels = fy.parcels.filter((x) => x.status !== "delivered").length;
+      fy.week.parcels = fy.parcels.filter((x) => x.status !== "delivered" && x.status !== "ordered").length;
       fy.week.waiting = fy.followups.length;
       fy.week.proposals = fy.proposals.length;
       return fy;
@@ -630,7 +646,7 @@ export function install({ data, q }) {
         if (m.sender) fy.parcel_ignored.push(...parcel.senders.filter((d) => !fy.parcel_ignored.includes(d)));
         fy.parcels = fy.parcels.filter((x) => x !== parcel);
       }
-      fy.week.parcels = fy.parcels.filter((x) => x.status !== "delivered").length;
+      fy.week.parcels = fy.parcels.filter((x) => x.status !== "delivered" && x.status !== "ordered").length;
       return fy;
     }
     if (m.type === "friedafetch_mail/insights/calendars") {

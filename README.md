@@ -374,6 +374,14 @@ the mailbox, the activity and the contacts; nothing of it goes to an AI, and not
   the shop (“from APPLE”) joins the shop's order. *Track* opens the carrier's own tracking page, *Order* the shop's
   order page (Amazon, eBay, Apple) when no carrier is known – never a link from the mail. Delivered parcels stay for two
   days. The sensor *Parcels on their way* and the event `friedafetch_mail_package` make automations possible.
+  **What is in it:** order confirmations count too (step *Ordered*), with their items – in the usual forms “1 x Name”,
+  Amazon's “Name / Menge: 1”, eBay's “Name / Artikelnr.”, Apple's “Name / price / quantity”, else the name in the
+  subject (“Bestellt: „…“ und 1 weiterer Artikel”); shipping costs, sums and fees are not items. The order number joins
+  the order and its shipping mails. A shipping mail with a list of its own shows that; one without (Apple, many shops)
+  gets the ordered items it names – so a parcel shows what is in *it*, also when an order comes in several parcels (a
+  different tracking number makes a parcel of its own). Until then the row shows the order's items with a cart
+  (“as ordered”). An order without items (a download) and a mail with nothing but a word like “versendet” (a request
+  sent) are no parcels; only ordered ones do not count as on their way.
   **Where from?** (the ⓘ button of a parcel) lists the mails it was put together from, newest first, with what Frieda
   read in each (number, order, expected day, the shop it names). If something went wrong you can correct it there:
   *Make it a parcel of its own* takes a mail out, *Belongs to* + *Merge* joins two parcels, *Not a parcel* hides it,

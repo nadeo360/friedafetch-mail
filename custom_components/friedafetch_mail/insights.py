@@ -88,9 +88,10 @@ PACKAGE_READS = 40  # shipping mails read per look (each once)
 MAX_PARSED = 1000
 SOURCE_FIELDS = (
     "message_id", "subject", "date", "status", "carrier", "numbers", "order", "eta", "window", "shop", "shop_hint",
-    "domain",
+    "domain", "items", "more", "mailbox", "uid", "matched",
 )  # fmt: skip
-PACKAGE_ORDER = {"out_for_delivery": 0, "pickup": 1, "problem": 2, "in_transit": 3, "delivered": 4}
+PACKAGE_ORDER = {"out_for_delivery": 0, "pickup": 1, "problem": 2, "in_transit": 3, "ordered": 4, "delivered": 5}
+NOT_ON_THE_WAY = ("delivered", "ordered")  # not counted as parcels on their way
 WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 AUTOMATED = re.compile(
     r"(^|[._+-])(no-?reply|do-?not-?reply|donotreply|noreply|notifications?|notify|mailer-daemon|postmaster|bounces?|"
@@ -113,6 +114,21 @@ def _imap_date(day: date) -> str:
 
 def _id(*parts: Any) -> str:
     return hashlib.sha1("\x1f".join(str(p) for p in parts).encode(), usedforsecurity=False).hexdigest()[:12]
+
+
+def _words(text: str) -> str:
+    """Text as plain words: non-breaking spaces, line breaks and punctuation in a mail do not hide a name."""
+    return " ".join(re.findall(r"\w+", str(text).casefold()))
+
+
+def _names_in(items: list[dict[str, Any]], text: str) -> list[dict[str, Any]]:
+    """The ordered items a shipping mail names (by the beginning of their names)."""
+    words = f" {_words(text)} "
+    return [
+        {**i, "from_order": True}
+        for i in items
+        if (key := _words(i.get("name") or "")[:28].strip()) and f" {key}" in words
+    ]
 
 
 def _site(address: str) -> str:
@@ -937,9 +953,13 @@ class Insights:
                 continue
             self.parsed.append(str(summary["message_id"]))
             sent = dt_util.parse_datetime(str(message.get("date") or summary.get("date") or "")) or dt_util.now()
-            info = shipping.parse({**summary, **message}, str(message.get("body") or ""), dt_util.as_local(sent))
+            text = str(message.get("body") or "")
+            info = shipping.parse({**summary, **message}, text, dt_util.as_local(sent))
             if info is not None:
-                changed |= self._merge_parcel(info, fire=fire)
+                info.update(mailbox=folder, uid=int(summary["uid"]))  # to read it again when its order comes later
+                changed |= self._merge_parcel(info, fire=fire, text=text)
+        for parcel in self.packages:
+            changed |= await self._items_from_order(parcel)
         self.parsed = self.parsed[-MAX_PARSED:]
         self._prune_parcels()
         await self._save()
@@ -975,13 +995,70 @@ class Insights:
                 return max(same_sender, key=lambda p: p.get("updated") or "")
         return None
 
-    def _merge_parcel(self, info: dict[str, Any], *, fire: bool) -> bool:
-        keys = [f"{info['carrier']}:{n}" for n in info["numbers"]]
+    @staticmethod
+    def _ordered_items(parcel: dict[str, Any] | None) -> list[dict[str, Any]]:
+        """The items of the order confirmations among a parcel's mails."""
+        out: dict[str, dict[str, Any]] = {}
+        for x in (parcel or {}).get("sources") or []:
+            if x.get("status") == "ordered":
+                for item in x.get("items") or []:
+                    out.setdefault(str(item.get("name")).lower(), item)
+        return list(out.values())
+
+    async def _items_from_order(self, parcel: dict[str, Any]) -> bool:
+        """An order read after its shipping mails: those are read again for the ordered items they name."""
+        ordered = self._ordered_items(parcel)
+        waiting = [
+            x
+            for x in parcel.get("sources") or []
+            if x.get("status") != "ordered"
+            and not x.get("items")
+            and x.get("mailbox")
+            and x.get("uid") is not None
+            and not x.get("matched")
+        ]
+        if not ordered or not waiting:
+            return False
+        # mails merged before the order came: read again (the stored marks of an older try do not count)
+        changed = False
+        for source in waiting:
+            source["matched"] = True  # once
+            try:
+                message = await self._mail.async_get_message(source["mailbox"], int(source["uid"]), max_chars=20000)
+            except (MailError, MailboxNotFound) as err:
+                _LOGGER.debug("Parcels: reading a shipping mail again failed: %s", err)
+                continue
+            named = _names_in(ordered, str(message.get("body") or ""))
+            if named:
+                source["items"] = named
+                changed = True
+        return changed
+
+    def _merge_parcel(self, info: dict[str, Any], *, fire: bool, text: str = "") -> bool:
+        number_keys = [f"{info['carrier']}:{n}" for n in info["numbers"]]
+        keys = list(number_keys)
         if info.get("order"):
             keys.append(f"order:{info['domain']}:{info['order']}")
         if not keys:
             keys = [f"mail:{info['message_id']}"]
         parcel = self._same_parcel(info, keys)
+        ordered = self._ordered_items(parcel)
+        if (
+            parcel is not None
+            and number_keys
+            and parcel.get("number")
+            and not set(parcel["keys"]) & set(number_keys)
+            and info["status"] != "ordered"
+        ):
+            parcel = None  # another parcel of the same order (a different tracking number): a parcel of its own
+        if info["status"] != "ordered" and not info.get("items") and ordered and text:
+            # a shipping mail without a list of its own: the ordered items it names are the ones in this parcel
+            named = _names_in(ordered, text)
+            if named:
+                info["items"] = named
+        weak = not number_keys and not info.get("order") and not info.get("items") and not info.get("carrier")
+        if parcel is None and weak:
+            return False  # only a word like "versendet" (a request sent): it may update a parcel, not start one
         if parcel is None:
             parcel = {
                 "id": _id(*keys),
@@ -1140,6 +1217,30 @@ class Insights:
         await self._save()
 
     @staticmethod
+    def parcel_items(p: dict[str, Any]) -> tuple[list[dict[str, Any]], int, str | None]:
+        """What is in a parcel: the items its shipping mails list (or name from the order), else the order's items.
+
+        Returns (items, how many more were only counted, "parcel" or "order")."""
+        sources = sorted(p.get("sources") or [], key=lambda x: str(x.get("date") or ""))
+        for kind, picked in (
+            ("parcel", [x for x in sources if x.get("status") != "ordered" and x.get("items")]),
+            ("order", [x for x in sources if x.get("status") == "ordered" and x.get("items")]),
+        ):
+            if not picked:
+                continue
+            out: dict[str, dict[str, Any]] = {}
+            for x in picked:
+                for item in x.get("items") or []:
+                    key = str(item.get("name")).lower()
+                    # a full name wins over the one cut off in a subject
+                    if key not in out or (out[key].get("short") and not item.get("short")):
+                        out[key] = item
+            more = max((int(x.get("more") or 0) for x in picked), default=0)
+            listed = [{k: i.get(k) for k in ("name", "qty", "price")} for i in out.values()]
+            return listed[:12], more + max(0, len(out) - 12), kind
+        return [], 0, None
+
+    @staticmethod
     def parcel_view(p: dict[str, Any]) -> dict[str, Any]:
         """A parcel as the panel, the sensor and the tool show it.
 
@@ -1147,6 +1248,7 @@ class Insights:
         """
         track = shipping.tracking_url(p.get("carrier"), p.get("number"))
         shop = None if track else shipping.shop_url(p.get("shop_domain"), p.get("order"))
+        listed, more, kind = Insights.parcel_items(p)
         return {
             "id": p["id"],
             "carrier": shipping.carrier_name(p.get("carrier")),
@@ -1161,6 +1263,9 @@ class Insights:
             "subject": p.get("subject"),
             "updated": p.get("updated"),
             "senders": sorted({x.get("domain") for x in p.get("sources") or [] if x.get("domain")}),
+            "items": listed,  # what is in it: [{name, qty, price}]
+            "items_more": more,  # only counted ("and 2 more")
+            "items_from": kind,  # "parcel": its shipping mails; "order": the order (which parcel is not known)
             "sources": [
                 {
                     "message_id": x.get("message_id"),
@@ -1171,6 +1276,7 @@ class Insights:
                     "order": x.get("order"),
                     "eta": x.get("eta"),
                     "shop_hint": x.get("shop_hint"),
+                    "items": [str(i.get("name")) for i in x.get("items") or []],
                 }
                 for x in p.get("sources") or []
             ],
@@ -1249,7 +1355,7 @@ class Insights:
             "waiting": len(self.followups),
             "proposals": len(self.open_proposals()),
             "never_opened": sum(1 for s in self.subscriptions if s.get("never_opened") and not s.get("unsubscribed")),
-            "parcels": sum(1 for p in self.packages if p.get("status") != "delivered"),
+            "parcels": sum(1 for p in self.packages if p.get("status") not in NOT_ON_THE_WAY),
             "trend": self.trend(now),
         }
 
