@@ -695,6 +695,65 @@ async def test_unsure_ratings_have_their_own_view(hass: HomeAssistant) -> None:
     assert summarize(rows, "unsure", "", 0, 50)["total"] == 0
 
 
+async def test_confirming_a_guess_and_the_senders_page(hass: HomeAssistant, hass_ws_client) -> None:
+    entry = await _setup(hass, ai_enabled=True, ai_entity=AI_ENTITY)
+    link = entry.runtime_data
+    sorter = link.ai
+    guess = SimpleNamespace(data={"category": "Notifications", "importance": 2, "confidence": "low", "reason": "x"})
+    with (
+        patch(f"{MAIL}.async_search_uids", AsyncMock(side_effect=[[1], [1, 2]])),
+        patch(f"{MAIL}.async_summaries", AsyncMock(return_value=[_summary(2)])),
+        patch(GENERATE, AsyncMock(return_value=guess)),
+    ):
+        await sorter.async_process()
+        report = await sorter.async_process("push")
+    await link.rules.async_record_ai("push", report)
+    ws = await hass_ws_client(hass)
+    # the quick check: "right" keeps the category and is a confirmation, not a correction
+    rating = sorter.ratings[-1]
+    await ws.send_json(
+        {
+            "id": 1,
+            "type": "friedafetch_mail/ai/correct",
+            "entry_id": entry.entry_id,
+            "rating_id": rating["id"],
+            "category": "Notifications",
+            "by": "confirm",
+        }
+    )
+    assert (await ws.receive_json())["success"]
+    row = next(r for r in link.activity.view(sorter.ratings, ai_active=True) if r.get("uid") == 2)
+    assert row["confirmed"] and not row["corrected"] and not row["unsure"]
+    assert rating["corrected_by"] == "confirm"
+    await ws.send_json(
+        {
+            "id": 2,
+            "type": "friedafetch_mail/ai/correct",
+            "entry_id": entry.entry_id,
+            "rating_id": rating["id"],
+            "category": "Notifications",
+            "by": "guess",
+        }
+    )
+    assert not (await ws.receive_json())["success"]  # only "confirm" comes from outside
+    # the sender's page
+    await ws.send_json(
+        {"id": 3, "type": "friedafetch_mail/sender", "entry_id": entry.entry_id, "email": " Anna@Example.com "}
+    )
+    msg = await ws.receive_json()
+    assert msg["success"], msg
+    page = msg["result"]
+    assert page["email"] == "anna@example.com" and page["site"] == "example.com" and page["name"] == "Anna"
+    assert page["count"] == 1 and page["kinds"]["ai"] == 1 and page["corrected"] == 0
+    assert page["categories"] == [{"name": "Notifications", "count": 1}]
+    assert page["last"][0]["subject"] == "Treffen morgen?" and page["subscription"] is None and page["parcels"] == []
+    await ws.send_json(
+        {"id": 4, "type": "friedafetch_mail/sender", "entry_id": entry.entry_id, "email": "nobody@example.org"}
+    )
+    empty = (await ws.receive_json())["result"]
+    assert empty["count"] == 0 and empty["read_share"] is None and empty["first"] is None and empty["last"] == []
+
+
 async def test_correction_can_run_the_new_categorys_actions(hass: HomeAssistant, hass_ws_client) -> None:
     entry = await _setup(hass, ai_enabled=True, ai_entity=AI_ENTITY, ai_mode="observe")
     sorter = entry.runtime_data.ai

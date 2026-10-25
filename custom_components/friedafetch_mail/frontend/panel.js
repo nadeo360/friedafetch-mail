@@ -103,6 +103,25 @@ const linkify = (text, t) =>
     })
     .join("");
 const UNDO_MS = 8000; // how long "Undo" stays after an action (it waits while the pointer or the focus is on it)
+const HIST_KEY = "friedafetch_mail_today"; // today's undoable actions (this device)
+const DENSITY_KEY = "friedafetch_mail_density"; // "compact" or "" (this device)
+const store = {
+  get(key) {
+    try {
+      return window.localStorage.getItem(key);
+    } catch (err) {
+      return null; // private mode, blocked storage: the panel works without
+    }
+  },
+  set(key, value) {
+    try {
+      window.localStorage.setItem(key, value);
+    } catch (err) {
+      /* nothing to keep then */
+    }
+  },
+};
+const isoDay = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; // a local day, as the backend counts them
 const SWIPE_AT = 80; // px a mail in the list is swiped before it acts
 const ASSIST_ROUNDS = 5; // rounds of the category assistant, then the proposal is edited by hand
 const initials = (name) =>
@@ -215,6 +234,7 @@ class FriedaPostfachPanel extends HTMLElement {
     this._timer = setInterval(() => this._autoRefresh(), 60000);
     this._onKey = (ev) => this._shortcut(ev);
     this.addEventListener("keydown", this._onKey);
+    this.classList.toggle("dense", store.get(DENSITY_KEY) === "compact");
     // a key the panel handled is not also one of Home Assistant's own shortcuts (e: entities, c: commands, …)
     this._onKeyStop = (ev) => ev.defaultPrevented && ev.stopPropagation();
     this.addEventListener("keydown", this._onKeyStop);
@@ -310,6 +330,7 @@ class FriedaPostfachPanel extends HTMLElement {
   async _loadRules() {
     const list = await this._ws({ type: "friedafetch_mail/rules/list", entry_id: this._s.entryId });
     this._s.rules = list.rules;
+    this._s.dailySince = list.daily_since || null;
     this._s.lastRun = list.last_run;
     this._s.automation = list.automation || null;
   }
@@ -429,6 +450,7 @@ class FriedaPostfachPanel extends HTMLElement {
       this._loadInsights(),
     ]);
     this._s.rules = list.rules;
+    this._s.dailySince = list.daily_since || null;
     this._s.lastRun = list.last_run;
     this._s.automation = list.automation || null;
   }
@@ -501,7 +523,7 @@ class FriedaPostfachPanel extends HTMLElement {
     if (!res || undoing) return;
     const text = res.failed?.length ? fmt(t.mactFailed, res.failed.length) : fmt(t[`mactDone_${action}`], res.done);
     const undo = res.undo;
-    if (undo) this._offerUndo(text, () => this._mailAct(undo.keys, undo.action, { to: undo.to || null, undoing: true }));
+    if (undo) this._offerUndo(text, () => this._mailAct(undo.keys, undo.action, { to: undo.to || null, undoing: true }), { kind: "mail", undo });
     else W.announce(this.shadowRoot, text, 0);
   }
 
@@ -533,13 +555,18 @@ class FriedaPostfachPanel extends HTMLElement {
       else this._paletteOpen();
       return;
     }
-    if (ev.ctrlKey || ev.metaKey || ev.altKey || this._s.confirm || this._s.assist || this._s.keys || this._pal) return;
+    if (ev.ctrlKey || ev.metaKey || ev.altKey || this._s.confirm || this._s.assist || this._s.keys || this._pal || this._s.qc || this._s.sender || this._s.hist) return;
     const target = ev.composedPath()[0];
     if (target?.closest?.("input, select, textarea, [contenteditable]")) return;
     const tabs = this._tabs();
     if (ev.key === "?") {
       ev.preventDefault();
       this._keysOpen();
+      return;
+    }
+    if (ev.key === "q" && this._s.ai?.status?.active) {
+      ev.preventDefault();
+      this._qcOpen();
       return;
     }
     if (ev.key === "z" && this._undoRun) {
@@ -707,10 +734,11 @@ class FriedaPostfachPanel extends HTMLElement {
     if (this._undoRun) this._undoTimer = setTimeout(() => this._hideUndo(), UNDO_MS);
   }
 
-  _offerUndo(text, run) {
+  _offerUndo(text, run, record = null) {
     const t = this.t;
     const bar = this._undoBar();
     this._undoRun = run;
+    if (record) this._histAdd(text, record);
     bar.innerHTML = `${ico("check-circle-outline")}<span class="ut">${esc(text)}</span><button class="link" data-undo>${esc(t.undo)}</button><button class="icon" data-undo-close aria-label="${esc(t.undoClose)}">${ico("close")}</button>`;
     bar.querySelector("[data-undo]").addEventListener("click", () => this._undoNow());
     bar.querySelector("[data-undo-close]").addEventListener("click", () => this._hideUndo());
@@ -806,6 +834,9 @@ class FriedaPostfachPanel extends HTMLElement {
       s.ai?.status?.active && [t.palNewCat, "shape-plus-outline", () => (this._setTab("ai"), (this._s.aiEdit = { index: -1, data: { name: "", description: "", move_to: null, mark_seen: false, flag: false } }), this._render())],
       s.ai?.status?.active && [t.palAssist, "creation", () => (this._setTab("ai"), this._assistOpen())],
       [t.palKeys, "keyboard-outline", () => this._keysOpen()],
+      s.ai?.status?.active && [t.qcTitle, "cards-outline", () => this._qcOpen()],
+      [t.hiTitle, "history", () => this._histOpen()],
+      [this.classList.contains("dense") ? t.densAiry : t.densCompact, "view-agenda-outline", () => this._density()],
     ].filter(Boolean);
     for (const [label, icon, run] of actions) if (has(label, t.palActions)) out.push({ group: t.palActions, icon, label, run });
     for (const rule of s.rules) {
@@ -881,6 +912,381 @@ class FriedaPostfachPanel extends HTMLElement {
     if (!item) return;
     this._paletteClose();
     item.run();
+  }
+
+  // ------------------------------------------------------------ density (per device)
+  _density() {
+    const dense = !this.classList.contains("dense");
+    this.classList.toggle("dense", dense);
+    store.set(DENSITY_KEY, dense ? "compact" : "");
+    W.announce(this.shadowRoot, dense ? this.t.densCompact : this.t.densAiry, 0);
+  }
+
+  // ------------------------------------------------------------ "Done today": the undoable actions of today
+  _histLoad() {
+    let list = [];
+    try {
+      list = JSON.parse(store.get(`${HIST_KEY}_${this._s.entryId}`) || "[]");
+    } catch (err) {
+      list = [];
+    }
+    return Array.isArray(list) ? list.filter((h) => h && h.day === isoDay()) : [];
+  }
+
+  _histSave(list) {
+    store.set(`${HIST_KEY}_${this._s.entryId}`, JSON.stringify(list.slice(-50)));
+  }
+
+  _histAdd(text, record) {
+    const list = this._histLoad();
+    list.push({ id: `${Date.now()}`, day: isoDay(), time: new Date().toISOString(), text, record, undone: false });
+    this._histSave(list);
+  }
+
+  _histOpen() {
+    this._s.hist = true;
+    this._render();
+    this.shadowRoot.querySelector('.hist [data-action="hist-close"]')?.focus({ preventScroll: true });
+  }
+
+  async _histUndo(id) {
+    const list = this._histLoad();
+    const h = list.find((x) => x.id === id);
+    if (!h || h.undone) return;
+    const r = h.record || {};
+    const run = {
+      mail: () => this._mailAct(r.undo.keys, r.undo.action, { to: r.undo.to || null, undoing: true }),
+      rule: () =>
+        this._call(async () => {
+          await this._ws({ type: "friedafetch_mail/rules/restore", entry_id: this._s.entryId, rule_id: r.id });
+          await this._reload();
+        }),
+      fy: () => this._fyCall({ type: "friedafetch_mail/insights/undo", token: r.token }),
+      cats: () => this._aiSaveCategories(r.before),
+    }[r.kind];
+    if (!run) return;
+    await run();
+    if (!this._s.error) {
+      h.undone = true;
+      this._histSave(list);
+      W.announce(this.shadowRoot, this.t.undoDone, 0);
+    }
+    this._render();
+  }
+
+  _renderHist() {
+    if (!this._s.hist) return "";
+    const t = this.t;
+    const list = this._histLoad().reverse();
+    const rows = list
+      .map(
+        (h) => `<li class="${h.undone ? "undone" : ""}"><span class="hi-t">${esc(fmtClock(h.time))}</span><span class="hi-x">${esc(h.text)}</span>
+          ${h.undone ? `<span class="chip">${esc(t.hiUndone)}</span>` : `<button class="link" data-action="hist-undo" data-id="${esc(h.id)}" ${this._s.busy ? "disabled" : ""}>${esc(t.undo)}</button>`}</li>`
+      )
+      .join("");
+    return `<div class="modal-backdrop" data-action="hist-close"></div>
+      <div class="modal neutral hist" role="dialog" aria-modal="true" aria-labelledby="hist-title">
+        <div class="modal-head"><span class="modal-icon">${ico("history")}</span><h3 id="hist-title">${esc(t.hiTitle)}</h3></div>
+        ${rows ? `<ul class="hilist">${rows}</ul>` : this._empty(t.hiEmpty)}
+        ${this._s.error ? `<p class="error" role="alert">${esc(this._s.error)}</p>` : ""}
+        <div class="modal-actions"><button data-action="hist-close">${esc(t.hiClose)}</button></div>
+      </div>`;
+  }
+
+  // ------------------------------------------------------------ calm empty states (Frieda's own little motif)
+  _empty(text, action = "") {
+    return `<div class="empty-state"><img src="${esc(ICON_URL)}" alt="" aria-hidden="true"><p>${esc(text)}</p>${action}</div>`;
+  }
+
+  // ------------------------------------------------------------ quick check: the unsure ratings as a stack of cards
+  async _qcOpen() {
+    const t = this.t;
+    let items = [];
+    await this._call(async () => {
+      const res = await this._ws({ type: "friedafetch_mail/activity/list", entry_id: this._s.entryId, view: "unsure", limit: 100 });
+      items = (res.items || []).filter((i) => i.rating_id && i.ai?.category);
+    });
+    this._s.qc = { items, i: 0, kept: 0, changed: 0 };
+    this._render();
+    this.shadowRoot.querySelector(".qc")?.focus({ preventScroll: true });
+    if (!items.length) W.announce(this.shadowRoot, t.qcDone, 0);
+  }
+
+  _qcClose() {
+    const changed = this._s.qc && this._s.qc.kept + this._s.qc.changed > 0;
+    this._s.qc = null;
+    this._render();
+    if (changed) this._loadActivity().catch(() => {});
+  }
+
+  async _qcAnswer(category) {
+    const qc = this._s.qc;
+    const item = qc?.items[qc.i];
+    if (!item) return;
+    const same = category === item.ai.category;
+    try {
+      await this._ws({ type: "friedafetch_mail/ai/correct", entry_id: this._s.entryId, rating_id: item.rating_id, category, ...(same ? { by: "confirm" } : {}) });
+      qc[same ? "kept" : "changed"] += 1;
+    } catch (err) {
+      this._s.error = err.message || String(err);
+    }
+    this._qcNext();
+  }
+
+  _qcNext() {
+    const qc = this._s.qc;
+    if (!qc) return;
+    qc.i += 1;
+    this._render();
+    this.shadowRoot.querySelector(".qc")?.focus({ preventScroll: true });
+    const t = this.t;
+    const next = qc.items[qc.i];
+    W.announce(this.shadowRoot, next ? `${fmt(t.qcProgress, qc.i + 1, qc.items.length)}: ${next.subject || ""}` : t.qcDone, 0);
+  }
+
+  _renderQc() {
+    const qc = this._s.qc;
+    if (!qc) return "";
+    const t = this.t;
+    const cats = [...(this._s.ai?.categories || []).map((c) => c.name), "other"];
+    const cat = (c) => (c === "other" ? t.aiOther : c);
+    const item = qc.items[qc.i];
+    const body = item
+      ? `<p class="qc-progress">${esc(fmt(t.qcProgress, qc.i + 1, qc.items.length))}</p>
+        <div class="qc-card" data-key="${esc(item.key)}">
+          <span class="qc-from">${esc(item.name || item.from || "–")}</span>
+          <strong class="qc-subj">${esc(item.subject || "–")}</strong>
+          <span class="qc-now"><i class="cdot" style="--cat:${catColor(item.ai.category)}"></i>${esc(cat(item.ai.category))}${item.ai.importance ? ` · ${esc(item.ai.importance)}/5` : ""}</span>
+        </div>
+        <div class="qc-cats" role="group" aria-label="${esc(t.aiCategories)}">${cats
+          .map((c, i) => `<button class="qc-cat ${c === item.ai.category ? "now" : ""}" data-action="qc-cat" data-v="${esc(c)}">${i < 9 ? `<kbd>${i + 1}</kbd>` : ""}<i class="cdot" style="--cat:${catColor(c)}"></i>${esc(cat(c))}</button>`)
+          .join("")}</div>
+        <div class="modal-actions"><button class="secondary" data-action="qc-skip">${esc(t.qcSkip)}</button><button data-action="qc-keep">${ico("check")}${esc(t.qcKeep)}</button></div>
+        <p class="qc-keys">${esc(t.qcKeys)}</p>`
+      : `${this._empty(qc.items.length ? `${t.qcDone} ${fmt(t.qcDoneText, qc.kept, qc.changed)}` : t.emptyAllDone)}
+        <div class="modal-actions"><button data-action="qc-close">${esc(t.qcClose)}</button></div>`;
+    return `<div class="modal-backdrop" data-action="qc-close"></div>
+      <div class="modal neutral qc" id="qc-box" role="dialog" aria-modal="true" aria-labelledby="qc-title" tabindex="-1">
+        <div class="modal-head"><span class="modal-icon">${ico("cards-outline")}</span><h3 id="qc-title">${esc(t.qcTitle)}</h3><span class="grow"></span>
+          <button class="icon" data-action="qc-close" aria-label="${esc(t.qcClose)}">${ico("close")}</button></div>
+        <p class="muted qc-hint">${esc(t.qcHint)}</p>${body}
+      </div>`;
+  }
+
+  _bindQc(root) {
+    const box = root.querySelector(".modal.qc");
+    if (!box) return;
+    box.addEventListener("keydown", (ev) => {
+      const qc = this._s.qc;
+      const item = qc?.items[qc.i];
+      const cats = [...(this._s.ai?.categories || []).map((c) => c.name), "other"];
+      let done = true;
+      if (ev.key === "Escape") this._qcClose();
+      else if (!item) done = false;
+      else if (/^[1-9]$/.test(ev.key) && cats[Number(ev.key) - 1]) this._qcAnswer(cats[Number(ev.key) - 1]);
+      else if (ev.key === "Enter" && !ev.composedPath()[0]?.closest?.("button")) this._qcAnswer(item.ai.category);
+      else if (ev.key === "ArrowRight") this._qcNext();
+      else done = false;
+      if (done) {
+        ev.preventDefault();
+        ev.stopPropagation();
+      }
+    });
+    // touch: the card swiped right is right, left is skipped
+    const card = box.querySelector(".qc-card");
+    if (!card) return;
+    let x0 = null;
+    let dx = 0;
+    card.addEventListener("pointerdown", (ev) => {
+      if (ev.pointerType !== "touch") return;
+      x0 = ev.clientX;
+      dx = 0;
+    });
+    card.addEventListener("pointermove", (ev) => {
+      if (x0 === null) return;
+      dx = ev.clientX - x0;
+      card.style.transform = `translateX(${dx}px) rotate(${dx / 30}deg)`;
+      card.classList.toggle("go-keep", dx > SWIPE_AT);
+      card.classList.toggle("go-skip", dx < -SWIPE_AT);
+    });
+    const end = () => {
+      if (x0 === null) return;
+      x0 = null;
+      card.style.transform = "";
+      const item = this._s.qc?.items[this._s.qc.i];
+      if (dx > SWIPE_AT && item) this._qcAnswer(item.ai.category);
+      else if (dx < -SWIPE_AT) this._qcNext();
+    };
+    card.addEventListener("pointerup", end);
+    card.addEventListener("pointercancel", () => {
+      x0 = null;
+      card.style.transform = "";
+    });
+  }
+
+  // ------------------------------------------------------------ the sender's page
+  async _senderOpen(email) {
+    if (!email || !email.includes("@")) return;
+    this._s.sender = { email, data: null };
+    this._render();
+    try {
+      this._s.sender.data = await this._ws({ type: "friedafetch_mail/sender", entry_id: this._s.entryId, email });
+    } catch (err) {
+      this._s.sender.error = err.message || String(err);
+    }
+    if (this._s.sender) {
+      this._render();
+      this.shadowRoot.querySelector('.sheet.sender [data-action="sender-close"]')?.focus({ preventScroll: true });
+    }
+  }
+
+  _renderSender() {
+    const sp = this._s.sender;
+    if (!sp) return "";
+    const t = this.t;
+    const d = sp.data;
+    const cat = (c) => (c === "other" ? t.aiOther : c);
+    const body = sp.error
+      ? `<div class="error">${esc(sp.error)}</div>`
+      : !d
+        ? `<p class="working"><span class="spinner" aria-hidden="true"></span>${esc(t.spLoading)}</p>`
+        : `<div class="sp-tiles">
+            <div class="sp-tile"><strong>${esc(d.count)}</strong><span>${esc(t.spMails)}</span></div>
+            <div class="sp-tile"><strong>${esc(d.read_share == null ? "–" : `${d.read_share} %`)}</strong><span>${esc(t.spRead)}</span></div>
+            <div class="sp-tile"><strong>${esc(d.unread)}</strong><span>${esc(t.spUnread)}</span></div>
+            <div class="sp-tile"><strong>${esc(d.flagged)}</strong><span>${esc(t.spFlagged)}</span></div>
+          </div>
+          ${d.categories.length ? `<h4>${esc(t.spCats)}</h4><ul class="sp-list">${d.categories.map((c) => `<li><i class="cdot" style="--cat:${catColor(c.name)}"></i><span>${esc(cat(c.name))}</span><b>${esc(c.count)}</b></li>`).join("")}</ul>` : ""}
+          ${d.rules.length ? `<h4>${esc(t.spRules)}</h4><ul class="sp-list">${d.rules.map((r) => `<li>${ico("filter-outline")}<span>${esc(r.name)}</span><b>${esc(r.count)}</b></li>`).join("")}</ul>` : ""}
+          ${d.subscription ? `<h4>${esc(t.spNews)}</h4><div class="sp-row">${ico("newspaper-variant-outline")}<span>${esc(fmt(t.fySubCount, d.subscription.count, d.subscription.unread))}</span>
+            ${d.subscription.unsubscribed ? `<span class="chip">${esc(fmt(t.fyUnsubscribed, fmtShort(d.subscription.unsubscribed)))}</span>` : `<button class="secondary small ib" data-action="fy-unsub" data-sender="${esc(d.subscription.sender)}" data-name="${esc(d.subscription.name || d.subscription.sender)}">${ico("email-remove-outline")}${esc(t.fyUnsub)}</button>`}</div>` : ""}
+          ${d.parcels.length ? `<h4>${esc(t.spParcels)}</h4><ul class="sp-list">${d.parcels.map((p) => `<li>${ico("package-variant-closed")}<span>${esc([t.fyParcel[p.status] || p.status, p.items.join(", ")].filter(Boolean).join(" · "))}</span></li>`).join("")}</ul>` : ""}
+          ${d.last.length ? `<h4>${esc(t.spLast)}</h4><ul class="sp-mails">${d.last.map((m) => `<li><button class="link" data-action="sender-mail" data-id="${esc(m.key)}"><span>${esc(m.subject || "–")}</span><small>${esc(fmtShort(m.time))}</small></button></li>`).join("")}</ul>` : ""}`;
+    const initial = initials(d?.name || sp.email);
+    return `<div class="sheet-backdrop sender-back" data-action="sender-close"></div>
+      <aside class="sheet sender" role="dialog" aria-modal="true" aria-labelledby="sp-title">
+        <div class="sheet-top"><span class="ttl">${esc(t.spOpen)}</span><button class="icon" data-action="sender-close" aria-label="${esc(t.spClose)}">${ico("close")}</button></div>
+        <div class="sp-head"><span class="av" aria-hidden="true">${esc(initial)}</span><span class="who"><strong id="sp-title">${esc(d?.name || sp.email)}</strong><small>${esc(sp.email)}</small>
+          ${d?.vip ? `<span class="sp-vip">${ico("star")}${esc(t.spVip)}</span>` : ""}${d?.first ? `<small>${esc(fmt(t.spSince, fmtShort(d.first)))}</small>` : ""}</span></div>
+        <div class="sheet-body">${body}</div>
+        <div class="sheet-foot sp-foot">
+          <button class="secondary small ib" data-action="rule-from-mail" data-from="${esc(sp.email)}" data-name="${esc(d?.name || "")}">${ico("filter-plus-outline")}${esc(t.ruleFromMail)}</button>
+          <button class="secondary small ib" data-action="sender-all" data-v="${esc(sp.email)}">${ico("magnify")}${esc(t.spShowAll)}</button>
+        </div>
+      </aside>`;
+  }
+
+  // ------------------------------------------------------------ "Today": one calm timeline at the top of For you
+  _fyToday(fy) {
+    const t = this.t;
+    const now = new Date();
+    const today = isoDay(now);
+    const mins = (d) => d.getHours() * 60 + d.getMinutes();
+    const entries = [];
+    for (const p of fy.parcels || []) {
+      const coming = p.status === "out_for_delivery" || (p.eta === today && ["in_transit", "pickup", "problem"].includes(p.status));
+      if (!coming) continue;
+      const m = /^(\d{1,2}):(\d{2})/.exec(p.window || "");
+      entries.push({ at: m ? Number(m[1]) * 60 + Number(m[2]) : null, time: p.window || null, icon: "truck-delivery-outline", text: fmt(t.dayParcel, p.shop || p.carrier || "–"), sub: [(p.items || []).map((i) => i.name).slice(0, 2).join(", "), t.fyParcel[p.status]].filter(Boolean).join(" · "), go: "fy-parcels" });
+    }
+    for (const e of fy.proposals || []) {
+      if (!String(e.start || "").startsWith(today)) continue;
+      const d = e.all_day ? null : parseTime(e.start);
+      entries.push({ at: d ? mins(d) : null, time: d ? fmtClock(e.start) : t.dayAllDay, icon: "calendar-clock", text: e.title, sub: e.location || "", go: "fy-events" });
+    }
+    for (const i of this._s.act.items || []) {
+      if (i.day !== today || !((i.ai?.importance || 0) >= 4 || i.vip)) continue;
+      const d = parseTime(i.time);
+      entries.push({ at: d ? mins(d) : null, time: fmtClock(i.time), icon: i.vip ? "star-outline" : "email-alert-outline", text: fmt(t.dayMail, i.name || i.from || "–"), sub: i.subject || "", mail: i.key });
+    }
+    for (const f of (fy.followups || []).slice(0, 2)) {
+      entries.push({ at: null, time: null, icon: "reply-outline", text: fmt(t.dayReply, f.to?.[0]?.name || f.to?.[0]?.email || "–"), sub: f.subject || "", go: "fy-replies" });
+    }
+    const timed = entries.filter((e) => e.at != null).sort((a, b) => a.at - b.at);
+    const later = entries.filter((e) => e.at == null);
+    const row = (e) => `<li><span class="dt">${esc(e.time || "")}</span><span class="dl">${ico(e.icon)}</span>
+        <button class="dx" ${e.mail ? `data-action="day-mail" data-id="${esc(e.mail)}"` : `data-action="day-go" data-v="${esc(e.go)}"`}><strong>${esc(e.text)}</strong>${e.sub ? `<small>${esc(e.sub)}</small>` : ""}</button></li>`;
+    let list = "";
+    let marked = false;
+    for (const e of timed) {
+      if (!marked && e.at > mins(now)) {
+        list += `<li class="now" aria-label="${esc(t.dayNow)} ${esc(fmtClock(now.toISOString()))}"><span class="dt">${esc(fmtClock(now.toISOString()))}</span><span class="dl"></span><span class="dx">${esc(t.dayNow)}</span></li>`;
+        marked = true;
+      }
+      list += row(e);
+    }
+    if (!marked) list += `<li class="now" aria-label="${esc(t.dayNow)} ${esc(fmtClock(now.toISOString()))}"><span class="dt">${esc(fmtClock(now.toISOString()))}</span><span class="dl"></span><span class="dx">${esc(t.dayNow)}</span></li>`;
+    if (later.length) list += `<li class="later"><span class="dt"></span><span class="dl"></span><span class="dx">${esc(t.dayLater)}</span></li>${later.map(row).join("")}`;
+    return `<div class="card"><div class="chead"><h2>${esc(t.dayTitle)}</h2><span class="muted day-date">${esc(now.toLocaleDateString(this._lang(), { weekday: "long", day: "numeric", month: "long" }))}</span></div>
+      ${entries.length ? `<ol class="daytl">${list}</ol>` : this._empty(t.dayEmpty)}</div>`;
+  }
+
+  // The parcels of the coming week, day by day (a tap shows the parcels of that day)
+  _parcelWeek(fy) {
+    const t = this.t;
+    const today = new Date();
+    const open = (fy.parcels || []).filter((p) => p.status !== "delivered");
+    const dayOf = (p) => p.eta || (p.status === "out_for_delivery" ? isoDay(today) : null);
+    if (!open.some(dayOf)) return "";
+    const pick = this._s.parcelDay || "";
+    const days = [...Array(7)].map((_, n) => {
+      const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + n);
+      const iso = isoDay(d);
+      const count = open.filter((p) => dayOf(p) === iso).length;
+      const wd = n === 0 ? t.fyToday : d.toLocaleDateString(this._lang(), { weekday: "short" });
+      return `<button class="pday ${pick === iso ? "on" : ""} ${count ? "has" : ""}" data-action="parcel-day" data-v="${esc(iso)}" aria-pressed="${pick === iso}" aria-label="${esc(fmt(t.calLabel, d.toLocaleDateString(this._lang(), { weekday: "long", day: "numeric", month: "long" }), count))}">
+        <small>${esc(wd)}</small><b>${esc(d.getDate())}</b><span class="pdots">${count ? "•".repeat(Math.min(count, 3)) : ""}</span></button>`;
+    });
+    return `<div class="pweek" role="group" aria-label="${esc(t.fyParcels)}"><button class="pday all ${pick ? "" : "on"}" data-action="parcel-day" data-v="" aria-pressed="${!pick}"><b>${esc(t.calAll)}</b></button>${days.join("")}</div>`;
+  }
+
+  // How often a rule hit in the last 30 days, per day (from the run history the panel has)
+  // hits per day of the last 30 days, oldest first, from the counts each rule keeps
+  _ruleDaily(rule) {
+    const days = 30;
+    const out = Array(days).fill(0);
+    const start = new Date();
+    for (let i = 0; i < days; i++) {
+      const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() - (days - 1 - i));
+      out[i] = rule.daily?.[isoDay(d)] || 0;
+    }
+    return out;
+  }
+
+  _ruleSpark(rule) {
+    const t = this.t;
+    const points = this._ruleDaily(rule);
+    const total = points.reduce((a, b) => a + b, 0);
+    if (!total) {
+      // counted per day only since 1.0.40: no "30 days without hits" before there were 30 days
+      const since = this._s.dailySince ? new Date(`${this._s.dailySince}T00:00:00`) : null;
+      const young = since && Date.now() - since.getTime() < 29 * 86400000;
+      const label = young ? fmt(t.ruleQuietSince, since.toLocaleDateString(this._lang(), { day: "numeric", month: "numeric" })) : t.ruleQuiet;
+      return `<span class="rspark quiet">${esc(label)}</span>`;
+    }
+    const max = Math.max(...points);
+    const xy = points.map((v, i) => `${(i * 46) / (points.length - 1) + 1},${(13 - (v / max) * 11).toFixed(1)}`).join(" ");
+    return `<svg class="rspark" viewBox="0 0 48 14" role="img" aria-label="${esc(fmt(t.ruleTrend, total))}"><polyline points="${xy}"/></svg>`;
+  }
+
+  // Rule templates for a new rule (the live preview shows at once what they would catch)
+  _ruleTemplate(kind) {
+    const boxes = this._s.mailboxes || [];
+    const find = (re, fallback = null) => boxes.find((b) => re.test(b)) || fallback;
+    const archive = find(/^(archive|archiv)$/i, find(/archiv/i));
+    const t = this.t;
+    const e = this._s.editing;
+    if (!e) return;
+    const tpl = {
+      news: { name: t.tplNews, match: "any", conditions: [{ field: "from", op: "contains", value: "newsletter" }, { field: "from", op: "contains", value: "news@" }], actions: { move_to: archive, mark_seen: true } },
+      bills: { name: t.tplBills, match: "any", conditions: [{ field: "subject", op: "contains", value: "Rechnung" }, { field: "subject", op: "contains", value: "Invoice" }], actions: { move_to: find(/rechnung|beleg|invoice/i, archive) } },
+      notify: { name: t.tplNotify, match: "any", conditions: [{ field: "from", op: "contains", value: "noreply" }, { field: "from", op: "contains", value: "no-reply" }], actions: { mark_seen: true } },
+      ship: { name: t.tplShip, match: "any", conditions: [{ field: "subject", op: "contains", value: "Versand" }, { field: "subject", op: "contains", value: "Zustellung" }], actions: { move_to: find(/^shop$|bestell|versand|order/i, archive) } },
+    }[kind];
+    if (!tpl) return;
+    Object.assign(e, { name: tpl.name, match: tpl.match, conditions: tpl.conditions.map((c) => ({ ...c })) });
+    e.actions = { ...e.actions, move_to: null, mark_seen: null, flag: null, ...tpl.actions };
+    this._render();
   }
 
   _keysOpen() {
@@ -1391,12 +1797,15 @@ class FriedaPostfachPanel extends HTMLElement {
     });
     if (!done) return;
     // the rule comes back as it was (same id, hits and place)
-    this._offerUndo(fmt(t.ruleDeleted, name), () =>
-      this._call(async () => {
-        await this._ws({ type: "friedafetch_mail/rules/restore", entry_id: this._s.entryId, rule_id: id });
-        this._s.scrollTo = id;
-        await this._reload();
-      })
+    this._offerUndo(
+      fmt(t.ruleDeleted, name),
+      () =>
+        this._call(async () => {
+          await this._ws({ type: "friedafetch_mail/rules/restore", entry_id: this._s.entryId, rule_id: id });
+          this._s.scrollTo = id;
+          await this._reload();
+        }),
+      { kind: "rule", id }
     );
   }
 
@@ -1759,10 +2168,10 @@ class FriedaPostfachPanel extends HTMLElement {
       title = t[`tlActed_${e.action}`] || e.action;
       sub = e.mailbox && ["archive", "inbox", "trash", "return"].includes(e.action) ? this._folderName(e.mailbox) : "";
     } else if (e.kind === "corrected") {
-      icon = e.by === "move" ? "folder-move-outline" : "pencil-outline";
+      icon = e.by === "move" ? "folder-move-outline" : e.by === "confirm" ? "check-circle-outline" : "pencil-outline";
       tone = "you";
-      title = e.by === "move" ? t.tlCorrectedByMove : t.tlCorrected;
-      sub = fmt(t.tlCorrectedSub, cat(e.before), cat(e.after));
+      title = e.by === "move" ? t.tlCorrectedByMove : e.by === "confirm" ? t.tlConfirmed : t.tlCorrected;
+      sub = e.by === "confirm" ? cat(e.after) : fmt(t.tlCorrectedSub, cat(e.before), cat(e.after));
     } else if (e.kind === "event_proposed") {
       icon = "calendar-clock";
       tone = "ai";
@@ -2082,7 +2491,7 @@ class FriedaPostfachPanel extends HTMLElement {
             <td class="c-name"><button class="rname" data-action="expand" data-id="${esc(r.id)}" aria-expanded="${open}" ${editingThis ? "disabled" : ""}>${ico("chevron-right")}<span class="nm"><strong>${esc(r.name)}</strong>${multiBox ? `<small>${esc(r.mailbox)}</small>` : ""}</span></button></td>
             <td class="c-cond dim" data-action="expand" data-id="${esc(r.id)}" title="${esc(conds.join("\n"))}"><span class="ctext">${esc(conds[0] || "")}</span>${n > 1 ? `<span class="more">+${n - 1}</span>` : ""}</td>
             <td class="c-act">${acts || `<span class="muted">${esc(t.noActions)}</span>`}</td>
-            <td class="c-hits num" title="${esc(t.hits)}">${esc(r.hits ?? 0)}</td>
+            <td class="c-hits num">${esc(r.hits ?? 0)}${this._ruleSpark(r)}</td>
             <td class="c-menu">${menu}</td>
           </tr>${open ? `<tr class="detail rdetail" data-detail-for="${esc(r.id)}"><td colspan="7">${detail}</td></tr>` : ""}`;
       })
@@ -2122,6 +2531,7 @@ class FriedaPostfachPanel extends HTMLElement {
       <div class="row"><label for="f-name">${esc(t.name)}</label><input type="text" id="f-name" class="grow" value="${esc(e.name)}"></div>
       <div class="row"><label for="f-mailbox">${esc(t.mailbox)}</label><select id="f-mailbox">${boxes.map((b) => opt(b, b, e.mailbox)).join("")}</select></div>
       <div class="row"><label for="f-match">${esc(t.match)}</label><select id="f-match">${opt("all", t.all, e.match)}${opt("any", t.any, e.match)}</select></div>
+      ${e.id ? "" : `<div class="tpls" role="group" aria-label="${esc(t.tplTitle)}"><span class="muted">${esc(t.tplTitle)}</span>${[["news", "newspaper-variant-outline", t.tplNews], ["bills", "receipt-text-outline", t.tplBills], ["notify", "bell-check-outline", t.tplNotify], ["ship", "truck-outline", t.tplShip]].map(([k, icon, l]) => `<button class="secondary small" data-action="rule-tpl" data-v="${k}">${ico(icon)}${esc(l)}</button>`).join("")}</div>`}
       <p class="rsentence" id="rule-sentence" aria-live="polite">${esc(this._ruleSentence(e))}</p>
       <div class="with-add"><h3 class="muted">${esc(t.conditions)}</h3><button class="round small" data-action="add-cond" title="${esc(t.addCondition)}" aria-label="${esc(t.addCondition)}">+</button></div>
       ${conds}
@@ -2450,6 +2860,7 @@ class FriedaPostfachPanel extends HTMLElement {
       push ? `<button class="st ok" data-action="tab" data-v="rules">${ico("lightning-bolt")}${esc(t.actStatusPush)}</button>` : "",
       au.enabled && au.interval ? `<button class="st" data-action="tab" data-v="rules">${ico("timer-outline")}${esc(fmt(push ? t.actStatusEvery : t.actStatusEveryOnly, au.interval))}</button>` : "",
       st.active ? `<button class="st ai" data-action="tab" data-v="ai">${ico("creation")}${esc(st.mode === "act" ? t.actStatusAiAct : t.actStatusAiObserve)}</button>` : "",
+      st.active && s.act.counts?.unsure ? `<button class="st qc-open" data-action="qc-open">${ico("cards-outline")}${esc(fmt(t.qcOpen, s.act.counts.unsure))}</button>` : "",
     ].join("");
   }
 
@@ -2562,11 +2973,17 @@ class FriedaPostfachPanel extends HTMLElement {
     const actbar = a.picking
       ? `<div class="actbar"><span>${esc(fmt(t.selected, a.sel.size))}</span><span class="grow"></span>${a.sel.size ? `<span class="macts">${this._mailActions([...a.sel.keys()].map((k) => this._actItem(k)).filter(Boolean))}</span>` : ""}<button class="pill" data-action="act-rerate" ${a.sel.size && !this._batchBusy() && !s.busy ? "" : "disabled"}>${ico("refresh")}${esc(t.rerate)}</button></div>`
       : "";
-    const empty = !a.loaded ? `<p class="lempty">${esc(t.loading)}</p>` : `<p class="lempty">${esc(a.counts?.all ? t.actEmptyView : t.actEmpty)}</p>`;
+    const empty = !a.loaded
+      ? `<p class="lempty">${esc(t.loading)}</p>`
+      : this._empty(a.counts?.all ? t.actEmptyView : t.actEmpty, a.view !== "all" && a.counts?.all ? `<button class="secondary small" data-action="act-chip" data-v="all">${esc(t.actAll)}</button>` : "");
     return `<div class="listpane ${a.picking ? "picking" : ""}">
         <div class="lhead">
           <div class="ttl"><h2>${esc(label)}</h2><span class="cnt">${esc(a.total || 0)}</span>${menu}</div>
           ${tools}
+          ${a.picking ? "" : `<div class="vchips" role="group" aria-label="${esc(t.actViews)}">${[...kindViews, ...stateViews]
+            .filter(([id, , , n]) => id === "all" || n)
+            .map(([id, l, icon, n]) => `<button class="vchip ${a.view === id ? "on" : ""}" data-action="act-chip" data-v="${esc(id)}" aria-pressed="${a.view === id}">${ico(icon)}${esc(l)}<span class="n">${esc(n)}</span></button>`)
+            .join("")}</div>`}
           ${a.picking ? "" : `<div class="lstatus">${this._actStatus()}</div>`}
           ${err}${batch}
         </div>
@@ -2630,7 +3047,8 @@ class FriedaPostfachPanel extends HTMLElement {
     const rerate = canRerate
       ? `<button class="secondary small ib" data-action="tl-rerate" aria-label="${esc(t.rerate)}" ${s.busy || this._batchBusy() ? "disabled" : ""}>${ico("refresh")}<span class="lb">${esc(t.rerate)}</span></button>`
       : "";
-    const who = name && address && name !== address ? `<strong>${esc(name)}</strong><small>${esc(address)}</small>` : `<strong>${esc(name || address || "–")}</strong>`;
+    const whoText = name && address && name !== address ? `<strong>${esc(name)}</strong><small>${esc(address)}</small>` : `<strong>${esc(name || address || "–")}</strong>`;
+    const who = address.includes("@") ? `<button class="whobtn" data-action="sender-open" data-v="${esc(address)}" aria-label="${esc(`${t.spOpen}: ${name || address}`)}">${whoText}</button>` : whoText;
     const ruleBtn = address.includes("@")
       ? `<button class="secondary small ib" data-action="rule-from-mail" data-from="${esc(address)}" data-name="${esc(name)}" aria-label="${esc(t.ruleFromMail)}">${ico("filter-plus-outline")}<span class="lb">${esc(t.ruleFromMail)}</span></button>`
       : "";
@@ -3148,7 +3566,7 @@ class FriedaPostfachPanel extends HTMLElement {
       token = res?.undo || null;
       if (after) after(res);
     });
-    if (undoText && token && !this._s.error) this._offerUndo(undoText, () => this._fyCall({ type: "friedafetch_mail/insights/undo", token }));
+    if (undoText && token && !this._s.error) this._offerUndo(undoText, () => this._fyCall({ type: "friedafetch_mail/insights/undo", token }), { kind: "fy", token });
   }
 
   _fyWhen(p) {
@@ -3206,6 +3624,7 @@ class FriedaPostfachPanel extends HTMLElement {
         ${fy.error ? `<p class="muted">${esc(fmt(t.fyError, fy.error))}</p>` : ""}
       </div>`;
     return [
+      `<section class="widget w-full" data-widget="fy-today">${this._fyToday(fy)}</section>`,
       `<section class="widget w-full" data-widget="fy-week">${week}</section>`,
       (fy.parcels || []).length || (fy.parcel_ignored || []).length ? `<section class="widget w-full" data-widget="fy-parcels">${this._fyParcels(fy)}</section>` : "",
       `<section class="widget w-full" data-widget="fy-events">${this._fyEvents(fy)}</section>`,
@@ -3225,7 +3644,9 @@ class FriedaPostfachPanel extends HTMLElement {
       const diff = Math.round((new Date(d.toDateString()) - new Date(today.toDateString())) / 86400000);
       return diff === 0 ? t.fyToday : diff === 1 ? t.fyTomorrow : d.toLocaleDateString(this._lang(), { weekday: "short", day: "numeric", month: "short" });
     };
+    const dayOf = (p) => p.eta || (p.status === "out_for_delivery" ? isoDay() : null);
     const rows = (fy.parcels || [])
+      .filter((p) => !this._s.parcelDay || (dayOf(p) === this._s.parcelDay && p.status !== "delivered"))
       .map((p) => {
         const when = p.status === "delivered" ? "" : [day(p.eta), p.window ? fmt(t.fyWindow, p.window) : ""].filter(Boolean).join(" ");
         const who = [p.carrier, p.number].filter(Boolean).join(" · ");
@@ -3245,7 +3666,7 @@ class FriedaPostfachPanel extends HTMLElement {
       : "";
     return `<div class="card"><div class="chead"><h2>${esc(t.fyParcels)}</h2>${open ? `<span class="badge">${open}</span>` : ""}</div>
       <p class="muted" style="margin:-4px 0 10px">${esc(t.fyParcelsHint)}</p>
-      <div class="ai-cats">${rows}</div>${ignored}</div>`;
+      ${this._parcelWeek(fy)}<div class="ai-cats">${rows || this._empty(t.emptyAllDone)}</div>${ignored}</div>`;
   }
 
   // What is in a parcel: from its shipping mails, or (until one comes) the order's items
@@ -3363,7 +3784,7 @@ class FriedaPostfachPanel extends HTMLElement {
     const empty = !aiOn ? t.fyEventsNeedAi : s.ai?.status?.events === false ? t.fyEventsOff : t.fyEventsNone;
     return `<div class="card"><div class="chead"><h2>${esc(t.fyEvents)}</h2>${list.length ? `<span class="badge">${list.length}</span>` : ""}</div>
       <p class="muted" style="margin:-4px 0 10px">${esc(t.fyEventsHint)}</p>
-      <div class="ai-cats">${rows || `<p class="muted">${esc(empty)}</p>`}</div></div>`;
+      <div class="ai-cats">${rows || this._empty(empty)}</div></div>`;
   }
 
   _fyReplies(fy) {
@@ -3380,7 +3801,7 @@ class FriedaPostfachPanel extends HTMLElement {
     const restore = fy.dismissed?.followup ? `<button class="link" data-action="fy-restore" data-kind="followup">${esc(fmt(t.fyRestore, fy.dismissed.followup))}</button>` : "";
     return `<div class="card"><div class="chead"><h2>${esc(t.fyReplies)}</h2>${list.length ? `<span class="badge">${list.length}</span>` : ""}</div>
       <p class="muted" style="margin:-4px 0 10px">${esc(fy.followup_days ? fmt(t.fyRepliesHint, fy.followup_days) : t.fyRepliesOff)}</p>
-      <div class="ai-cats">${rows || `<p class="muted">${esc(empty)}</p>`}</div>${restore ? `<div class="subbar">${restore}</div>` : ""}</div>`;
+      <div class="ai-cats">${rows || this._empty(empty)}</div>${restore ? `<div class="subbar">${restore}</div>` : ""}</div>`;
   }
 
   _fySuggestions(fy) {
@@ -3400,7 +3821,7 @@ class FriedaPostfachPanel extends HTMLElement {
     const restore = fy.dismissed?.rule ? `<button class="link" data-action="fy-restore" data-kind="rule">${esc(fmt(t.fyRestore, fy.dismissed.rule))}</button>` : "";
     return `<div class="card"><div class="chead"><h2>${esc(t.fySuggestions)}</h2>${list.length ? `<span class="badge">${list.length}</span>` : ""}</div>
       <p class="muted" style="margin:-4px 0 10px">${esc(t.fySuggestionsHint)}</p>
-      <div class="ai-cats">${rows || `<p class="muted">${esc(t.fySuggestionsNone)}</p>`}</div>${restore ? `<div class="subbar">${restore}</div>` : ""}</div>`;
+      <div class="ai-cats">${rows || this._empty(t.fySuggestionsNone)}</div>${restore ? `<div class="subbar">${restore}</div>` : ""}</div>`;
   }
 
   _fySubs(fy) {
@@ -3446,7 +3867,7 @@ class FriedaPostfachPanel extends HTMLElement {
     const restore = fy.dismissed?.subscription ? `<button class="link" data-action="fy-restore" data-kind="subscription">${esc(fmt(t.fyRestore, fy.dismissed.subscription))}</button>` : "";
     return `<div class="card"><div class="chead"><h2>${esc(t.fySubs)}</h2>${list.length ? `<span class="badge">${list.length}</span>` : ""}</div>
       <p class="muted" style="margin:-4px 0 10px">${esc(t.fySubsHint)}</p>
-      ${tabs}${view === "gone" ? goneList : `<div class="ai-cats">${rows || `<p class="muted">${esc(gone.length ? t.fySubsNone : empty)}</p>`}</div>`}${restore ? `<div class="subbar">${restore}</div>` : ""}</div>`;
+      ${tabs}${view === "gone" ? goneList : `<div class="ai-cats">${rows || this._empty(gone.length ? t.fySubsNone : empty)}</div>`}${restore ? `<div class="subbar">${restore}</div>` : ""}</div>`;
   }
 
   async _fyOpenEditor(id) {
@@ -3625,9 +4046,9 @@ class FriedaPostfachPanel extends HTMLElement {
     W.mount(
       this.shadowRoot,
       `<style>${W.UI_STYLE}${STYLE}</style>
-      <div class="toolbar"><ha-menu-button></ha-menu-button><img src="${esc(ICON_URL)}" alt=""><span>${esc(t.title)}</span><span class="grow"></span></div>
+      <div class="toolbar"><ha-menu-button></ha-menu-button><img src="${esc(ICON_URL)}" alt=""><span>${esc(t.title)}</span><span class="grow"></span>${ready ? `<button class="icon tb-hist" data-action="hist-open" aria-label="${esc(t.hiTitle)}">${ico("history")}</button>` : ""}</div>
       ${ready && tabbed ? W.renderTabs(tabs, tab, t.tabsLabel) : ""}
-      <div class="content widgets" ${ready && tabbed ? `role="tabpanel" id="tabpanel" aria-labelledby="tab-${tab}"` : ""}>${body}</div>${this._renderSheet()}${this._renderConfirm()}${this._renderKeys()}${this._renderAssist()}`
+      <div class="content widgets" ${ready && tabbed ? `role="tabpanel" id="tabpanel" aria-labelledby="tab-${tab}"` : ""}>${body}</div>${this._renderSheet()}${this._renderSender()}${this._renderConfirm()}${this._renderKeys()}${this._renderQc()}${this._renderHist()}${this._renderAssist()}`
     );
     // a short glide where something new comes in: another tab, another mail in the reading pane
     if (this._enter && !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
@@ -3705,15 +4126,67 @@ class FriedaPostfachPanel extends HTMLElement {
       );
     }
     root.querySelector(".modal")?.addEventListener("keydown", (ev) => {
-      if (ev.key !== "Escape") return;
+      if (ev.key !== "Escape" || this._s.qc) return;
       if (this._s.keys) this._keysClose();
-      else this._confirmDone(false);
+      else if (this._s.hist) {
+        this._s.hist = false;
+        this._render();
+      } else this._confirmDone(false);
+    });
+    this._bindQc(root);
+    root.querySelector(".sheet.sender")?.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Escape") return;
+      this._s.sender = null;
+      this._render();
     });
     root.querySelectorAll("[data-action]").forEach((el) => {
       const action = el.dataset.action;
       const handler = {
         "fy-refresh": () => this._fyCall({ type: "friedafetch_mail/insights/refresh" }),
         "keys-close": () => this._keysClose(),
+        "qc-open": () => this._qcOpen(),
+        "qc-close": () => this._qcClose(),
+        "qc-skip": () => this._qcNext(),
+        "qc-keep": () => {
+          const item = this._s.qc?.items[this._s.qc.i];
+          if (item) this._qcAnswer(item.ai.category);
+        },
+        "qc-cat": () => this._qcAnswer(el.dataset.v),
+        "sender-open": () => this._senderOpen(el.dataset.v),
+        "sender-close": () => {
+          this._s.sender = null;
+          this._render();
+        },
+        "sender-mail": () => {
+          this._s.sender = null;
+          this._setTab("activity");
+          if (this._actItem(el.dataset.id)) this._actOpen(el.dataset.id);
+          else this._openTimeline({ message_id: el.dataset.id, subject: "", sender: "" });
+        },
+        "sender-all": () => {
+          this._s.sender = null;
+          this._s.sheet = null;
+          this._s.act.query = el.dataset.v;
+          this._setTab("activity");
+          this._loadActivity().catch(() => {});
+        },
+        "hist-open": () => this._histOpen(),
+        "hist-close": () => {
+          this._s.hist = false;
+          this._render();
+        },
+        "hist-undo": () => this._histUndo(el.dataset.id),
+        "act-chip": () => this._actView(el.dataset.v),
+        "rule-tpl": () => this._ruleTemplate(el.dataset.v),
+        "parcel-day": () => {
+          this._s.parcelDay = el.dataset.v || null;
+          this._render();
+        },
+        "day-go": () => this.shadowRoot.querySelector(`[data-widget="${CSS.escape(el.dataset.v)}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" }),
+        "day-mail": () => {
+          this._setTab("activity");
+          if (this._actItem(el.dataset.id)) this._actOpen(el.dataset.id);
+        },
         "fy-subs-view": () => {
           this._s.subsView = el.dataset.v;
           this._render();
@@ -3762,6 +4235,7 @@ class FriedaPostfachPanel extends HTMLElement {
           this._s.editing = rule;
           this._s.focusEditor = true;
           this._s.sheet = null;
+          this._s.sender = null;
           this._setTab("rules");
         },
         new: () => {
@@ -3867,7 +4341,7 @@ class FriedaPostfachPanel extends HTMLElement {
           const before = this._s.ai.categories;
           const name = before[e.index]?.name || "";
           await this._aiSaveCategories(before.filter((_, i) => i !== e.index));
-          if (!this._s.error) this._offerUndo(fmt(this.t.catDeleted, name), () => this._aiSaveCategories(before));
+          if (!this._s.error) this._offerUndo(fmt(this.t.catDeleted, name), () => this._aiSaveCategories(before), { kind: "cats", before });
         },
         "confirm-yes": () => this._confirmDone(true),
         "confirm-no": () => this._confirmDone(false),

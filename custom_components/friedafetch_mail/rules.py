@@ -14,8 +14,8 @@ import logging
 import re
 import time
 import uuid
-from dataclasses import asdict, dataclass
-from datetime import datetime
+from dataclasses import asdict, dataclass, field
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -39,6 +39,7 @@ MAX_RULES = 100
 MAX_SCAN_ALL = 2000  # newest messages inspected for scope="all"
 _SUMMARY_CHUNK = 200
 HISTORY_MAX = 200  # stored runs per account
+DAILY_DAYS = 30  # hits per day kept for each rule: its effect in the panel (the runs above reach back only hours)
 HISTORY_MAILS = 20  # handled messages remembered per run (subject, sender, rules, action) for the panel
 # Unattended runs (timer, push) and runs requested by an AI client change at most this many messages per run,
 # and they count against Frieda's hourly quota for mail changes; the rest follows in the next run.
@@ -260,6 +261,15 @@ class Rule:
     mailbox: str = "INBOX"
     created: str | None = None
     hits: int = 0
+    daily: dict[str, int] = field(default_factory=dict)  # local day (YYYY-MM-DD) -> hits, the last DAILY_DAYS days
+
+    def count_hit(self, today: date) -> None:
+        self.hits += 1
+        day = today.isoformat()
+        self.daily[day] = self.daily.get(day, 0) + 1
+        first = (today - timedelta(days=DAILY_DAYS - 1)).isoformat()
+        for old in [d for d in self.daily if d < first]:
+            del self.daily[old]
 
     def validate(self) -> None:
         if not self.name.strip():
@@ -305,6 +315,7 @@ class Rule:
             mailbox=str(data.get("mailbox") or "INBOX"),
             created=data.get("created"),
             hits=int(data.get("hits", 0) or 0),
+            daily={str(k): int(v) for k, v in (data.get("daily") or {}).items() if isinstance(v, int | float)},
         )
 
 
@@ -348,6 +359,7 @@ class RuleEngine:
         # run history (newest last); consecutive empty automatic runs are merged into one entry
         self._history: list[dict[str, Any]] = []
         self._history_seq = 0
+        self.daily_since: str | None = None  # the day rules started counting their hits per day
         self.account: str = ""  # label of the account, part of the events
         self.activity: Any | None = None  # ActivityLog: one line per checked message (the panel's "Aktivität")
 
@@ -363,7 +375,29 @@ class RuleEngine:
         self.last_check = data.get("last_check")
         self._history = [_complete_run(r) for r in list(data.get("history") or [])[-HISTORY_MAX:]]
         self._history_seq = int(data.get("history_seq") or len(self._history))
+        self.daily_since = data.get("daily_since")
+        if self.daily_since is None:
+            self._seed_daily()
         self._loaded = True
+
+    def _seed_daily(self) -> None:
+        """Hits per day did not exist before 1.0.40: the stored runs give the first days (a few hours to days)."""
+        today = datetime.now().astimezone().date()
+        first = (today - timedelta(days=DAILY_DAYS - 1)).isoformat()
+        by_name = {r.name: r for r in self._rules}
+        days = [today.isoformat()]
+        for run in self._history:
+            day = str(run.get("started") or "")[:10]
+            if len(day) != 10:
+                continue
+            days.append(day)
+            if day < first:
+                continue
+            for name, n in (run.get("rules") or {}).items():
+                rule = by_name.get(name)
+                if rule is not None and isinstance(n, int):
+                    rule.daily[day] = rule.daily.get(day, 0) + n
+        self.daily_since = min(days)
 
     def _data(self) -> dict[str, Any]:
         return {
@@ -372,6 +406,7 @@ class RuleEngine:
             "uidvalidity": self._uidvalidity,
             "last_run": self.last_run,
             "last_check": self.last_check,
+            "daily_since": self.daily_since,
             "history": self._history,
             "history_seq": self._history_seq,
         }
@@ -422,7 +457,7 @@ class RuleEngine:
         await self.async_load()
         if len(self._rules) >= MAX_RULES:
             raise RuleError(f"Too many rules (max {MAX_RULES})")
-        rule = Rule.from_dict({**data, "id": uuid.uuid4().hex[:8], "created": _now_iso(), "hits": 0})
+        rule = Rule.from_dict({**data, "id": uuid.uuid4().hex[:8], "created": _now_iso(), "hits": 0, "daily": {}})
         rule.validate()
         await self._check_mailboxes(rule)
         self._rules.append(rule)
@@ -863,9 +898,10 @@ class RuleEngine:
         if dry_run or not plan:
             return
         self._limit_plan(box, plan, scope, report)
+        today = datetime.now().astimezone().date()
         for d in plan.values():
             for rule in d["rules"]:
-                rule.hits += 1
+                rule.count_hit(today)
         if not plan:
             return
 

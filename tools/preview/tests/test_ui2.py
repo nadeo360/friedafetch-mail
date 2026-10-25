@@ -259,7 +259,7 @@ def test_ipad_portrait_list_and_mail_side_by_side(browser, site, width: int) -> 
     got = page.evaluate(
         """() => { const root = document.querySelector('friedafetch-mail-panel').shadowRoot;
         const list = root.querySelector('.listpane').getBoundingClientRect();
-        const inside = [...root.querySelectorAll('.lhead *')].filter((n) => n.getClientRects().length).every((n) => n.getBoundingClientRect().right <= list.right + 1);
+        const inside = [...root.querySelectorAll('.lhead *')].filter((n) => n.getClientRects().length && !n.closest('.vchips > *')).every((n) => n.getBoundingClientRect().right <= list.right + 1);  // the chips' row scrolls itself
         const top = root.querySelector('.reader .rtop'); return { inside, topRows: top ? Math.round(top.getBoundingClientRect().height) : 0,
           page: document.documentElement.scrollWidth - innerWidth }; }"""
     )

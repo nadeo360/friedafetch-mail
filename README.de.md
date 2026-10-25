@@ -177,6 +177,11 @@ die gewählte Mail (auf dem Handy öffnet sich die Mail in einem Blatt über der
 - Eine Regeltabelle (Position, Schalter, Name, Bedingungen, Aktionen, Treffer) zum Aufklappen, **+** für eine neue
   Regel und ein ⋮-Menü pro Regel für Bearbeiten, Probelauf nur mit dieser Regel, Reihenfolge, Kopieren und Löschen.
   Eine Regel lässt sich am Griff an ihren Platz ziehen (Hoch/Runter im Menü bleibt für die Tastatur).
+- **Vorlagen** für eine neue Regel (Newsletter ins Archiv, Rechnungen ablegen, Benachrichtigungen gelesen,
+  Versandinfos ablegen) füllen Name, Bedingungen und Aktionen; die Live-Vorschau zeigt gleich, was sie träfen.
+- **Die Wirkung einer Regel:** Eine kleine Linie neben den Treffern zeigt ihre Treffer pro Tag der letzten 30 Tage
+  („30 Tage ohne Treffer“ bei einer stillen). Frieda Postfach zählt sie seit 1.0.40 pro Tag und beginnt mit den Läufen,
+  die es schon gespeichert hatte.
 - **Der Editor** sagt die Regel in einem Satz („Wenn Betreff enthält „Rechnung“, dann: Archiv.“) und zeigt beim Tippen
   eine **Live-Vorschau**: auf wie viele der letzten 300 Mails der Aktivität sie zuträfe, mit den ersten davon. Die
   Aktivität kennt Absender und Betreff; Bedingungen auf An/Cc werden als nicht geprüft genannt.
@@ -196,6 +201,22 @@ gelesen), beim Löschen einer Regel (sie kommt mit ihren Treffern an ihren Platz
 beim Ausblenden oder Korrigieren in *Für dich*. Die Leiste bleibt etwa acht Sekunden und wartet, solange Zeiger oder
 Fokus auf ihr sind. Nur was sich nicht zurücknehmen lässt, fragt weiter vorher: Listen leeren, Abmelden, Neu bewerten
 (es kostet KI-Anfragen) und Läufe über das ganze Postfach.
+
+**Schnell prüfen:** War sich die KI bei Mails unsicher, zeigt *Unsichere prüfen* (oder Taste q) sie als Karten
+nacheinander: die Kategorien als Knöpfe mit den Tasten 1–9, Enter für „passt“, → zum Überspringen; auf dem Touchscreen
+wischt man die Karte nach rechts (passt) oder links (überspringen). Jede Antwort ist eine Korrektur oder Bestätigung,
+aus der die KI als Beispiel lernt; eine bestätigte Mail gilt nicht mehr als unsicher.
+
+**Absenderprofil:** Der Name des Absenders in der geöffneten Mail öffnet alles zu dieser Adresse: ihre Mails der
+letzten 30 Tage, wie viele gelesen, ungelesen oder markiert sind, die KI-Kategorien und Regeln, die sie trafen, ihren
+Newsletter (mit Abmelden), ihre Pakete und ihre letzten fünf Mails – unten mit *Regel erstellen* und *Alle Mails
+zeigen*.
+
+**Heute getan:** Das Uhr-Symbol oben hält die Aktionen von heute auf diesem Gerät fest (auch wenn die
+Rückgängig-Leiste schon weg ist), jede mit *Rückgängig*, solange sie sich zurücknehmen lässt. **Kompakte Darstellung**
+(Befehlspalette) macht Listen und Verlauf dichter, ebenfalls je Gerät. Auf Tablets und Handys stehen die Ansichten der
+Aktivität als Chips über der Liste, und leere Listen zeigen einen ruhigen Hinweis mit Frieda statt einer leeren
+Fläche.
 
 ## Dashboard-Karte
 
@@ -368,6 +389,11 @@ Daten mit der Anweisung hinein, darin enthaltenen Aufforderungen nicht zu folgen
 Der Tab **Für dich** im Panel sammelt, was Frieda dir abnimmt. Alles wird in Home Assistant aus dem Postfach, der
 Aktivität und den Kontakten ermittelt; davon geht nichts an eine KI, und ohne deinen Klick passiert nichts.
 
+- **Heute** – als Erstes im Tab: ein Zeitstrahl des Tages mit den Paketen, die heute kommen (mit Zeitfenster), den
+  Terminen von heute, wichtigen Mails und Mails wichtiger Absender, einer Markierung „jetzt“ und darunter den offenen
+  Antworten *Ohne Uhrzeit*. Jeder Eintrag führt zu seiner Mail oder Karte.
+- **Die Woche der Pakete:** Über den Paketen zeigt eine Leiste mit den nächsten sieben Tagen, an welchem Tag etwas
+  kommt; ein Tag filtert die Liste.
 - **Deine Woche** – was angekommen ist (im Vergleich zur Woche davor), was Regeln erledigt haben, wie oft die KI richtig
   lag (bewertet minus korrigiert), was noch ungelesen ist. Kleine Linien zeigen die letzten acht Wochen für Mails,
   Regeln und Trefferquote (Frieda Postfach behält eine Zusammenfassung jeder abgeschlossenen Woche; die Aktivität

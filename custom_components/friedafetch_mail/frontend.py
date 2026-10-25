@@ -42,6 +42,7 @@ from .const import (
     DEFAULT_RULES_PUSH,
     DOMAIN,
 )
+from .insights import _site
 from .live import SIGNAL_PANEL
 from .locate import async_locate
 from .rules import Condition, RuleError, RuleNotFound
@@ -79,6 +80,7 @@ async def async_setup_frontend(hass: HomeAssistant, version: str) -> None:
         ws_rules_delete,
         ws_rules_restore,
         ws_rules_preview,
+        ws_sender,
         ws_rules_run,
         ws_rules_history,
         ws_rules_history_clear,
@@ -243,6 +245,7 @@ async def ws_rules_list(hass: HomeAssistant, connection: websocket_api.ActiveCon
             "entry_id": entry.entry_id,
             "rules": await rules.async_list(),
             "last_run": rules.last_run,
+            "daily_since": rules.daily_since,
             "automation": rules.automation_status(),
         },
     )
@@ -288,6 +291,70 @@ async def ws_rules_delete(hass: HomeAssistant, connection: websocket_api.ActiveC
     rules = _entry(hass, msg.get("entry_id")).runtime_data.rules
     await rules.async_delete(msg["rule_id"])
     connection.send_result(msg["id"], {"deleted": True})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/sender",
+        vol.Optional("entry_id"): str,
+        vol.Required("email"): vol.All(str, vol.Length(min=3, max=200)),
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+@_ws_errors
+async def ws_sender(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """Everything about one sender in one place: its mails of the activity, read or not, what rules and the AI did,
+    its newsletter and its parcels."""
+    link = _entry(hass, msg.get("entry_id")).runtime_data
+    email = msg["email"].strip().lower()
+    rows = [r for r in await _activity_rows(link) if str(r.get("from") or "").lower() == email]
+    insights = getattr(link, "insights", None)
+    site = _site(email)
+    categories: dict[str, int] = {}
+    rule_hits: dict[str, int] = {}
+    for row in rows:
+        ai = row.get("ai") or {}
+        if row.get("kind") == "ai" and ai.get("category"):
+            categories[ai["category"]] = categories.get(ai["category"], 0) + 1
+        for name in row.get("rules") or []:
+            rule_hits[name] = rule_hits.get(name, 0) + 1
+    known = [r for r in rows if (r.get("state") or {}).get("seen") is not None]
+    subscription = None
+    parcels: list[dict[str, Any]] = []
+    if insights is not None:
+        sub = next((x for x in insights.subscriptions if x.get("site") == site), None)
+        if sub is not None:
+            subscription = {k: sub.get(k) for k in ("id", "sender", "name", "count", "unread", "unsubscribed", "after")}
+        parcels = [
+            {k: p[k] for k in ("id", "shop", "status", "eta")} | {"items": [i["name"] for i in p["items"][:3]]}
+            for p in insights.parcels()
+            if any(_site(f"x@{d}") == site for d in p.get("senders") or [])
+        ]
+    connection.send_result(
+        msg["id"],
+        {
+            "email": email,
+            "site": site,
+            "name": next((r.get("name") for r in rows if r.get("name")), None),
+            "count": len(rows),
+            "unread": sum(1 for r in known if r["state"]["seen"] is False),
+            "read_share": round(100 * sum(1 for r in known if r["state"]["seen"]) / len(known)) if known else None,
+            "flagged": sum(1 for r in rows if (r.get("state") or {}).get("flagged")),
+            "kinds": {k: sum(1 for r in rows if r.get("kind") == k) for k in ("ai", "rule", "held", "none")},
+            "categories": [{"name": k, "count": v} for k, v in sorted(categories.items(), key=lambda x: -x[1])],
+            "corrected": sum(1 for r in rows if r.get("corrected")),
+            "rules": [{"name": k, "count": v} for k, v in sorted(rule_hits.items(), key=lambda x: -x[1])],
+            "vip": bool(insights is not None and insights.vip_now(email)),
+            "first": min((str(r["time"]) for r in rows if r.get("time")), default=None),
+            "last": [
+                {k: r.get(k) for k in ("key", "subject", "time", "kind", "folder")}
+                for r in sorted(rows, key=lambda r: str(r.get("time") or ""), reverse=True)[:5]
+            ],
+            "subscription": subscription,
+            "parcels": parcels,
+        },
+    )
 
 
 @websocket_api.websocket_command(
@@ -475,6 +542,7 @@ async def ws_ai_categories(
         vol.Required("rating_id"): str,
         vol.Required("category"): str,
         vol.Optional("apply", default=False): bool,
+        vol.Optional("by"): vol.In(("confirm",)),  # the AI's category was right (the quick check): "confirmed"
     }
 )
 @websocket_api.require_admin
@@ -486,7 +554,7 @@ async def ws_ai_correct(hass: HomeAssistant, connection: websocket_api.ActiveCon
     link = _entry(hass, msg.get("entry_id")).runtime_data
     if msg["apply"] and link.clients.options.get(CONF_READ_ONLY, DEFAULT_READ_ONLY):
         raise ActionError("Frieda is in read-only mode (options of Frieda)")
-    rating = await sorter.async_correct(msg["rating_id"], msg["category"], apply=msg["apply"])
+    rating = await sorter.async_correct(msg["rating_id"], msg["category"], apply=msg["apply"], by=msg.get("by"))
     if msg["apply"] and link.state is not None:
         link.state.request()  # follows the mail if the category moved it
     connection.send_result(msg["id"], {"rating": rating})

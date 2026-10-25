@@ -525,14 +525,21 @@ class ActivityLog:
                     local=bool(rating.get("local")),
                 )
                 row["rating_id"] = rating.get("id")
-                row["corrected"] = bool(rating.get("corrected"))
+                # confirmed in the quick check: the same category again – right, not a correction
+                row["confirmed"] = rating.get("corrected") == rating.get("category")
+                row["corrected"] = bool(rating.get("corrected")) and not row["confirmed"]
                 row["name"] = row.get("name") or rating.get("from")
             row["state"] = item.get("state")  # read / flagged as the mailbox has it (mailstate.py), or None
             if ai:
                 ai.setdefault("confidence", None)  # lines from before 1.0.24
             row["ai"] = ai or None
             row["kind"] = kind_of(row)
-            row["unsure"] = bool(row["kind"] == "ai" and ai.get("confidence") == "low" and not row.get("corrected"))
+            row["unsure"] = bool(
+                row["kind"] == "ai"
+                and ai.get("confidence") == "low"
+                and not row.get("corrected")
+                and not row.get("confirmed")
+            )
             row["folder"] = folder_of(row)
             row["day"] = _day(item.get("time"))
             row["selectable"] = bool(ai_active and row.get("message_id") and row["kind"] != "rule")

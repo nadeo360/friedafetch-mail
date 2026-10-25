@@ -1,5 +1,6 @@
 """Inbox rule engine."""
 
+from datetime import date, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -179,6 +180,8 @@ async def test_engine_run_batches_actions(hass: HomeAssistant) -> None:
     mail.async_move.assert_awaited_once_with("INBOX", [11], "Archive")
     rules = await engine.async_list()
     assert {r["name"]: r["hits"] for r in rules} == {"Newsletter": 1, "Spam": 1, "Chef": 1}
+    today = datetime.now().astimezone().date().isoformat()
+    assert all(r["daily"] == {today: 1} for r in rules)  # also per day: the rule's effect in the panel
 
     # new mail arrives: only uids above the baseline are inspected
     mail.async_search_uids.return_value = [11, 12, 13, 14]
@@ -628,3 +631,39 @@ async def test_pass_in_progress_is_shown_and_announced(hass: HomeAssistant, hass
 
     await ws.send_json({"id": 4, "type": "friedafetch_mail/accounts"})
     assert (await ws.receive_json())["result"]["version"]
+
+
+def test_a_rule_counts_its_hits_per_day_for_thirty_days() -> None:
+    rule = Rule.from_dict(
+        {
+            "name": "x",
+            "conditions": [{"field": "from", "op": "contains", "value": "a"}],
+            "actions": {},
+            "daily": {"2026-09-01": 4, "bad": "x"},
+        }
+    )
+    assert rule.daily == {"2026-09-01": 4}
+    rule.count_hit(date(2026, 9, 30))
+    rule.count_hit(date(2026, 9, 30))
+    assert rule.hits == 2 and rule.daily == {"2026-09-01": 4, "2026-09-30": 2}  # 30 days including today
+    rule.count_hit(date(2026, 10, 1))
+    assert rule.daily == {"2026-09-30": 2, "2026-10-01": 1}
+    assert Rule.from_dict(rule.to_dict()).daily == rule.daily
+
+
+async def test_hits_per_day_start_from_the_stored_runs(hass: HomeAssistant) -> None:
+    engine = RuleEngine(hass, "entry-daily", MagicMock())
+    today = datetime.now().astimezone().date()
+    yesterday = date.fromordinal(today.toordinal() - 1).isoformat()
+    old = date.fromordinal(today.toordinal() - 40).isoformat()
+    rule = {"id": "a", "name": "News", "conditions": [{"field": "from", "op": "contains", "value": "n"}], "actions": {}}
+    runs = [
+        {"started": f"{old}T08:00:00+02:00", "rules": {"News": 5}},
+        {"started": f"{yesterday}T08:00:00+02:00", "rules": {"News": 2, "Gone": 1}},
+        {"started": f"{yesterday}T09:00:00+02:00", "rules": {"News": 1}},
+    ]
+    with patch.object(engine._store, "async_load", AsyncMock(return_value={"rules": [rule], "history": runs})):  # noqa: SLF001
+        await engine.async_load()
+    assert engine.daily_since == old  # the oldest stored run: before it nothing was counted
+    assert (await engine.async_list())[0]["daily"] == {yesterday: 3}  # older than 30 days does not count
+    assert engine._data()["daily_since"] == old  # noqa: SLF001

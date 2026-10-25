@@ -64,6 +64,7 @@
      "importance": "null|num",
      "local": "bool|null"
     },
+    "?confirmed": "bool",
     "?corrected": "bool",
     "date": "null",
     "day": "str",
@@ -932,6 +933,7 @@
    "next_run": "null",
    "push": "null"
   },
+  "daily_since": "str",
   "entry_id": "str",
   "last_run": "null",
   "rules": [
@@ -953,6 +955,7 @@
      }
     ],
     "created": "str",
+    "daily": {},
     "enabled": "bool",
     "hits": "num",
     "id": "str",
@@ -995,6 +998,7 @@
     }
    ],
    "created": "str",
+   "daily": {},
    "enabled": "bool",
    "hits": "num",
    "id": "str",
@@ -1043,5 +1047,38 @@
   "skipped": [],
   "started": "str",
   "trigger": "str"
+ },
+ "friedafetch_mail/sender": {
+  "categories": [
+   {
+    "count": "num",
+    "name": "str"
+   }
+  ],
+  "corrected": "num",
+  "count": "num",
+  "email": "str",
+  "first": "str",
+  "flagged": "num",
+  "kinds": {
+   "*": "num"
+  },
+  "last": [
+   {
+    "folder": "str",
+    "key": "str",
+    "kind": "str",
+    "subject": "str",
+    "time": "str"
+   }
+  ],
+  "name": "str",
+  "parcels": [],
+  "read_share": "num",
+  "rules": [],
+  "site": "str",
+  "subscription": "null",
+  "unread": "num",
+  "vip": "bool"
  }
 }

@@ -166,6 +166,10 @@ mail on the right (on phones the mail opens in a sheet over the list that you sw
 - A rule table (position, switch, name, conditions, actions, hits) that expands per rule, **+** for a new rule, and a
   ⋮ menu per rule for edit, dry run with only this rule, order, copy and delete. Drag a rule by its handle to change
   the order (the menu's up/down stays for keyboards).
+- **Templates** for a new rule (*Newsletters to the archive*, *File invoices*, *Notifications read*, *File shipping
+  news*) fill name, conditions and actions; the live preview shows at once what they would catch.
+- **The effect of a rule:** a small line next to its hits shows its hits per day of the last 30 days (“No hits in 30
+  days” for a quiet one). Frieda Postfach counts them per day since 1.0.40 and starts with the runs it kept before.
 - **The editor** says the rule in one sentence (“If the subject contains “Invoice”, then: Archive.”) and shows a
   **live preview** while you type: how many of the last 300 mails of the activity it would catch, with the first
   ones. The activity knows sender and subject; conditions on To/Cc are named as not checked.
@@ -183,6 +187,20 @@ mail goes back to the folder it came from; mails that were read already stay rea
 with its hits at its place) or an AI category, and hiding or correcting things in *For you*. The bar stays about eight
 seconds and waits while the pointer or the focus is on it. Only what cannot be undone still asks first: clearing
 lists, unsubscribing, rating again (it costs AI requests) and runs over the whole mailbox.
+
+**Quick check:** when the AI was unsure about some mails, *Check unsure ones* (or the key q) shows them one card at a
+time: the category buttons with the keys 1–9, Enter for “right”, → to skip; on a touch screen swipe the card right
+(right) or left (skip). Every answer is a correction or a confirmation the AI learns from as an example; a confirmed
+mail is no longer unsure.
+
+**Sender profile:** the sender's name in the open mail opens everything about that address: its mails of the last 30
+days, how many are read, unread or flagged, the AI categories and rules that met them, its newsletter (with
+unsubscribe), its parcels and its last five mails – with *Create rule* and *Show all mails* at the bottom.
+
+**Done today:** the clock symbol at the top keeps today's actions on this device (also after the undo bar has gone),
+each with *Undo* as long as it can be taken back. **Compact layout** (command palette) makes lists and the timeline
+denser, also per device. On tablets and phones the views of the activity sit as chips above the list, and empty
+lists show a calm note with Frieda instead of a blank space.
 
 ## Dashboard card
 
@@ -347,6 +365,11 @@ demand (optionally for one `account`) and returns the text.
 The tab **For you** in the panel collects what Frieda notices for you. Everything is worked out in Home Assistant from
 the mailbox, the activity and the contacts; nothing of it goes to an AI, and nothing happens without your click.
 
+- **Today** – first in the tab: a timeline of the day with the parcels coming today (with their time window),
+  today's dates, important mails and mails of important senders, a “now” marker and the replies still open below
+  *No time*. Each entry leads to its mail or card.
+- **The parcels' week:** above the parcels a bar with the next seven days shows on which day something arrives; a
+  day filters the list.
 - **Your week** – what arrived (compared with the week before), what rules handled, how often the AI was right (rated
   minus corrected), what is still unread. Small lines show the last eight weeks of mails, rules and accuracy
   (Frieda Postfach keeps a summary of every completed week; the activity itself keeps 30 days). *Handled without

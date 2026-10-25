@@ -74,6 +74,7 @@ function makeRows(volume) {
     row.in_reply_to = x.reply ? `<${x.reply}@example>` : null;
     row.thread = x.reply ? `<${x.reply}@example>` : mid; // one conversation: the school's answer to its invitation
     row.unsure = row.kind === "ai" && row.ai.confidence === "low" && !row.corrected;
+    row.confirmed = false;
     // read / flagged as the mailbox has it (mailstate.py): the newest ones still unread, flagged personal mails
     // (one was moved to the archive on another device: followed there by its Message-ID)
     row.state = row.folder === "INBOX" ? { seen: i >= 2 && i !== 6, flagged: (row.ai?.applied || []).includes("flagged"), gone: false, mailbox: x.gone ? "Archive" : "INBOX", uid: x.gone ? 9000 + i : row.uid, searched: null, checked: new Date(now).toISOString() } : null;
@@ -141,8 +142,13 @@ function derive(data, rows) {
   const account = data["friedafetch_mail/accounts"].accounts[0];
   const rules = data["friedafetch_mail/rules/list"].rules;
   const automation = { enabled: true, interval: 5, enabled_rules: rules.filter((r) => r.enabled).length, push: { state: "listening" }, next_run: null, last_check: { time: new Date().toISOString(), result: "ran", error: null }, idle_reason: null };
-  Object.assign(data["friedafetch_mail/rules/list"], { entry_id: "e1", automation });
+  Object.assign(data["friedafetch_mail/rules/list"], { entry_id: "e1", automation, daily_since: "2026-09-01" });
   for (const r of rules) Object.assign(r, { created: r.created || "2026-09-01T10:00:00+02:00", actions: { attachments_folder: null, ...r.actions } });
+  // like the backend: hits per local day of the last 30 days, here from the activity's mails
+  for (const r of rules) {
+    r.daily = {};
+    for (const row of rows) if (row.rules.includes(r.name)) r.daily[row.day] = (r.daily[row.day] || 0) + 1;
+  }
   data["friedafetch_mail/accounts"].version = "__BUILD__"; // the panel's own build: no "new version" hint
   Object.assign(account, { automation, core_entry_id: "e1", rules_total: rules.length, rules_enabled: rules.filter((r) => r.enabled).length, digest_time: "07:30", last_run: data["friedafetch_mail/rules/list"].last_run });
   // iCloud's folders (the trash is "Deleted Messages"), plus two of the user's own
@@ -407,7 +413,8 @@ export function install({ data, q }) {
         if (!r.original) r.original = r.ai.category;
         r.ai.category = m.category;
         r.corrected = m.category !== r.original;
-        r.unsure = r.ai.confidence === "low" && !r.corrected;
+        r.confirmed = m.by === "confirm"; // "Right" in the quick check: no longer unsure
+        r.unsure = r.ai.confidence === "low" && !r.corrected && !r.confirmed;
         ai.corrected = rows.filter((x) => x.corrected).length;
       }
       return { rating: { id: m.rating_id, corrected: m.category } };
@@ -556,6 +563,29 @@ export function install({ data, q }) {
       if (at >= 0) deletedRule = [rulesList.rules[at], at];
       rulesList.rules = rulesList.rules.filter((r) => r.id !== m.rule_id);
       return { deleted: true };
+    }
+    if (m.type === "friedafetch_mail/sender") {
+      // like the backend: the sender's mails of the activity, what rules and the AI did, its newsletter and parcels
+      const mine = rows.filter((r) => String(r.from).toLowerCase() === m.email.toLowerCase());
+      const site = m.email.split("@")[1].split(".").slice(-2).join(".");
+      const known = mine.filter((r) => r.state?.seen != null);
+      const categories = {};
+      const rules = {};
+      for (const r of mine) {
+        if (r.kind === "ai" && r.ai?.category) categories[r.ai.category] = (categories[r.ai.category] || 0) + 1;
+        for (const n of r.rules || []) rules[n] = (rules[n] || 0) + 1;
+      }
+      const fy = data["friedafetch_mail/insights"];
+      const sub = (fy.subscriptions || []).find((x) => x.site === site);
+      return structuredClone({
+        email: m.email.toLowerCase(), site, name: mine.find((r) => r.name)?.name || null, count: mine.length,
+        unread: known.filter((r) => r.state.seen === false).length, read_share: known.length ? Math.round((100 * known.filter((r) => r.state.seen).length) / known.length) : null,
+        flagged: mine.filter((r) => r.state?.flagged).length, kinds: { ai: mine.filter((r) => r.kind === "ai").length, rule: mine.filter((r) => r.kind === "rule").length, held: mine.filter((r) => r.kind === "held").length, none: mine.filter((r) => r.kind === "none").length },
+        categories: Object.entries(categories).sort((a, b) => b[1] - a[1]).map(([name, count]) => ({ name, count })), corrected: mine.filter((r) => r.corrected).length, rules: Object.entries(rules).map(([name, count]) => ({ name, count })), vip: m.email.toLowerCase() === "erika@example.com", first: mine.at(-1)?.time || null,
+        last: mine.slice(0, 5).map((r) => ({ key: r.key, subject: r.subject, time: r.time, kind: r.kind, folder: r.folder })),
+        subscription: sub ? { id: sub.id, sender: sub.sender, name: sub.name, count: sub.count, unread: sub.unread, unsubscribed: sub.unsubscribed, after: sub.after } : null,
+        parcels: (fy.parcels || []).filter((p) => (p.senders || []).some((d) => d.endsWith(site))).map((p) => ({ id: p.id, shop: p.shop, status: p.status, eta: p.eta, items: (p.items || []).slice(0, 3).map((i) => i.name) })),
+      });
     }
     if (m.type === "friedafetch_mail/rules/preview") {
       // like the backend: sender and subject of the newest mails (To/Cc are not known to the activity)
