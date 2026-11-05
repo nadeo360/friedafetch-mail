@@ -38,7 +38,7 @@ Aufgaben und ohne Dateizugriffe – solange Frieda Postfach nicht installiert is
 ## Voraussetzungen
 
 - Home Assistant 2026.10 oder neuer
-- **Frieda 2.0.18 oder neuer** (`friedafetch`; bei älteren Versionen bittet eine Reparatur ums Update, und Teile des Panels fehlen) mit mindestens einem eingerichteten iCloud-Konto. Frieda Postfach nutzt
+- **Frieda 2.0.23 oder neuer, ab Home Assistant 2026.11 Frieda 2.0.25 oder neuer** (`friedafetch`; bei älteren Versionen bittet eine Reparatur ums Update) mit mindestens einem eingerichteten iCloud-Konto. Frieda Postfach nutzt
   dessen Verbindung und fragt selbst nie nach Apple-ID oder Passwort.
 
 ## Installation

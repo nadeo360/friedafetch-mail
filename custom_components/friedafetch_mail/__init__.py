@@ -60,9 +60,19 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     try:
         from custom_components.friedafetch import SIGNAL_ACCOUNT_READY, SIGNAL_ACCOUNT_UNLOADED  # noqa: PLC0415
         from custom_components.friedafetch.schema import vol  # noqa: PLC0415
-    except ImportError:
-        _LOGGER.error("Frieda Postfach needs the Frieda integration (friedafetch) version 2.0 or newer")
+    except Exception as err:  # noqa: BLE001 - not only ImportError: a Frieda too old for this Home Assistant breaks too
+        _LOGGER.error("Frieda Postfach needs a working Frieda integration (friedafetch): %s", err)
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            "frieda_unavailable",
+            is_fixable=False,
+            severity=ir.IssueSeverity.ERROR,
+            translation_key="frieda_unavailable",
+            learn_more_url="https://github.com/nadeo360/friedafetch/releases",
+        )
         return False
+    ir.async_delete_issue(hass, DOMAIN, "frieda_unavailable")
 
     from .digest import async_send_digest  # noqa: PLC0415
 

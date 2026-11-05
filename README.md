@@ -38,7 +38,7 @@ no file writes unless you install Frieda Postfach.
 ## Requirements
 
 - Home Assistant 2026.10 or newer
-- **Frieda 2.0.18 or newer** (`friedafetch`; with older versions a repair asks for the update, and parts of the panel are missing), set up with at least one iCloud account. Frieda Postfach uses that
+- **Frieda 2.0.23 or newer, on Home Assistant 2026.11 and later 2.0.25 or newer** (`friedafetch`; with older versions a repair asks for the update), set up with at least one iCloud account. Frieda Postfach uses that
   account's connection; it never asks for your Apple ID or password itself.
 
 ## Installation
