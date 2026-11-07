@@ -43,7 +43,7 @@ no file writes unless you install Frieda Postfach.
 
 ## Installation
 
-1. HACS → ⋮ → Custom repositories → `https://github.com/nadeo360/friedafetch-mail`, type *Integration*.
+1. Home Assistant 2026.11 or newer: [open this repository in the Marketplace](https://my.home-assistant.io/redirect/hacs_repository/?owner=nadeo360&repository=friedafetch-mail&category=integration), or go to Settings → Marketplace → **Add from link** and enter `nadeo360/friedafetch-mail`. Before 2026.11: HACS → ⋮ → Custom repositories → `https://github.com/nadeo360/friedafetch-mail`, type *Integration*.
 2. Download **Frieda Postfach** and restart Home Assistant.
 3. Settings → Devices & services → Add integration → **Frieda Postfach**, pick the Frieda account.
 

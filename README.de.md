@@ -43,7 +43,7 @@ Aufgaben und ohne Dateizugriffe – solange Frieda Postfach nicht installiert is
 
 ## Installation
 
-1. HACS → ⋮ → Benutzerdefinierte Repositories → `https://github.com/nadeo360/friedafetch-mail`, Typ *Integration*.
+1. Home Assistant 2026.11 oder neuer: [Dieses Repository im Marketplace öffnen](https://my.home-assistant.io/redirect/hacs_repository/?owner=nadeo360&repository=friedafetch-mail&category=integration) oder Einstellungen → Marketplace → **Add from link** und `nadeo360/friedafetch-mail` eingeben. Vor 2026.11: HACS → ⋮ → Benutzerdefinierte Repositories → `https://github.com/nadeo360/friedafetch-mail`, Typ *Integration*.
 2. **Frieda Postfach** herunterladen und Home Assistant neu starten.
 3. Einstellungen → Geräte & Dienste → Integration hinzufügen → **Frieda Postfach**, Frieda-Konto auswählen.
 

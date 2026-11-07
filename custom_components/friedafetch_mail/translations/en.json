@@ -178,11 +178,11 @@
   "issues": {
     "frieda_unavailable": {
       "title": "Frieda could not be loaded",
-      "description": "Frieda Postfach runs on top of the Frieda integration, which could not be loaded. It is missing, or too old for this version of Home Assistant. Install or update Frieda in HACS and restart Home Assistant; rules, AI sorting and the panel start again by themselves."
+      "description": "Frieda Postfach runs on top of the Frieda integration, which could not be loaded. It is missing, or too old for this version of Home Assistant. Install or update Frieda in the Marketplace or HACS and restart Home Assistant; rules, AI sorting and the panel start again by themselves."
     },
     "frieda_too_old": {
       "title": "Frieda is too old for Frieda Postfach",
-      "description": "Frieda Postfach needs Frieda {required} or newer; installed is {installed}. Update Frieda in HACS and restart Home Assistant. Until then the panel shows its parts one below the other and some of them are missing."
+      "description": "Frieda Postfach needs Frieda {required} or newer; installed is {installed}. Update Frieda in the Marketplace or HACS and restart Home Assistant. Until then the panel shows its parts one below the other and some of them are missing."
     },
     "health": {
       "title": "Frieda Postfach ({account}) has had a problem for an hour",

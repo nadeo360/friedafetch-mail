@@ -161,8 +161,8 @@ def test_trend_lines_and_the_ais_confidence(open_panel) -> None:
 
 def test_a_short_glide_where_something_new_comes_in(open_panel) -> None:
     panel = open_panel("postfach")
-    panel.js("el._setTab('rules');")
-    assert panel.count(".content.enter") == 1
+    # in one step: a live update may redraw at any time, and a redraw takes the glide away again
+    assert panel.js("el._setTab('rules'); return root.querySelectorAll('.content.enter').length;") == 1
     panel.js("el._render();")
     assert panel.count(".content.enter") == 0  # only once, not on every redraw
     panel.page.emulate_media(reduced_motion="reduce")

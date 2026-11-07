@@ -1,6 +1,9 @@
 {
   "domain": "friedafetch_mail",
   "name": "Frieda Postfach",
+  "categories": [
+    "messaging_notifications.email_sms_calls"
+  ],
   "codeowners": [
     "@nadeo360"
   ],
