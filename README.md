@@ -451,8 +451,9 @@ every other Frieda tool. See [SECURITY.md](https://github.com/nadeo360/friedafet
 
 **Diagnostics** (Settings → Devices & services → Frieda Postfach → ⋮ → Download diagnostics) contain versions,
 options, the structure of the rules, automation and push status, runs and AI use as numbers, and the size of the
-activity and whether the server offers CONDSTORE – no subjects, senders, names, Message-IDs, rule values,
-kill-switch terms or the notify service. If Frieda
+activity and whether the server offers CONDSTORE – no subjects, senders, names, Message-IDs, rule values, the
+folders rules use, kill-switch terms, important senders and contact groups, the proposal calendar or the notify
+service. If Frieda
 is older than this version needs, a repair under Settings → Repairs says so until Frieda is updated.
 
 ## Development

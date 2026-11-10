@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import pytest
+from freezegun.api import FrozenDateTimeFactory
 from homeassistant.core import HomeAssistant
 
 from custom_components.friedafetch_mail import activity as _activity  # noqa: F401 - loaded before the fixtures patch it
@@ -125,6 +127,15 @@ USAGE_1_0_4 = [
         "items": None,
     },
 ]
+
+
+# the stored data are of October 2026, and the activity keeps 30 days: the tests run on a day back then
+OCTOBER = "2026-10-20T12:00:00+02:00"
+
+
+@pytest.fixture(autouse=True)
+def _in_october(freezer: FrozenDateTimeFactory) -> None:
+    freezer.move_to(OCTOBER)
 
 
 async def _upgrade(hass: HomeAssistant, hass_storage: dict[str, Any], *, activity: dict[str, Any] | None = None):

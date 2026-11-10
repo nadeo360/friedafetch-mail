@@ -1,7 +1,8 @@
 """Diagnostics support for Frieda Postfach: what helps to find a fault, without the content of anybody's mail.
 
-Left out: subjects, senders, names, Message-IDs, the values of rule conditions, the kill-switch lists, the notify
-service (it often carries a person's name) and the Apple ID. Error lists are counted, since a message may quote a mail.
+Left out: subjects, senders, names, Message-IDs, the values of rule conditions, the folders rules use (a folder
+name may say more than it should), the kill-switch lists, the important senders and contact groups, the calendar for
+proposals, the notify service (it often carries a person's name) and the Apple ID. Error lists are counted, since a message may quote a mail.
 Kept: versions, options, the rules' structure, automation and push, run summaries, the AI status and counts.
 """
 
@@ -14,9 +15,27 @@ from homeassistant.const import __version__ as HA_VERSION
 from homeassistant.core import HomeAssistant
 from homeassistant.loader import async_get_integration
 
-from .const import CONF_AI_BLOCK_TERMS, CONF_AI_EXCLUDE, CONF_DIGEST_NOTIFY, CORE_DOMAIN, DOMAIN
+from .const import (
+    CONF_AI_BLOCK_TERMS,
+    CONF_AI_EXCLUDE,
+    CONF_DIGEST_NOTIFY,
+    CONF_EVENTS_CALENDAR,
+    CONF_VIP_GROUPS,
+    CONF_VIP_SENDERS,
+    CORE_DOMAIN,
+    DOMAIN,
+)
 
-TO_REDACT = {CONF_AI_EXCLUDE, CONF_AI_BLOCK_TERMS, CONF_DIGEST_NOTIFY}
+# diagnostics get pasted into public issues
+TO_REDACT = {
+    CONF_AI_EXCLUDE,
+    CONF_AI_BLOCK_TERMS,
+    CONF_DIGEST_NOTIFY,
+    CONF_VIP_SENDERS,
+    CONF_VIP_GROUPS,
+    CONF_EVENTS_CALENDAR,
+}
+FOLDER_KEYS = ("move_to", "attachments_folder")  # rule actions that name a folder
 RUN_KEYS = ("started", "finished", "trigger", "scope", "checked", "matched", "actions", "idle", "runs")
 
 
@@ -64,10 +83,14 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: Any) ->
             {
                 "id": r["id"],
                 "enabled": r.get("enabled"),
-                "mailbox": r.get("mailbox"),
+                "mailbox": r.get("mailbox") if r.get("mailbox") in (None, "INBOX") else "**REDACTED**",
                 "match": r.get("match"),
                 "conditions": [{"field": c.get("field"), "op": c.get("op")} for c in r.get("conditions") or []],
-                "actions": {k: v for k, v in (r.get("actions") or {}).items() if v not in (None, False)},
+                "actions": {
+                    k: "**REDACTED**" if k in FOLDER_KEYS else v
+                    for k, v in (r.get("actions") or {}).items()
+                    if v not in (None, False)
+                },
                 "hits": r.get("hits"),
             }
             for r in await rules.async_list()

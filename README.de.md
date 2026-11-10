@@ -483,8 +483,9 @@ Nur-Lesen-Modus, und Freigaben gelten wie für jedes andere Frieda-Tool. Siehe [
 
 **Diagnose** (Einstellungen → Geräte & Dienste → Frieda Postfach → ⋮ → Diagnose herunterladen) enthält Versionen,
 Optionen, den Aufbau der Regeln, Automatik- und Push-Status, Läufe und KI-Nutzung als Zahlen sowie die Größe der
-Aktivität und ob der Server CONDSTORE anbietet – keine Betreffs, Absender, Namen, Message-IDs, Regelwerte,
-Killswitch-Begriffe oder den Benachrichtigungsdienst.
+Aktivität und ob der Server CONDSTORE anbietet – keine Betreffs, Absender, Namen, Message-IDs, Regelwerte, von
+Regeln genutzten Ordner, Killswitch-Begriffe, wichtigen Absender und Kontaktgruppen, den Kalender für Vorschläge
+oder den Benachrichtigungsdienst.
 Ist Frieda älter, als diese Version braucht, weist eine Reparatur unter Einstellungen → Reparaturen darauf hin, bis
 Frieda aktualisiert ist.
 
